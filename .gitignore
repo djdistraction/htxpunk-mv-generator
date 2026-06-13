@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.eggs/
+dist/
+build/
+venv/
+.venv/
+env/
+*.env
+
+# Node
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+celerybeat-schedule
+celerybeat.pid
+
+# Temp files
+tmp/
+temp/
+*.tmp
+
+# Generated assets (large binary files — stored in R2)
+backend/temp/
+*.mp4
+*.mp3
+*.wav
+*.flac
+
+# Supabase local
+supabase/.branches/
+supabase/.temp/
