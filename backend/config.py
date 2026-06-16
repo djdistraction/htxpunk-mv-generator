@@ -1,24 +1,46 @@
 from pydantic_settings import BaseSettings
-
+from pathlib import Path
 
 class Settings(BaseSettings):
-    openai_api_key: str
-    replicate_api_token: str
-    runwayml_api_secret: str
-    supabase_url: str
-    supabase_service_key: str
-    r2_account_id: str
-    r2_access_key_id: str
-    r2_secret_access_key: str
-    r2_bucket_name: str = "voodoo-hut-assets"
-    r2_public_url: str
-    redis_url: str = "redis://localhost:6379"
-    app_env: str = "development"
-    secret_key: str
-    frontend_url: str = "http://localhost:3000"
+    # LLM — Groq free tier (swap to OLLAMA_BASE_URL when you have a GPU)
+    groq_api_key: str = ""
+    groq_model: str = "llama-3.3-70b-versatile"
+
+    # Image generation — HF free inference API (swap to local ComfyUI later)
+    hf_token: str = ""
+    hf_image_model: str = "black-forest-labs/FLUX.1-schnell"
+
+    # Audio — local Whisper model size: tiny / base / small / medium
+    whisper_model: str = "base"
+
+    # Storage — local filesystem (swap to r2 when deploying)
+    storage_backend: str = "local"  # "local" | "r2"
+    local_storage_path: str = str(Path(__file__).parent / "storage")
+
+    # R2 (only needed if storage_backend = "r2")
+    r2_account_id: str = ""
+    r2_access_key_id: str = ""
+    r2_secret_access_key: str = ""
+    r2_bucket_name: str = "voodoo-mv"
+
+    # Database — SQLite by default (swap to supabase url when deploying)
+    database_url: str = "sqlite+aiosqlite:///./voodoo.db"
+
+    # Celery — memory broker for local dev (swap to redis:// when deploying)
+    celery_broker_url: str = "memory://"
+    celery_result_backend: str = "cache+memory://"
+
+    # Video generation backend: "ffmpeg" | "runway" | "wan2"
+    video_backend: str = "ffmpeg"
+    runway_api_key: str = ""
+
+    # FFmpeg ken burns settings
+    video_fps: int = 25
+    clip_duration: int = 5  # seconds per clip
+    output_resolution: str = "1920x1080"
 
     class Config:
-        env_file = "../.env"
-
+        env_file = ".env"
+        extra = "ignore"
 
 settings = Settings()

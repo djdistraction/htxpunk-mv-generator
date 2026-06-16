@@ -1,70 +1,42 @@
 """
-Stage 2: Visual Treatment Generator
-- Takes song analysis and produces a full creative treatment proposal
-- Treatment defines the visual world, characters, style, and recurring motifs
+Stage 2 — Visual Treatment Generation
+Uses Groq free tier (Llama 3.3 70B).
+Swap groq_model to gpt-4o in config if you want to upgrade later.
 """
 import json
 from openai import OpenAI
 from config import settings
 
-client = OpenAI(api_key=settings.openai_api_key)
+def _groq_client():
+    return OpenAI(api_key=settings.groq_api_key, base_url="https://api.groq.com/openai/v1")
 
-TREATMENT_PROMPT = """You are an award-winning music video director. Based on the song
-analysis below, generate a complete visual treatment for this music video.
+def generate_treatment(analysis: dict) -> dict:
+    """Generate a full visual treatment from song analysis."""
+    client = _groq_client()
+    response = client.chat.completions.create(
+        model=settings.groq_model,
+        response_format={"type": "json_object"},
+        temperature=0.85,
+        messages=[
+            {"role": "system", "content": (
+                "You are a visionary music video director. Create bold, specific, "
+                "cinematic visual treatments. Avoid clichés. Return JSON only."
+            )},
+            {"role": "user", "content": f"""Create a complete music video visual treatment.
 
 SONG ANALYSIS:
-{analysis}
+{json.dumps(analysis, indent=2)}
 
-LYRICS:
-{lyrics}
-
-Return a JSON object with this structure:
-{{
-  "logline": "One sentence describing the video concept",
-  "visual_style": "Detailed aesthetic description",
-  "color_palette": {{
-    "primary": ["#hex1", "#hex2"],
-    "secondary": ["#hex3", "#hex4"],
-    "accent": ["#hex5"]
-  }},
-  "world_description": "Where does this video take place?",
-  "time_of_day": "day/night/golden hour/multiple",
-  "characters": [
-    {{
-      "name": "Character name",
-      "role": "protagonist/antagonist/supporting",
-      "appearance": "Detailed physical description for image generation",
-      "emotional_arc": "How this character changes through the video",
-      "states_needed": ["neutral", "singing", "running", "silhouette"]
-    }}
-  ],
-  "locations": [
-    {{
-      "name": "Location name",
-      "description": "Detailed visual description",
-      "atmosphere": "mood/lighting/weather",
-      "scenes_used_in": ["intro", "chorus"]
-    }}
-  ],
-  "recurring_motifs": ["motif1", "motif2"],
-  "image_gen_style_prompt": "Style suffix to append to ALL image prompts for consistency",
-  "narrative_structure": "How visual story maps to song sections"
-}}
-Return ONLY valid JSON."""
-
-
-def generate_treatment(analysis: dict, transcript: dict) -> dict:
-    lyrics = " ".join([s["text"] for s in transcript.get("segments", [])])
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[{
-            "role": "user",
-            "content": TREATMENT_PROMPT.format(
-                analysis=json.dumps(analysis, indent=2),
-                lyrics=lyrics
-            )
-        }],
-        response_format={"type": "json_object"},
-        temperature=0.85
+Return JSON with:
+- logline: one-sentence visual pitch (compelling, specific)
+- visual_style: art style and aesthetic (specific — not just "cinematic")
+- color_palette: list of 4-6 specific colors with hex codes
+- world_description: the world this video lives in (2-3 sentences)
+- characters: list of {{name, description, role, states_needed: [list of visual states/poses needed]}}
+- locations: list of {{name, description, mood}} — 2-4 distinct environments
+- recurring_motifs: list of 3-5 visual symbols that recur throughout
+- narrative_structure: how the visuals arc across the song (3-4 sentences)
+- image_gen_style_prompt: a FLUX image generation style suffix (15-25 words) that will be appended to ALL image prompts to ensure visual consistency. Be specific about art style, rendering, lighting."""}
+        ]
     )
     return json.loads(response.choices[0].message.content)

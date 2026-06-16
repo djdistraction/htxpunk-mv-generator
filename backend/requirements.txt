@@ -1,32 +1,36 @@
-# Web framework
-fastapi==0.111.0
-uvicorn[standard]==0.29.0
+# API framework
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
 python-multipart==0.0.9
-pydantic-settings==2.2.1
 
-# Database
-supabase==2.4.6
+# Task queue (memory broker — no Redis needed for local dev)
+celery==5.4.0
 
-# Queue
-celery==5.3.6
-redis==5.0.4
+# LLM — Groq is OpenAI-compatible, free tier
+openai==1.51.0
+groq==0.11.0
 
-# AI services
-openai==1.30.0
-replicate==0.28.0
+# Audio transcription — runs locally on CPU, no API needed
+openai-whisper==20231117
+ffmpeg-python==0.2.0
 
-# Image processing
-Pillow==10.3.0
+# Image generation — Hugging Face free inference API
+huggingface-hub==0.25.2
+Pillow==10.4.0
+
+# Background removal — for element cutouts
 rembg==2.0.57
+onnxruntime==1.19.2
 
-# Audio
-pydub==0.25.1
+# Database — SQLite, no server needed
+aiosqlite==0.20.0
+sqlalchemy==2.0.35
 
-# Storage (S3-compatible / Cloudflare R2)
-boto3==1.34.105
+# Storage — local filesystem for now, swap to S3/R2 later
+aiofiles==24.1.0
 
 # Utilities
+pydantic-settings==2.5.2
+httpx==0.27.2
 python-dotenv==1.0.1
-httpx==0.27.0
-pydantic==2.7.1
-jinja2==3.1.4
+pydub==0.25.1

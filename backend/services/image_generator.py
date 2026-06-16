@@ -1,68 +1,69 @@
 """
-Stages 4 & 5: Image Generation via FLUX.1-dev on Replicate
-- Generates background images (no characters)
-- Generates character/prop elements on white backgrounds
-- REMBG removes backgrounds from element images -> transparent PNGs
+Stages 4-5 — Image Generation
+Uses Hugging Face Inference API (free tier) with FLUX.1-schnell.
+No API cost. Rate limited — adds ~2-3s delay between calls automatically.
+
+To upgrade to paid FLUX.1-dev on Replicate:
+  Set image_backend=replicate in config and add replicate_api_key.
+When you have a local GPU:
+  Set image_backend=local and point at your ComfyUI API.
 """
-import replicate
-import httpx
-from PIL import Image
-from rembg import remove
 import io
+import time
+from pathlib import Path
+from PIL import Image
 from config import settings
 from utils.storage import upload_bytes
 
-FLUX_MODEL = "black-forest-labs/flux-1.1-pro"
+def generate_image(prompt: str, style_suffix: str = "", width: int = 1024, height: int = 576) -> bytes:
+    """Generate an image and return raw PNG bytes."""
+    full_prompt = f"{prompt}. {style_suffix}".strip(" .")
 
+    from huggingface_hub import InferenceClient
+    client = InferenceClient(token=settings.hf_token)
 
-def generate_image(prompt: str, width: int = 1920, height: int = 1080) -> bytes:
-    """Calls FLUX.1 via Replicate. Returns raw PNG bytes."""
-    output = replicate.run(
-        FLUX_MODEL,
-        input={
-            "prompt": prompt,
-            "width": width,
-            "height": height,
-            "output_format": "png",
-            "output_quality": 95,
-            "num_inference_steps": 28,
-            "guidance": 3.5
-        }
+    # HF free tier needs a small pause between calls to avoid 429s
+    time.sleep(2)
+
+    image = client.text_to_image(
+        full_prompt,
+        model=settings.hf_image_model,
+        width=width,
+        height=height,
     )
-    url = str(output)
-    response = httpx.get(url, timeout=60)
-    return response.content
+    buf = io.BytesIO()
+    image.save(buf, format="PNG")
+    return buf.getvalue()
 
-
-def generate_background(background_def: dict) -> str:
-    """Generate a background image and upload to R2. Returns public URL."""
+def generate_background(project_id: str, bg_id: str, prompt: str, style_suffix: str = "") -> str:
+    """Generate a background image. Returns storage URL."""
+    print(f"Generating background: {bg_id}")
     img_bytes = generate_image(
-        prompt=background_def["image_prompt"],
-        width=background_def.get("width", 1920),
-        height=background_def.get("height", 1080)
+        f"{prompt}. Wide establishing shot. No people or figures. Static background.",
+        style_suffix=style_suffix,
+        width=1920, height=1080,
     )
-    path = f"projects/{background_def['project_id']}/backgrounds/{background_def['id']}.png"
-    return upload_bytes(img_bytes, path, content_type="image/png")
+    key = f"{project_id}/backgrounds/{bg_id}.png"
+    return upload_bytes(img_bytes, key, "image/png")
 
-
-def generate_element(state_def: dict, remove_bg: bool = True) -> str:
-    """
-    Generate an element in a specific state.
-    If remove_bg=True, applies REMBG to strip the white background -> transparent PNG.
-    Returns public URL of the final PNG.
-    """
+def generate_element(project_id: str, element_id: str, prompt: str,
+                     style_suffix: str = "", remove_bg: bool = True) -> str:
+    """Generate a character/prop element. Optionally removes background."""
+    print(f"Generating element: {element_id}")
     img_bytes = generate_image(
-        prompt=state_def["image_prompt"],
-        width=1024,
-        height=1024
+        f"{prompt}. Full body. Plain white background. Centered. No shadows.",
+        style_suffix=style_suffix,
+        width=768, height=1024,
     )
 
     if remove_bg:
-        input_img = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
-        output_img = remove(input_img)
-        buf = io.BytesIO()
-        output_img.save(buf, format="PNG")
-        img_bytes = buf.getvalue()
+        try:
+            from rembg import remove
+            img_bytes = remove(img_bytes)
+            key = f"{project_id}/elements/{element_id}.png"
+            return upload_bytes(img_bytes, key, "image/png")
+        except Exception as e:
+            print(f"rembg failed ({e}), saving with white background")
 
-    path = f"projects/{state_def['project_id']}/elements/{state_def['state_id']}.png"
-    return upload_bytes(img_bytes, path, content_type="image/png")
+    key = f"{project_id}/elements/{element_id}.png"
+    return upload_bytes(img_bytes, key, "image/png")

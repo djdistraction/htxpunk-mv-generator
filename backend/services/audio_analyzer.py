@@ -1,80 +1,97 @@
 """
-Stage 1: Audio Analysis
-- Transcribes audio with word-level timestamps via OpenAI Whisper
-- Analyzes song structure, themes, and mood via GPT-4o
+Stage 1 — Audio Analysis
+Transcription: local Whisper (CPU) — free, no API key needed.
+Analysis: Groq LLM — free tier.
+
+When you get a GPU: set whisper_model=large-v3 for better accuracy.
 """
 import json
+import tempfile
+from pathlib import Path
 from openai import OpenAI
 from config import settings
 
-client = OpenAI(api_key=settings.openai_api_key)
+# Lazy-load whisper to avoid slow import at startup
+_whisper_model = None
 
+def _get_whisper():
+    global _whisper_model
+    if _whisper_model is None:
+        import whisper
+        print(f"Loading Whisper {settings.whisper_model} model...")
+        _whisper_model = whisper.load_model(settings.whisper_model)
+    return _whisper_model
+
+def _groq_client():
+    return OpenAI(
+        api_key=settings.groq_api_key,
+        base_url="https://api.groq.com/openai/v1"
+    )
 
 def transcribe_audio(audio_path: str) -> dict:
-    """Returns word-level timestamped transcript from Whisper."""
-    with open(audio_path, "rb") as f:
-        response = client.audio.transcriptions.create(
-            model="whisper-1",
-            file=f,
-            response_format="verbose_json",
-            timestamp_granularities=["word", "segment"]
-        )
+    """Transcribe audio file using local Whisper. Returns segments + word timestamps."""
+    model = _get_whisper()
+    result = model.transcribe(
+        audio_path,
+        word_timestamps=True,
+        verbose=False,
+    )
+    segments = []
+    for seg in result.get("segments", []):
+        segments.append({
+            "start": round(seg["start"], 2),
+            "end": round(seg["end"], 2),
+            "text": seg["text"].strip(),
+            "words": [
+                {"word": w["word"].strip(), "start": round(w["start"], 2), "end": round(w["end"], 2)}
+                for w in seg.get("words", [])
+            ]
+        })
     return {
-        "text": response.text,
-        "segments": [
-            {"start": s.start, "end": s.end, "text": s.text}
-            for s in response.segments
-        ],
-        "words": [
-            {"word": w.word, "start": w.start, "end": w.end}
-            for w in (response.words or [])
-        ],
-        "duration": response.duration,
-        "language": response.language
+        "language": result.get("language", "en"),
+        "text": result.get("text", "").strip(),
+        "segments": segments,
     }
 
-
-def analyze_song(transcript: dict) -> dict:
-    """Uses GPT-4o to extract themes, mood, structure, and narrative arc."""
-    prompt = f"""You are a creative director analyzing a song for music video production.
+def analyze_song(transcript: dict, audio_path: str) -> dict:
+    """Use Groq LLM to interpret the song's meaning and generate visual keywords."""
+    lyrics_with_timestamps = "\n".join(
+        f"[{seg['start']:.1f}s] {seg['text']}" for seg in transcript["segments"]
+    )
+    client = _groq_client()
+    response = client.chat.completions.create(
+        model=settings.groq_model,
+        response_format={"type": "json_object"},
+        temperature=0.4,
+        messages=[
+            {"role": "system", "content": (
+                "You are a music video director analyzing a song for visual storytelling. "
+                "Return a JSON object only."
+            )},
+            {"role": "user", "content": f"""Analyze this song's lyrics and structure.
 
 LYRICS WITH TIMESTAMPS:
-{json.dumps(transcript["segments"], indent=2)}
+{lyrics_with_timestamps}
 
-SONG DURATION: {transcript["duration"]} seconds
-
-Analyze this song and return a JSON object with this structure:
-{{
-  "themes": ["theme1", "theme2"],
-  "mood": "overall emotional tone",
-  "narrative_arc": "2-3 sentence story/emotional journey",
-  "sections": [
-    {{"name": "intro|verse|chorus|bridge|outro",
-      "start_time": 0.0, "end_time": 30.0,
-      "lyric_summary": "what is expressed here",
-      "emotional_peak": false}}
-  ],
-  "key_moments": [
-    {{"time": 45.2, "lyric": "specific lyric",
-      "significance": "why this matters visually"}}
-  ],
-  "color_mood": "warm/cool/dark/bright/etc",
-  "energy_level": "low/medium/high/building/explosive",
-  "visual_keywords": ["keyword1", "keyword2", "keyword3"]
-}}
-Return ONLY valid JSON."""
-
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"},
-        temperature=0.7
+Return JSON with these fields:
+- themes: list of 3-5 main themes
+- mood: overall emotional tone (string)
+- narrative_arc: how the story/emotion develops (string)
+- sections: list of {{name, start_time, end_time, energy_level 1-10, description}}
+- key_moments: list of {{timestamp, lyric, visual_opportunity}} for the 5-8 most visually compelling moments
+- color_mood: 3 color words that match the song's feeling
+- energy_level: overall 1-10
+- visual_keywords: list of 10 concrete visual concepts this song evokes
+- song_duration: estimate in seconds based on latest timestamp"""}
+        ]
     )
     return json.loads(response.choices[0].message.content)
 
-
 def run_full_analysis(audio_path: str) -> dict:
-    """Runs the complete Stage 1 analysis pipeline."""
+    """Run transcription + analysis. Called by pipeline worker."""
+    print(f"Transcribing {audio_path}...")
     transcript = transcribe_audio(audio_path)
-    analysis = analyze_song(transcript)
-    return {"transcript": transcript, "analysis": analysis}
+    print("Analyzing song meaning...")
+    analysis = analyze_song(transcript, audio_path)
+    analysis["transcript"] = transcript
+    return analysis
