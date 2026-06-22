@@ -1,24 +1,56 @@
 """
 Celery pipeline workers — each stage runs as an async task.
-Tasks update project stage in the DB and chain to the next step automatically.
-"""
-import tempfile
-import httpx
-from pathlib import Path
-from celery import Celery
-from config import settings
-from database import get_db
+Uses SQLite via SQLAlchemy sync helpers (db_get_project, etc.)
+Tasks update project stage in DB and chain to the next step automatically.
 
-app = Celery("voodoo_hut", broker=settings.redis_url, backend=settings.redis_url)
+Start with:  celery -A workers.pipeline_worker worker --pool=solo --loglevel=info
+"""
+import json
+import logging
+import tempfile
+from pathlib import Path
+
+import httpx
+from celery import Celery
+
+from config import settings
+from database import (
+    SessionLocal,
+    db_get_project,
+    db_update_project,
+    db_create_asset,
+    db_get_assets,
+)
+from utils.storage import url_to_local_path
+
+logger = logging.getLogger(__name__)
+
+app = Celery(
+    "voodoo_hut",
+    broker=settings.celery_broker_url,
+    backend=settings.celery_result_backend,
+)
 app.conf.task_track_started = True
 
 
+# ── DB helpers ────────────────────────────────────────────────────────────────
+
 def _set_stage(project_id: str, stage: str):
-    get_db().table("projects").update({"stage": stage}).eq("id", project_id).execute()
+    with SessionLocal() as db:
+        db_update_project(db, project_id, {"stage": stage})
 
 
 def _get_project(project_id: str) -> dict:
-    return get_db().table("projects").select("*").eq("id", project_id).single().execute().data
+    with SessionLocal() as db:
+        row = db_get_project(db, project_id)
+        return {
+            "id": row.id,
+            "audio_url": row.audio_url,
+            "title": row.title or "untitled",
+            "stage": row.stage,
+            "analysis_json": row.analysis_json,
+            "treatment_json": row.treatment_json,
+        }
 
 
 # ── Stage 1: Audio Analysis ───────────────────────────────────────────────────
@@ -29,17 +61,22 @@ def run_audio_analysis(project_id: str):
     _set_stage(project_id, "analyzing")
     project = _get_project(project_id)
 
-    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
-        f.write(httpx.get(project["audio_url"], timeout=60).content)
-        tmp_path = f.name
+    # Download audio to temp file for Whisper
+    audio_url = project["audio_url"]
+    audio_path = url_to_local_path(audio_url)
 
-    result = run_full_analysis(tmp_path)
-    Path(tmp_path).unlink(missing_ok=True)
+    if not Path(audio_path).exists():
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+            f.write(httpx.get(audio_url, timeout=120).content)
+            audio_path = f.name
 
-    get_db().table("projects").update({
-        "stage": "analyzed",
-        "analysis": result
-    }).eq("id", project_id).execute()
+    result = run_full_analysis(audio_path)
+
+    with SessionLocal() as db:
+        db_update_project(db, project_id, {
+            "stage": "analyzed",
+            "analysis_json": json.dumps(result),
+        })
 
     run_treatment_generation.delay(project_id)
 
@@ -51,10 +88,14 @@ def run_treatment_generation(project_id: str):
     from services.treatment_generator import generate_treatment
     _set_stage(project_id, "treatment_pending")
     project = _get_project(project_id)
-    data = project["analysis"]
-    treatment = generate_treatment(data["analysis"], data["transcript"])
-    get_db().table("projects").update({"treatment": treatment}).eq("id", project_id).execute()
-    # Pipeline pauses here — waits for human approval via POST /api/pipeline/{id}/approve-treatment
+    analysis = json.loads(project["analysis_json"] or "{}")
+    treatment = generate_treatment(analysis)
+    with SessionLocal() as db:
+        db_update_project(db, project_id, {
+            "treatment_json": json.dumps(treatment),
+            "stage": "awaiting_treatment_approval",
+        })
+    # ⏸ Pipeline pauses here — resumed by POST /api/pipeline/{id}/approve-treatment
 
 
 # ── Stage 3: Element Extraction ───────────────────────────────────────────────
@@ -64,52 +105,50 @@ def run_element_extraction(project_id: str):
     from services.element_extractor import extract_elements
     _set_stage(project_id, "extracting_elements")
     project = _get_project(project_id)
-    data = project["analysis"]
-    elements = extract_elements(project["treatment"], data["analysis"], data["transcript"])
-    get_db().table("projects").update({
-        "elements": elements,
-        "stage": "elements_ready"
-    }).eq("id", project_id).execute()
+    analysis = json.loads(project["analysis_json"] or "{}")
+    treatment = json.loads(project["treatment_json"] or "{}")
+    elements = extract_elements(treatment, analysis)
+    with SessionLocal() as db:
+        db_update_project(db, project_id, {
+            "elements_json": json.dumps(elements),
+            "stage": "elements_ready",
+        })
     run_image_generation.delay(project_id)
 
 
-# ── Stages 4-5: Image Generation ─────────────────────────────────────────────
+# ── Stages 4–5: Image Generation ─────────────────────────────────────────────
 
 @app.task(name="pipeline.run_image_generation")
 def run_image_generation(project_id: str):
     from services.image_generator import generate_background, generate_element
     _set_stage(project_id, "generating_backgrounds")
     project = _get_project(project_id)
-    elements = project["elements"]
-    db = get_db()
+    with SessionLocal() as db:
+        row = db_get_project(db, project_id)
+        elements = json.loads(row.elements_json or "{}")
 
     for bg in elements.get("backgrounds", []):
-        bg["project_id"] = project_id
-        url = generate_background(bg)
-        db.table("assets").insert({
-            "project_id": project_id, "asset_type": "background",
-            "name": bg["name"], "url": url, "metadata": bg
-        }).execute()
+        url = generate_background(project_id, bg["id"], bg["prompt"], bg.get("style_suffix", ""))
+        with SessionLocal() as db:
+            db_create_asset(db, project_id, "background", bg["name"], url, bg)
 
     _set_stage(project_id, "generating_elements")
 
     for char in elements.get("characters", []):
         for state in char.get("states", []):
-            state["project_id"] = project_id
-            url = generate_element(state, remove_bg=True)
-            db.table("assets").insert({
-                "project_id": project_id, "asset_type": "element",
-                "name": f"{char['name']} - {state['state_name']}", "url": url, "metadata": state
-            }).execute()
+            url = generate_element(project_id, state["state_id"], state["prompt"],
+                                   state.get("style_suffix", ""), remove_bg=True)
+            with SessionLocal() as db:
+                db_create_asset(db, project_id, "element",
+                                f"{char['name']} – {state['state_name']}", url, state)
 
     for prop in elements.get("props", []):
         for state in prop.get("states", []):
-            state["project_id"] = project_id
-            url = generate_element(state, remove_bg=True)
-            db.table("assets").insert({
-                "project_id": project_id, "asset_type": "element",
-                "name": f"{prop['name']} - {state['state_name']}", "url": url, "metadata": state
-            }).execute()
+            url = generate_element(project_id, state["state_id"], state["prompt"],
+                                   state.get("style_suffix", ""), remove_bg=True)
+            with SessionLocal() as db:
+                db_create_asset(db, project_id, "element",
+                                f"{prop['name']} – {state['state_name']}", url, state)
 
     run_storyboard_build.delay(project_id)
 
@@ -122,89 +161,77 @@ def run_storyboard_build(project_id: str):
     from services.compositor import composite_panel
     _set_stage(project_id, "building_storyboard")
     project = _get_project(project_id)
-    db = get_db()
 
-    assets = db.table("assets").select("*").eq("project_id", project_id).execute().data
-    bg_map = {a["metadata"]["id"]: a["url"] for a in assets if a["asset_type"] == "background"}
-    el_map = {a["metadata"]["state_id"]: a["url"] for a in assets if a["asset_type"] == "element"}
+    with SessionLocal() as db:
+        row = db_get_project(db, project_id)
+        analysis = json.loads(row.analysis_json or "{}")
+        treatment = json.loads(row.treatment_json or "{}")
+        elements_data = json.loads(row.elements_json or "{}")
+        assets = db_get_assets(db, project_id)
 
-    analysis_data = project["analysis"]
-    panels = build_scene_plan(
-        project["treatment"],
-        project["elements"],
-        analysis_data.get("transcript", analysis_data),
-        analysis_data.get("analysis", {})
-    )
+    bg_map = {a.metadata.get("id"): a.file_url for a in assets if a.asset_type == "background"}
+    el_map = {a.metadata.get("state_id"): a.file_url for a in assets if a.asset_type == "element"}
 
-    for panel in panels:
-        bg_url = bg_map.get(panel["background_id"], "")
+    panels = build_scene_plan(treatment, elements_data, analysis)
+
+    for i, panel in enumerate(panels):
+        bg_url = bg_map.get(panel.get("background_id"), "")
         elements_with_urls = [
-            {**e, "url": el_map.get(e["state_id"], "")}
+            {**e, "url": el_map.get(e.get("state_id"), "")}
             for e in panel.get("elements_visible", [])
-            if e["state_id"] in el_map
+            if e.get("state_id") in el_map
         ]
-        panel_url = composite_panel(bg_url, elements_with_urls, project_id, panel["panel_id"])
-        db.table("assets").insert({
-            "project_id": project_id, "asset_type": "storyboard_panel",
-            "name": f"Panel {panel['panel_id']}", "url": panel_url, "metadata": panel
-        }).execute()
-    # Pipeline pauses here — waits for human approval via POST /api/pipeline/{id}/approve-storyboard
+        panel_url = composite_panel(bg_url, elements_with_urls, project_id, panel.get("panel_id", str(i)))
+        metadata = {**panel, "panel_index": i, "energy_level": panel.get("energy_level", 0.5)}
+        with SessionLocal() as db:
+            db_create_asset(db, project_id, "panel", f"Panel {i+1}", panel_url, metadata)
+
+    _set_stage(project_id, "awaiting_storyboard_approval")
+    # ⏸ Pipeline pauses here — resumed by POST /api/pipeline/{id}/approve-storyboard
 
 
-# ── Stage 7: Clip Generation ──────────────────────────────────────────────────
+# ── Stage 7: Remotion Assembly (replaces clip gen + ffmpeg concat) ────────────
 
-@app.task(name="pipeline.run_clip_generation")
-def run_clip_generation(project_id: str):
-    from services.video_generator import generate_clip
-    _set_stage(project_id, "generating_clips")
-    db = get_db()
-
-    panels = db.table("assets").select("*").eq("project_id", project_id).eq("asset_type", "storyboard_panel").execute().data
-    pairs: dict[int, dict] = {}
-    for p in panels:
-        ci = p["metadata"]["clip_index"]
-        ft = p["metadata"]["frame_type"]
-        pairs.setdefault(ci, {})[ft] = p
-
-    clip_urls = []
-    for ci in sorted(pairs.keys()):
-        pair = pairs[ci]
-        if "open" not in pair or "close" not in pair:
-            continue
-        clip_url = generate_clip(
-            frame_a_url=pair["open"]["url"],
-            frame_b_url=pair["close"]["url"],
-            project_id=project_id,
-            clip_index=ci,
-            scene_description=pair["open"]["metadata"].get("scene_description", "")
-        )
-        db.table("assets").insert({
-            "project_id": project_id, "asset_type": "clip",
-            "name": f"Clip {ci:04d}", "url": clip_url, "metadata": {"clip_index": ci}
-        }).execute()
-        clip_urls.append((ci, clip_url))
-
-    ordered_urls = [url for _, url in sorted(clip_urls)]
-    run_final_assembly.delay(project_id, ordered_urls)
-
-
-# ── Stage 8: Final Assembly ───────────────────────────────────────────────────
-
-@app.task(name="pipeline.run_final_assembly")
-def run_final_assembly(project_id: str, clip_urls: list[str]):
-    from services.video_assembler import assemble_video
+@app.task(name="pipeline.run_video_assembly")
+def run_video_assembly(project_id: str):
+    from services.video_assembler import assemble_music_video
     _set_stage(project_id, "assembling")
     project = _get_project(project_id)
-    title_slug = project["title"].lower().replace(" ", "-")
-    video_url = assemble_video(
+
+    with SessionLocal() as db:
+        row = db_get_project(db, project_id)
+        analysis = json.loads(row.analysis_json or "{}")
+        assets = db_get_assets(db, project_id, asset_type="panel")
+
+    # Word-level timestamps from Whisper for lyric sync
+    word_timestamps = analysis.get("transcription", {}).get("words", [])
+
+    panels = sorted(assets, key=lambda a: a.metadata.get("panel_index", 0))
+    if not panels:
+        raise ValueError(f"No panels found for project {project_id}")
+
+    panel_dicts = [
+        {
+            "composite_url": p.file_url,
+            "image_url": p.file_url,
+            "panel_index": p.metadata.get("panel_index", i),
+            "energy_level": p.metadata.get("energy_level", 0.5),
+        }
+        for i, p in enumerate(panels)
+    ]
+
+    audio_path = url_to_local_path(project["audio_url"])
+    video_url = assemble_music_video(
         project_id=project_id,
-        clip_urls=clip_urls,
-        audio_url=project["audio_url"],
-        output_name=f"{title_slug}-final.mp4"
+        audio_path=audio_path,
+        panels=panel_dicts,
+        word_timestamps=word_timestamps,
     )
-    get_db().table("projects").update({
-        "video_url": video_url, "stage": "complete"
-    }).eq("id", project_id).execute()
+
+    with SessionLocal() as db:
+        db_update_project(db, project_id, {"video_url": video_url, "stage": "complete"})
+
+    logger.info("Project %s complete — %s", project_id, video_url)
 
 
 # ── Utility: Regenerate a single image ───────────────────────────────────────
@@ -212,8 +239,12 @@ def run_final_assembly(project_id: str, clip_urls: list[str]):
 @app.task(name="pipeline.regenerate_single_image")
 def regenerate_single_image(project_id: str, asset_id: str, new_prompt: str):
     from services.image_generator import generate_element
-    db = get_db()
-    asset = db.table("assets").select("*").eq("id", asset_id).single().execute().data
-    state_def = {**asset["metadata"], "project_id": project_id, "image_prompt": new_prompt}
-    new_url = generate_element(state_def, remove_bg=(asset["asset_type"] == "element"))
-    db.table("assets").update({"url": new_url}).eq("id", asset_id).execute()
+    with SessionLocal() as db:
+        from database import db_get_asset, db_update_asset
+        asset = db_get_asset(db, asset_id)
+        remove_bg = asset.asset_type == "element"
+        new_url = generate_element(
+            project_id, asset_id, new_prompt,
+            asset.metadata.get("style_suffix", ""), remove_bg=remove_bg
+        )
+        db_update_asset(db, asset_id, {"file_url": new_url})
