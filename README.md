@@ -1,8 +1,8 @@
-# 🎬 VoodooHut Music Video Generator
+# 🎬 HTXpunk Productions — Music Video Generator
 
 An AI-powered pipeline that turns a song upload into a full-length animated music video — complete with ken burns motion, lyric overlays, crossfades, and particle effects — with visual continuity maintained throughout.
 
-Built for **TheVoodooHut.tv** · Runs **100% free locally** · Upgrade path to GPU/cloud via env vars only.
+Built by **HTXpunk Productions** · Runs **100% free locally** · Upgrade path to GPU/cloud via env vars only.
 
 ---
 
@@ -117,4 +117,4 @@ See [`bible_template/BIBLE.md`](bible_template/BIBLE.md) for the full structure.
 
 ## License
 
-Proprietary — © TheVoodooHut. All rights reserved.
+Proprietary — © HTXpunk Productions. All rights reserved.
