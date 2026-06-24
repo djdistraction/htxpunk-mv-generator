@@ -1,0 +1,144 @@
+================================================================================
+HTXPUNK MV GENERATOR - DESKTOP APP BUILD COMMANDS
+================================================================================
+
+WINDOWS BUILD (Run on your Windows machine)
+================================================================================
+
+# 1. GET LATEST CODE
+git checkout claude/youthful-cray-l9yx4c
+git pull origin claude/youthful-cray-l9yx4c
+
+# 2. BUILD FRONTEND
+cd frontend
+npm install
+npm run build
+cd ..
+
+# 3. BUILD BACKEND
+cd backend
+pip install -r requirements.txt
+cd ..
+
+# 4. SETUP ELECTRON APP
+cd electron-app
+npm install
+cd ..
+
+# 5. CREATE WINDOWS INSTALLER
+cd electron-app
+npm run dist:win
+
+# Result: HTXpunk MV Generator Setup 1.0.0.exe in electron-app/dist/
+
+================================================================================
+MAC BUILD (Run on macOS)
+================================================================================
+
+cd electron-app
+npm run dist:mac
+
+# Result: HTXpunk MV Generator-1.0.0.dmg in electron-app/dist/
+
+================================================================================
+LINUX BUILD (Run on Linux)
+================================================================================
+
+cd electron-app
+npm run dist:linux
+
+# Result: HTXpunk-MV-Generator-1.0.0.AppImage in electron-app/dist/
+
+================================================================================
+OPTIONAL: Build all platforms at once
+================================================================================
+
+cd electron-app
+npm run dist
+
+# Result: Installers for Windows, macOS, and Linux in electron-app/dist/
+
+================================================================================
+TESTING
+================================================================================
+
+# Test the installer
+electron-app/dist/HTXpunk\ MV\ Generator\ Setup\ 1.0.0.exe
+
+# Or in development mode before building:
+cd electron-app
+npm start
+
+# This will:
+# 1. Show setup wizard (fill with test API keys)
+# 2. Start Electron app
+# 3. Load backend
+# 4. Show main application
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+# If npm install hangs on electron:
+# - Wait 2-3 minutes (Electron binary is 150MB+)
+# - Don't interrupt the process
+# - If it fails, retry with: npm install --verbose
+
+# If "python not found":
+# - Python wasn't added to PATH during installation
+# - Reinstall Python and check "Add Python to PATH" option
+# - Restart PowerShell after reinstalling
+
+# If build fails, try clean rebuild:
+cd electron-app
+rm -r node_modules dist
+npm install
+npm run dist:win
+
+# If you get "permission denied" errors on Mac:
+xattr -d com.apple.quarantine HTXpunk\ MV\ Generator.app
+
+================================================================================
+WHAT USERS WILL DOWNLOAD
+================================================================================
+
+HTXpunk MV Generator Setup 1.0.0.exe (340MB)
+- Full installer with wizard
+- Uninstaller included
+- Desktop and Start Menu shortcuts
+- Can be distributed to others
+
+================================================================================
+API KEYS (Users will need these)
+================================================================================
+
+Groq API Key:
+  Site: https://console.groq.com
+  Steps: Sign in → Keys → Create New Key
+  Format: gsk_xxxxxxxx...
+
+HuggingFace Token:
+  Site: https://huggingface.co
+  Steps: Settings → Access Tokens → Create New Token
+  Format: hf_xxxxxxxx...
+
+================================================================================
+DOCUMENTATION
+================================================================================
+
+- QUICK_BUILD.md ............. Quick local build guide
+- DESKTOP_STATUS.md .......... Complete status and distribution guide
+- DESKTOP_APP.md ............ User guide for installers
+- DESKTOP_SUMMARY.md ........ Implementation details
+- BUILD.md .................. Advanced build and distribution
+
+================================================================================
+GIT BRANCH
+================================================================================
+
+Feature branch: claude/youthful-cray-l9yx4c
+
+All changes committed and pushed.
+Pull latest with: git pull origin claude/youthful-cray-l9yx4c
+
+================================================================================
