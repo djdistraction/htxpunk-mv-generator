@@ -28,7 +28,16 @@ cp .env.example .env
 # HF_TOKEN=hf_YOUR_TOKEN_HERE → paste your HuggingFace token
 ```
 
-## Step 3: Install & Start Backend
+## Step 3: Install Remotion (required for video rendering)
+
+```bash
+cd remotion-composer
+npm install
+
+# This may take 2-3 minutes on first run
+```
+
+## Step 4: Install & Start Backend
 
 ```bash
 cd backend
@@ -37,10 +46,10 @@ pip install -r requirements.txt
 # Terminal 1 — API Server
 uvicorn main:app --reload --port 8000
 
-# Wait for "Chimera Tower online" message, then move to Step 4
+# Wait for "Chimera Tower online" message, then move to Step 5
 ```
 
-## Step 4: Install & Start Frontend
+## Step 5: Install & Start Frontend
 
 **In a new terminal:**
 
@@ -52,7 +61,7 @@ npm run dev
 # Opens http://localhost:3000
 ```
 
-## Step 5: Upload Your First Song
+## Step 6: Upload Your First Song
 
 1. Open http://localhost:3000
 2. Click "+ New Video"
