@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#7c3aed" />
+    <meta name="description" content="HTXpunk Music Video Generator - Create stunning AI-powered music videos" />
+    <title>HTXpunk MV Generator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #000;
+            color: #fff;
+        }
+
+        #root {
+            width: 100%;
+            height: 100vh;
+        }
+
+        iframe {
+            border: none;
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background: linear-gradient(135deg, #1a1a1a 0%, #2d1b4e 100%);
+        }
+
+        .loading-content {
+            text-align: center;
+        }
+
+        .loading-spinner {
+            width: 60px;
+            height: 60px;
+            border: 4px solid rgba(124, 58, 237, 0.2);
+            border-top-color: #7c3aed;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            font-size: 18px;
+            color: #fff;
+            margin-bottom: 10px;
+        }
+
+        .loading-subtext {
+            font-size: 14px;
+            color: #999;
+        }
+    </style>
+</head>
+<body>
+    <div id="root">
+        <div class="loading">
+            <div class="loading-content">
+                <div class="loading-spinner"></div>
+                <div class="loading-text">🎬 HTXpunk MV Generator</div>
+                <div class="loading-subtext">Starting backend...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Wait for backend to be ready, then load the frontend
+        async function waitForBackend() {
+            const maxAttempts = 60; // 60 seconds
+            let attempts = 0;
+
+            while (attempts < maxAttempts) {
+                try {
+                    const response = await fetch('http://127.0.0.1:8000/health');
+                    if (response.ok) {
+                        // Backend is ready
+                        document.querySelector('.loading-subtext').textContent = 'Loading frontend...';
+
+                        // Create iframe pointing to localhost:3000
+                        const root = document.getElementById('root');
+                        root.innerHTML = '';
+                        const iframe = document.createElement('iframe');
+                        iframe.src = 'http://127.0.0.1:3000';
+                        root.appendChild(iframe);
+                        return;
+                    }
+                } catch (err) {
+                    // Backend not ready yet
+                }
+
+                attempts++;
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+
+            // Timeout
+            document.querySelector('.loading-text').textContent = '❌ Startup Failed';
+            document.querySelector('.loading-subtext').textContent = 'Backend failed to start. Check logs for details.';
+        }
+
+        waitForBackend();
+    </script>
+</body>
+</html>

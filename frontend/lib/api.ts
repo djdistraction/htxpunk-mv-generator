@@ -1,8 +1,23 @@
-import axios from 'axios'
+import axios, { AxiosError } from 'axios'
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 const client = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
+  baseURL: API_URL,
+  timeout: 120000, // 2 minute timeout for long uploads
 })
+
+// Log errors for debugging
+client.interceptors.response.use(
+  response => response,
+  error => {
+    if (!error.response) {
+      console.error('Network error:', error.message)
+      console.error(`Make sure the backend is running at ${API_URL}`)
+    }
+    return Promise.reject(error)
+  }
+)
 
 export const api = {
   projects: {

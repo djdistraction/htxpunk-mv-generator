@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { api } from "../lib/api"
+import { RefreshCw } from "lucide-react"
 
 const STAGE_LABELS: Record<string, string> = {
   uploaded: "⬆️ Uploaded",
@@ -25,32 +26,75 @@ const STAGE_LABELS: Record<string, string> = {
 export default function Home() {
   const [projectList, setProjectList] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState("")
+  const [refreshing, setRefreshing] = useState(false)
+
+  const loadProjects = async () => {
+    setRefreshing(true)
+    try {
+      const data = await api.projects.list()
+      setProjectList(data)
+      setError("")
+    } catch (err) {
+      setError("Failed to load projects. Is the backend running? (http://localhost:8000)")
+    } finally {
+      setRefreshing(false)
+      setLoading(false)
+    }
+  }
 
   useEffect(() => {
-    api.projects.list().then(setProjectList).finally(() => setLoading(false))
+    loadProjects()
+    const interval = setInterval(loadProjects, 10000)
+    return () => clearInterval(interval)
   }, [])
 
   return (
     <main className="max-w-5xl mx-auto p-8">
       <div className="flex items-center justify-between mb-10">
         <div>
-          <h1 className="text-3xl font-bold text-voodoo-purple">🎬 HTXpunk Productions</h1>
-          <p className="text-gray-400 mt-1">Music Video Generator</p>
+          <h1 className="text-3xl font-bold text-purple-600">🎬 HTXpunk Productions</h1>
+          <p className="text-gray-400 mt-1">AI Music Video Generator</p>
         </div>
-        <Link
-          href="/projects/new"
-          className="bg-purple-600 hover:bg-purple-700 px-5 py-2 rounded-lg font-medium transition"
-        >
-          + New Video
-        </Link>
+        <div className="flex gap-3">
+          <button
+            onClick={loadProjects}
+            disabled={refreshing}
+            className="p-2 rounded-lg border border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 transition disabled:opacity-50"
+            title="Refresh project list"
+          >
+            <RefreshCw size={20} className={refreshing ? "animate-spin" : ""} />
+          </button>
+          <Link
+            href="/projects/new"
+            className="bg-purple-600 hover:bg-purple-700 px-5 py-2 rounded-lg font-medium transition"
+          >
+            + New Video
+          </Link>
+        </div>
       </div>
 
+      {error && (
+        <div className="mb-6 bg-red-900/30 border border-red-700 rounded-lg p-4 text-red-300 text-sm">
+          {error}
+        </div>
+      )}
+
       {loading ? (
-        <p className="text-gray-500">Loading projects…</p>
+        <div className="text-center py-12">
+          <div className="animate-pulse text-4xl mb-3">🎬</div>
+          <p className="text-gray-500">Loading projects…</p>
+        </div>
       ) : projectList.length === 0 ? (
         <div className="text-center py-20 text-gray-500">
           <p className="text-5xl mb-4">🎵</p>
           <p className="text-xl">No videos yet. Upload a song to get started.</p>
+          <Link
+            href="/projects/new"
+            className="mt-6 inline-block bg-purple-600 hover:bg-purple-700 px-6 py-2 rounded-lg font-medium transition"
+          >
+            Create your first video
+          </Link>
         </div>
       ) : (
         <div className="grid gap-4">
@@ -62,7 +106,7 @@ export default function Home() {
             >
               <div>
                 <h2 className="text-xl font-semibold">{p.title}</h2>
-                <p className="text-gray-400 text-sm">{p.artist}</p>
+                <p className="text-gray-400 text-sm">{p.artist || "Unknown Artist"}</p>
               </div>
               <span className={`text-sm ${
                 p.stage === 'complete' ? 'text-green-400' :

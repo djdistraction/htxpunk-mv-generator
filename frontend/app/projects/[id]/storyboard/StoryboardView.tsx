@@ -48,14 +48,22 @@ export default function StoryboardView({ id }: { id: string }) {
   }
 
   if (loading) return (
-    <div className="min-h-screen bg-black text-white flex items-center justify-center">Loading…</div>
+    <div className="min-h-screen bg-black text-white flex items-center justify-center p-8">
+      <div className="text-center">
+        <div className="animate-spin text-4xl mb-4">🎬</div>
+        <p className="text-gray-400">Loading storyboard…</p>
+      </div>
+    </div>
   )
 
   if (!project || project.stage !== 'awaiting_storyboard_approval') return (
-    <div className="min-h-screen bg-black text-white flex items-center justify-center">
-      <div className="text-center">
-        <p className="text-gray-400">Storyboard not ready for review.</p>
-        <a href={`/projects/${id}`} className="text-purple-400 mt-2 block hover:underline">← Back to project</a>
+    <div className="min-h-screen bg-black text-white flex items-center justify-center p-8">
+      <div className="text-center max-w-md">
+        <p className="text-gray-400 mb-2">Storyboard not ready for review.</p>
+        <p className="text-gray-600 text-sm mb-6">
+          {project?.stage ? `Current stage: ${project.stage}` : 'Project not found'}
+        </p>
+        <a href={`/projects/${id}`} className="text-purple-400 hover:underline text-sm">← Back to project</a>
       </div>
     </div>
   )

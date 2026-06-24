@@ -180,15 +180,26 @@ export default function NewProjectPage() {
           </button>
         </form>
 
-        <div className="mt-8 p-4 bg-gray-900 rounded-lg border border-gray-800">
-          <h3 className="text-sm font-semibold text-gray-300 mb-2">What happens next</h3>
-          <ol className="text-gray-500 text-sm space-y-1 list-decimal list-inside">
-            <li>Audio is transcribed and analyzed (~1 min)</li>
-            <li>AI generates a visual treatment — you review and approve</li>
-            <li>Backgrounds and character elements are generated (~5–10 min)</li>
-            <li>Storyboard is built — you review and approve panel order</li>
-            <li>Final video is assembled with your audio</li>
-          </ol>
+        <div className="mt-8 space-y-4">
+          <div className="p-4 bg-gray-900 rounded-lg border border-gray-800">
+            <h3 className="text-sm font-semibold text-gray-300 mb-2">Pipeline Timeline</h3>
+            <ol className="text-gray-500 text-sm space-y-1 list-decimal list-inside">
+              <li>Audio is transcribed and analyzed (~1 min)</li>
+              <li>AI generates a visual treatment — you review and approve</li>
+              <li>Backgrounds and character elements are generated (~5–10 min)</li>
+              <li>Storyboard is built — you review and approve panel order</li>
+              <li>Final video is assembled with your audio (~15–25 min)</li>
+            </ol>
+          </div>
+
+          <div className="p-4 bg-blue-900/30 rounded-lg border border-blue-700">
+            <h3 className="text-sm font-semibold text-blue-300 mb-2">💡 Getting started</h3>
+            <ul className="text-blue-200 text-xs space-y-1">
+              <li>✓ Make sure the backend is running on <code className="bg-black/40 px-1 rounded">http://localhost:8000</code></li>
+              <li>✓ Check backend health: <code className="bg-black/40 px-1 rounded">curl http://localhost:8000/health</code></li>
+              <li>✓ Need API keys? Get them free at <code className="bg-black/40 px-1 rounded">console.groq.com</code> and <code className="bg-black/40 px-1 rounded">huggingface.co</code></li>
+            </ul>
+          </div>
         </div>
       </div>
     </div>

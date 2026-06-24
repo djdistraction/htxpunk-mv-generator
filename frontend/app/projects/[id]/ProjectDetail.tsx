@@ -45,7 +45,7 @@ export default function ProjectDetail({ id }: { id: string }) {
     try {
       const data = await api.projects.get(id)
       setProject(data)
-    } catch {
+    } catch (err) {
       setProject(null)
     } finally {
       setLoading(false)
@@ -54,10 +54,11 @@ export default function ProjectDetail({ id }: { id: string }) {
 
   useEffect(() => {
     fetchProject()
-    const interval = setInterval(fetchProject, 5000)
+    // Auto-refresh every 5 seconds while in progress, slower once complete
+    const interval = setInterval(fetchProject, project?.stage === 'complete' || project?.stage === 'error' ? 30000 : 5000)
     return () => clearInterval(interval)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id])
+  }, [id, project?.stage])
 
   if (loading) return (
     <div className="min-h-screen bg-black text-white flex items-center justify-center">
@@ -141,8 +142,9 @@ export default function ProjectDetail({ id }: { id: string }) {
         )}
 
         {/* Sub-page links */}
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
+            { label: 'Treatment', href: 'treatment', stages: ['awaiting_treatment_approval'] },
             { label: 'Elements', href: 'elements', stages: ['elements_ready', 'generating_images', 'images_ready', 'building_storyboard', 'awaiting_storyboard_approval', 'storyboard_approved', 'assembling', 'complete'] },
             { label: 'Storyboard', href: 'storyboard', stages: ['awaiting_storyboard_approval', 'storyboard_approved', 'assembling', 'complete'] },
             { label: 'Production', href: 'production', stages: ['assembling', 'complete'] },
@@ -168,9 +170,20 @@ export default function ProjectDetail({ id }: { id: string }) {
         </div>
 
         {project.stage === 'error' && project.error_message && (
-          <div className="mt-6 bg-red-900/30 border border-red-700 rounded-lg p-4">
-            <h3 className="text-red-300 font-semibold mb-1">Pipeline Error</h3>
-            <p className="text-red-400 text-sm font-mono">{project.error_message}</p>
+          <div className="mt-6 bg-red-900/30 border border-red-700 rounded-lg p-4 space-y-3">
+            <div>
+              <h3 className="text-red-300 font-semibold mb-1">Pipeline Error</h3>
+              <p className="text-red-400 text-sm font-mono whitespace-pre-wrap break-words">{project.error_message}</p>
+            </div>
+            <div className="text-red-300 text-xs space-y-1">
+              <p className="font-semibold">Troubleshooting:</p>
+              <ul className="list-disc list-inside space-y-1">
+                <li>Check backend logs for detailed error messages</li>
+                <li>Verify API keys (GROQ_API_KEY, HF_TOKEN) in .env</li>
+                <li>Ensure stable internet connection</li>
+                <li>Try uploading a different audio file</li>
+              </ul>
+            </div>
           </div>
         )}
 

@@ -42,7 +42,12 @@ export default function ElementsList({ id }: { id: string }) {
   )
 
   if (loading) return (
-    <div className="min-h-screen bg-black text-white flex items-center justify-center">Loading…</div>
+    <div className="min-h-screen bg-black text-white flex items-center justify-center p-8">
+      <div className="text-center">
+        <div className="animate-spin text-4xl mb-4">✨</div>
+        <p className="text-gray-400">Loading generated elements…</p>
+      </div>
+    </div>
   )
 
   return (

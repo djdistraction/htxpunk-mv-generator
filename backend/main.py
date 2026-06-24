@@ -3,13 +3,18 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+import logging
 
-from config import settings
+from config import settings, validate_settings
 from database import init_db
 from api import projects, pipeline, assets
 
+logger = logging.getLogger(__name__)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Validate configuration
+    validate_settings()
     # Create DB tables on startup (including new tasks + series tables)
     await init_db()
     # Ensure local storage directory exists
@@ -40,5 +45,11 @@ app.include_router(assets.router, prefix="/api/assets", tags=["assets"])
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "video_backend": settings.video_backend,
-            "storage_backend": settings.storage_backend}
+    return {
+        "status": "ok",
+        "backend_version": "1.0.0",
+        "video_backend": settings.video_backend,
+        "storage_backend": settings.storage_backend,
+        "database": "sqlite" if "sqlite" in settings.database_url else "postgres",
+        "storage_path": settings.local_storage_path if settings.storage_backend == "local" else "r2",
+    }

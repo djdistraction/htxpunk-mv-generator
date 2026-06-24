@@ -69,41 +69,30 @@ Everything upgrades via `.env` only — zero code changes:
 
 ## Quick Start
 
-### 1. Get free API keys
-- **Groq**: https://console.groq.com → free, no credit card
-- **HuggingFace**: https://huggingface.co → Settings → Access Tokens
+**👉 See [SETUP.md](SETUP.md) for a complete 5-10 minute walkthrough.**
 
-### 2. Configure
+### TL;DR
 ```bash
+# 1. Get API keys (free, no credit card)
+#    Groq: https://console.groq.com
+#    HuggingFace: https://huggingface.co/settings/tokens
+
+# 2. Configure
 cp .env.example .env
-# Add GROQ_API_KEY and HF_TOKEN
-```
+# Edit .env: add GROQ_API_KEY and HF_TOKEN
 
-### 3. Backend
-```bash
-cd backend
-pip install -r requirements.txt
-uvicorn main:app --reload
-# In a second terminal (Windows needs --pool=solo):
-celery -A workers.pipeline_worker worker --pool=solo --loglevel=info
-```
+# 3. Backend (terminal 1)
+cd backend && pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
 
-### 4. Remotion (video composer)
-```bash
-cd remotion-composer
-npm install
-# Optional: preview in browser
-npx remotion studio
-```
-
-### 5. Frontend
-```bash
-cd frontend
-npm install
+# 4. Frontend (terminal 2)
+cd frontend && npm install
 npm run dev
+# Opens http://localhost:3000
 ```
 
-Open http://localhost:3000
+**Full setup guide & troubleshooting:** [SETUP.md](SETUP.md)  
+**Architecture & development info:** [CLAUDE.md](CLAUDE.md)
 
 ---
 

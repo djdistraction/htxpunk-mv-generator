@@ -1,5 +1,8 @@
 from pydantic_settings import BaseSettings
 from pathlib import Path
+import logging
+
+logger = logging.getLogger(__name__)
 
 class Settings(BaseSettings):
     # LLM — Groq free tier (swap to OLLAMA_BASE_URL when you have a GPU)
@@ -24,7 +27,7 @@ class Settings(BaseSettings):
     r2_bucket_name: str = "voodoo-mv"
 
     # Database — SQLite by default (swap to postgres url when deploying)
-    database_url: str = "sqlite+aiosqlite:///./htxpunk.db"
+    database_url: str = f"sqlite+aiosqlite:///{Path(__file__).parent / 'htxpunk.db'}"
 
     # Video generation backend: "ffmpeg" | "runway" | "wan2"
     video_backend: str = "ffmpeg"
@@ -43,3 +46,16 @@ class Settings(BaseSettings):
         extra = "ignore"
 
 settings = Settings()
+
+# Validation on startup
+def validate_settings():
+    warnings = []
+    if not settings.groq_api_key or settings.groq_api_key == "gsk_YOUR_API_KEY_HERE":
+        warnings.append("⚠️  GROQ_API_KEY not set — set it in .env to use LLM features")
+    if not settings.hf_token or settings.hf_token == "hf_YOUR_TOKEN_HERE":
+        warnings.append("⚠️  HF_TOKEN not set — set it in .env to use image generation")
+
+    if warnings:
+        logger.warning("Configuration warnings:")
+        for w in warnings:
+            logger.warning(w)

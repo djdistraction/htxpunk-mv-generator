@@ -13,7 +13,20 @@ export default function TreatmentDetail({ id }: { id: string }) {
   const [feedback, setFeedback] = useState('')
 
   useEffect(() => {
-    api.projects.get(id).then(setProject).finally(() => setLoading(false))
+    const load = async () => {
+      try {
+        const data = await api.projects.get(id)
+        setProject(data)
+      } catch {
+        setProject(null)
+      } finally {
+        setLoading(false)
+      }
+    }
+    load()
+    // Auto-refresh while waiting for treatment
+    const interval = setInterval(load, 3000)
+    return () => clearInterval(interval)
   }, [id])
 
   const handleApprove = async () => {
@@ -44,11 +57,12 @@ export default function TreatmentDetail({ id }: { id: string }) {
   )
 
   if (!project?.treatment) return (
-    <div className="min-h-screen bg-black text-white flex items-center justify-center">
-      <div className="text-center">
-        <div className="text-4xl mb-4 animate-pulse">🎬</div>
-        <p className="text-gray-400">Generating your creative vision…</p>
-        <a href={`/projects/${id}`} className="text-purple-400 mt-4 block hover:underline text-sm">← Back to project</a>
+    <div className="min-h-screen bg-black text-white flex items-center justify-center p-8">
+      <div className="text-center max-w-md">
+        <div className="text-5xl mb-4 animate-pulse">🎬</div>
+        <p className="text-gray-400 mb-2">Generating your creative vision…</p>
+        <p className="text-gray-600 text-sm mb-6">This usually takes 1-2 minutes. The page will update automatically.</p>
+        <a href={`/projects/${id}`} className="text-purple-400 hover:underline text-sm inline-block">← Back to project dashboard</a>
       </div>
     </div>
   )
