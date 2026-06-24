@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HTXpunk MV Generator - Setup Wizard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #1a1a1a 0%, #2d1b4e 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .setup-container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            width: 100%;
+            max-width: 550px;
+            overflow: hidden;
+        }
+
+        .setup-header {
+            background: linear-gradient(135deg, #7c3aed 0%, #ec4899 100%);
+            color: white;
+            padding: 40px 30px;
+            text-align: center;
+        }
+
+        .setup-header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+
+        .setup-header p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .setup-body {
+            padding: 40px 30px;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .setup-step {
+            display: none;
+        }
+
+        .setup-step.active {
+            display: block;
+            animation: fadeIn 0.3s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .step-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #111;
+            margin-bottom: 20px;
+        }
+
+        .step-description {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 25px;
+            line-height: 1.6;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 13px;
+            font-weight: 500;
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        .form-group input,
+        .form-group textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: inherit;
+            transition: border-color 0.2s;
+        }
+
+        .form-group input:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #7c3aed;
+            box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.1);
+        }
+
+        .form-group input[type="password"] {
+            font-family: 'Courier New', monospace;
+            letter-spacing: 1px;
+        }
+
+        .help-text {
+            font-size: 12px;
+            color: #888;
+            margin-top: 6px;
+            line-height: 1.4;
+        }
+
+        .help-text a {
+            color: #7c3aed;
+            text-decoration: none;
+        }
+
+        .help-text a:hover {
+            text-decoration: underline;
+        }
+
+        .progress-bar {
+            height: 4px;
+            background: #eee;
+            margin-bottom: 30px;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #7c3aed 0%, #ec4899 100%);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .setup-footer {
+            display: flex;
+            gap: 12px;
+            padding: 20px 30px;
+            border-top: 1px solid #f0f0f0;
+            background: #fafafa;
+        }
+
+        button {
+            flex: 1;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #7c3aed 0%, #ec4899 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(124, 58, 237, 0.3);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-secondary {
+            background: white;
+            color: #333;
+            border: 1px solid #ddd;
+        }
+
+        .btn-secondary:hover {
+            background: #f5f5f5;
+        }
+
+        .error-message {
+            background: #fee;
+            color: #c33;
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            margin-bottom: 20px;
+            border-left: 3px solid #c33;
+        }
+
+        .success-message {
+            background: #efe;
+            color: #3c3;
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            margin-bottom: 20px;
+            border-left: 3px solid #3c3;
+        }
+
+        .folder-picker {
+            display: flex;
+            gap: 8px;
+        }
+
+        .folder-picker input {
+            flex: 1;
+        }
+
+        .folder-picker button {
+            padding: 12px 16px;
+            flex: 0;
+            background: #f0f0f0;
+            color: #333;
+            border: 1px solid #ddd;
+        }
+
+        .folder-picker button:hover {
+            background: #e5e5e5;
+        }
+
+        .step-indicator {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 20px;
+            justify-content: center;
+        }
+
+        .step-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ddd;
+            transition: all 0.3s;
+        }
+
+        .step-dot.active {
+            background: #7c3aed;
+            width: 24px;
+            border-radius: 4px;
+        }
+
+        .step-dot.completed {
+            background: #3c3;
+        }
+    </style>
+</head>
+<body>
+    <div class="setup-container">
+        <div class="setup-header">
+            <h1>🎬 HTXpunk MV Generator</h1>
+            <p>Complete setup in 3 steps</p>
+        </div>
+
+        <div class="setup-body">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+
+            <div class="step-indicator">
+                <div class="step-dot active" id="dot1"></div>
+                <div class="step-dot" id="dot2"></div>
+                <div class="step-dot" id="dot3"></div>
+            </div>
+
+            <!-- Step 1: API Keys -->
+            <div class="setup-step active" id="step1">
+                <div class="step-title">Get API Keys</div>
+                <div class="step-description">
+                    You'll need two free API keys to power your videos.
+                </div>
+
+                <div class="form-group">
+                    <label>Groq API Key *</label>
+                    <input type="password" id="groqApiKey" placeholder="gsk_..." />
+                    <div class="help-text">
+                        Get free at <a href="https://console.groq.com" target="_blank">console.groq.com</a> (no credit card needed)
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>HuggingFace Token *</label>
+                    <input type="password" id="hfToken" placeholder="hf_..." />
+                    <div class="help-text">
+                        Get free at <a href="https://huggingface.co/settings/tokens" target="_blank">huggingface.co/settings/tokens</a>
+                    </div>
+                </div>
+
+                <div id="step1Error" class="error-message" style="display: none;"></div>
+            </div>
+
+            <!-- Step 2: Storage Path -->
+            <div class="setup-step" id="step2">
+                <div class="step-title">Choose Storage Location</div>
+                <div class="step-description">
+                    Where should generated images and videos be stored?
+                </div>
+
+                <div class="form-group">
+                    <label>Storage Folder *</label>
+                    <div class="folder-picker">
+                        <input type="text" id="storagePath" readonly />
+                        <button onclick="pickFolder()" style="width: auto; padding: 12px 20px;">Browse</button>
+                    </div>
+                    <div class="help-text">
+                        Recommended: 50GB+ free space for video files
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Backend Port</label>
+                    <input type="number" id="backendPort" value="8000" min="1000" max="65535" />
+                    <div class="help-text">Port for the backend API (leave as default if unsure)</div>
+                </div>
+            </div>
+
+            <!-- Step 3: Confirmation -->
+            <div class="setup-step" id="step3">
+                <div class="step-title">Ready to Go!</div>
+                <div class="step-description">
+                    Your setup is complete. Here's what will happen next:
+                </div>
+
+                <div style="background: #f9f9f9; padding: 16px; border-radius: 6px; margin-bottom: 20px;">
+                    <div style="font-size: 14px; line-height: 1.8; color: #555;">
+                        <div style="margin-bottom: 10px;">✓ Backend will start on port <span id="summaryPort">8000</span></div>
+                        <div style="margin-bottom: 10px;">✓ Storage at: <span id="summaryPath" style="word-break: break-all;"></span></div>
+                        <div>✓ API keys will be securely saved</div>
+                    </div>
+                </div>
+
+                <div class="success-message">
+                    Click "Finish" to complete setup and start making videos!
+                </div>
+            </div>
+        </div>
+
+        <div class="setup-footer">
+            <button class="btn-secondary" id="backBtn" onclick="previousStep()" style="display: none;">← Back</button>
+            <button class="btn-primary" id="nextBtn" onclick="nextStep()">Next →</button>
+            <button class="btn-primary" id="finishBtn" onclick="finishSetup()" style="display: none;">Finish</button>
+        </div>
+    </div>
+
+    <script>
+        let currentStep = 1;
+        const totalSteps = 3;
+
+        function updateProgress() {
+            const progress = (currentStep / totalSteps) * 100;
+            document.getElementById('progressFill').style.width = progress + '%';
+
+            // Update step indicators
+            for (let i = 1; i <= totalSteps; i++) {
+                const dot = document.getElementById(`dot${i}`);
+                if (i < currentStep) {
+                    dot.classList.add('completed');
+                    dot.classList.remove('active');
+                } else if (i === currentStep) {
+                    dot.classList.add('active');
+                    dot.classList.remove('completed');
+                } else {
+                    dot.classList.remove('active', 'completed');
+                }
+            }
+
+            // Show/hide buttons
+            document.getElementById('backBtn').style.display = currentStep > 1 ? 'block' : 'none';
+            document.getElementById('nextBtn').style.display = currentStep < totalSteps ? 'block' : 'none';
+            document.getElementById('finishBtn').style.display = currentStep === totalSteps ? 'block' : 'none';
+        }
+
+        function showStep(step) {
+            document.querySelectorAll('.setup-step').forEach(el => el.classList.remove('active'));
+            document.getElementById(`step${step}`).classList.add('active');
+            updateProgress();
+        }
+
+        function nextStep() {
+            if (validateStep(currentStep)) {
+                if (currentStep < totalSteps) {
+                    currentStep++;
+                    showStep(currentStep);
+                }
+            }
+        }
+
+        function previousStep() {
+            if (currentStep > 1) {
+                currentStep--;
+                showStep(currentStep);
+            }
+        }
+
+        function validateStep(step) {
+            const errorEl = document.getElementById(`step${step}Error`);
+            if (errorEl) errorEl.style.display = 'none';
+
+            if (step === 1) {
+                const groqKey = document.getElementById('groqApiKey').value.trim();
+                const hfToken = document.getElementById('hfToken').value.trim();
+
+                if (!groqKey) {
+                    showError('step1Error', 'Please enter your Groq API key');
+                    return false;
+                }
+                if (!hfToken) {
+                    showError('step1Error', 'Please enter your HuggingFace token');
+                    return false;
+                }
+                return true;
+            }
+            if (step === 2) {
+                const storagePath = document.getElementById('storagePath').value.trim();
+                if (!storagePath) {
+                    showError('step2Error', 'Please select a storage folder');
+                    return false;
+                }
+                return true;
+            }
+            return true;
+        }
+
+        function showError(elementId, message) {
+            const el = document.getElementById(elementId);
+            if (el) {
+                el.textContent = message;
+                el.style.display = 'block';
+            }
+        }
+
+        function pickFolder() {
+            // This will need to be called from the main process in production
+            // For now, show a placeholder
+            const path = prompt('Enter storage path (or leave blank for default):',
+                '/home/user/.htxpunk-mv-generator/storage');
+            if (path) {
+                document.getElementById('storagePath').value = path;
+            }
+        }
+
+        function finishSetup() {
+            const config = {
+                groqApiKey: document.getElementById('groqApiKey').value,
+                hfToken: document.getElementById('hfToken').value,
+                storagePath: document.getElementById('storagePath').value,
+                backendPort: parseInt(document.getElementById('backendPort').value),
+                frontendPort: 3000,
+                setupComplete: true,
+            };
+
+            // Send to main process
+            if (window.electron) {
+                window.electron.setupComplete(config);
+            } else {
+                console.log('Setup config:', config);
+                alert('Setup complete! (In development mode)');
+            }
+        }
+
+        // Initialize
+        updateProgress();
+
+        // Set default storage path
+        if (window.electron) {
+            window.electron.getConfig().then(config => {
+                document.getElementById('storagePath').value = config.storagePath;
+                document.getElementById('backendPort').value = config.backendPort;
+                document.getElementById('summaryPath').textContent = config.storagePath;
+                document.getElementById('summaryPort').textContent = config.backendPort;
+            });
+        }
+
+        // Update summary when values change
+        document.getElementById('storagePath').addEventListener('change', () => {
+            document.getElementById('summaryPath').textContent = document.getElementById('storagePath').value;
+        });
+
+        document.getElementById('backendPort').addEventListener('change', () => {
+            document.getElementById('summaryPort').textContent = document.getElementById('backendPort').value;
+        });
+    </script>
+</body>
+</html>
