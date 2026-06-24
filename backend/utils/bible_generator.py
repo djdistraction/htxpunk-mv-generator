@@ -1,17 +1,18 @@
 """
 Exports a project's full state as a Markdown continuity bible document.
 """
-from database import get_db
+from database import db_get_project, db_get_assets
 from datetime import datetime
 
 
 def export_bible(project_id: str) -> str:
-    db = get_db()
-    project = db.table("projects").select("*").eq("id", project_id).single().execute().data
-    assets = db.table("assets").select("*").eq("project_id", project_id).execute().data
+    project = db_get_project(project_id)
+    if not project:
+        return f"# Error: project {project_id} not found"
+    assets = db_get_assets(project_id)
 
-    treatment = project.get("treatment", {})
-    elements = project.get("elements", {})
+    treatment = project.get("treatment") or {}
+    elements = project.get("elements") or {}
 
     def assets_of(t): return [a for a in assets if a["asset_type"] == t]
 
@@ -40,26 +41,31 @@ def export_bible(project_id: str) -> str:
         lines += [f"### {char['name']} (`{char['id']}`)",
                   f"**Appearance:** {char['base_appearance']}", "",
                   "| State | Asset URL |", "|-------|-----------|"]
-        char_assets = {a["metadata"].get("state_id"): a["url"]
-                       for a in assets_of("element") if char["id"] in a["metadata"].get("state_id", "")}
+        # elem assets have state_id unpacked from metadata
+        char_assets = {a.get("state_id"): a.get("url")
+                       for a in assets_of("element")
+                       if char["id"] in (a.get("state_id") or "")}
         for state in char.get("states", []):
             lines.append(f"| {state['state_name']} | {char_assets.get(state['state_id'], '_pending_')} |")
         lines.append("")
 
     lines += ["---", "", "## 🗺️ Backgrounds", ""]
     for bg in elements.get("backgrounds", []):
-        bg_url = next((a["url"] for a in assets_of("background") if a["metadata"].get("id") == bg["id"]), "_pending_")
+        # background assets store the extractor id as elem_id
+        bg_url = next((a["url"] for a in assets_of("background")
+                       if a.get("elem_id") == bg["id"]), "_pending_")
         lines += [f"### {bg['name']} (`{bg['id']}`)",
-                  f"**Asset:** {bg_url}", f"**Prompt:** {bg['image_prompt']}", ""]
+                  f"**Asset:** {bg_url}", f"**Prompt:** {bg.get('image_prompt', bg.get('prompt', ''))}", ""]
 
     lines += ["---", "", "## 🎞️ Storyboard", "",
-              "| Clip | Frame | Time | Scene | Panel |",
-              "|------|-------|------|-------|-------|"]
-    panels = sorted(assets_of("storyboard_panel"),
-                    key=lambda p: (p["metadata"].get("clip_index", 0), p["metadata"].get("frame_type", "")))
+              "| Panel | Time | Scene | URL |",
+              "|-------|------|-------|-----|"]
+    panels = sorted(assets_of("panel"),
+                    key=lambda p: p.get("panel_index", 0))
     for p in panels:
-        m = p["metadata"]
-        lines.append(f"| {m.get('clip_index')} | {m.get('frame_type')} | {m.get('timestamp_start', '')}s | {m.get('scene_description','')[:50]} | {p['url']} |")
+        lines.append(
+            f"| {p.get('panel_index', '')} | — | {str(p.get('scene_description', ''))[:50]} | {p.get('url', '')} |"
+        )
 
     if project.get("video_url"):
         lines += ["", "---", "", "## ✅ Final Video", "", f"**{project['video_url']}**"]

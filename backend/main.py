@@ -10,13 +10,16 @@ from api import projects, pipeline, assets
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Create DB tables on startup
+    # Create DB tables on startup (including new tasks + series tables)
     await init_db()
     # Ensure local storage directory exists
     Path(settings.local_storage_path).mkdir(parents=True, exist_ok=True)
+    # Start Chimera Tower orchestrator — replaces Celery worker process
+    from orchestrator import start_orchestrator
+    start_orchestrator(max_workers=4)
     yield
 
-app = FastAPI(title="VoodooHut MV Generator", lifespan=lifespan)
+app = FastAPI(title="HTXpunk Productions MV Generator", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

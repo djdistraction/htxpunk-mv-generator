@@ -1,25 +1,29 @@
 """
 Stage 1 — Audio Analysis
-Transcription: local Whisper (CPU) — free, no API key needed.
+Transcription: faster-whisper (CPU, int8) — free, no API key needed.
+  - Python 3.13 compatible replacement for openai-whisper
+  - ~2x faster on CPU, lower memory usage
+  - When you get a GPU: set device="cuda", compute_type="float16"
 Analysis: Groq LLM — free tier.
-
-When you get a GPU: set whisper_model=large-v3 for better accuracy.
 """
 import json
-import tempfile
 from pathlib import Path
 from openai import OpenAI
 from config import settings
 
-# Lazy-load whisper to avoid slow import at startup
+# Lazy-load model to avoid slow import at startup
 _whisper_model = None
 
 def _get_whisper():
     global _whisper_model
     if _whisper_model is None:
-        import whisper
-        print(f"Loading Whisper {settings.whisper_model} model...")
-        _whisper_model = whisper.load_model(settings.whisper_model)
+        from faster_whisper import WhisperModel
+        print(f"Loading faster-whisper '{settings.whisper_model}' model...")
+        _whisper_model = WhisperModel(
+            settings.whisper_model,
+            device="cpu",
+            compute_type="int8",  # most efficient on CPU
+        )
     return _whisper_model
 
 def _groq_client():
@@ -29,27 +33,35 @@ def _groq_client():
     )
 
 def transcribe_audio(audio_path: str) -> dict:
-    """Transcribe audio file using local Whisper. Returns segments + word timestamps."""
+    """Transcribe audio file using faster-whisper. Returns segments + word timestamps."""
     model = _get_whisper()
-    result = model.transcribe(
+    segments_iter, info = model.transcribe(
         audio_path,
         word_timestamps=True,
-        verbose=False,
+        vad_filter=True,  # skip silence automatically
     )
+
     segments = []
-    for seg in result.get("segments", []):
+    full_text_parts = []
+    for seg in segments_iter:
+        words = []
+        for w in (seg.words or []):
+            words.append({
+                "word": w.word.strip(),
+                "start": round(w.start, 2),
+                "end": round(w.end, 2),
+            })
         segments.append({
-            "start": round(seg["start"], 2),
-            "end": round(seg["end"], 2),
-            "text": seg["text"].strip(),
-            "words": [
-                {"word": w["word"].strip(), "start": round(w["start"], 2), "end": round(w["end"], 2)}
-                for w in seg.get("words", [])
-            ]
+            "start": round(seg.start, 2),
+            "end": round(seg.end, 2),
+            "text": seg.text.strip(),
+            "words": words,
         })
+        full_text_parts.append(seg.text.strip())
+
     return {
-        "language": result.get("language", "en"),
-        "text": result.get("text", "").strip(),
+        "language": info.language,
+        "text": " ".join(full_text_parts),
         "segments": segments,
     }
 

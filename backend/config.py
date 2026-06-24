@@ -23,12 +23,8 @@ class Settings(BaseSettings):
     r2_secret_access_key: str = ""
     r2_bucket_name: str = "voodoo-mv"
 
-    # Database — SQLite by default (swap to supabase url when deploying)
-    database_url: str = "sqlite+aiosqlite:///./voodoo.db"
-
-    # Celery — memory broker for local dev (swap to redis:// when deploying)
-    celery_broker_url: str = "memory://"
-    celery_result_backend: str = "cache+memory://"
+    # Database — SQLite by default (swap to postgres url when deploying)
+    database_url: str = "sqlite+aiosqlite:///./htxpunk.db"
 
     # Video generation backend: "ffmpeg" | "runway" | "wan2"
     video_backend: str = "ffmpeg"
@@ -40,7 +36,10 @@ class Settings(BaseSettings):
     output_resolution: str = "1920x1080"
 
     class Config:
-        env_file = ".env"
+        # .env lives at the project root (one level above backend/)
+        # Use an absolute path so this works regardless of the working directory
+        # uvicorn is launched from.
+        env_file = str(Path(__file__).parent.parent / ".env")
         extra = "ignore"
 
 settings = Settings()

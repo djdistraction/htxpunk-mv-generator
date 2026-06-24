@@ -4,23 +4,21 @@ uvicorn[standard]==0.30.6
 python-multipart==0.0.9
 
 # Task queue (memory broker — no Redis needed for local dev)
-celery==5.4.0
 
 # LLM — Groq is OpenAI-compatible, free tier
 openai==1.51.0
 groq==0.11.0
 
-# Audio transcription — runs locally on CPU, no API needed
-openai-whisper==20231117
-ffmpeg-python==0.2.0
+# Audio transcription — faster-whisper: Python 3.13 compatible, faster than openai-whisper
+faster-whisper==1.1.1
 
 # Image generation — Hugging Face free inference API
 huggingface-hub==0.25.2
-Pillow==10.4.0
+Pillow>=12.1.0
 
 # Background removal — for element cutouts
-rembg==2.0.57
-onnxruntime==1.19.2
+rembg==2.0.76
+onnxruntime==1.20.1
 
 # Database — SQLite, no server needed
 aiosqlite==0.20.0

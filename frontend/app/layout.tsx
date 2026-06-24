@@ -2,8 +2,8 @@ import type { Metadata } from "next"
 import "./globals.css"
 
 export const metadata: Metadata = {
-  title: "VoodooHut MV Generator",
-  description: "AI-powered music video generation for TheVoodooHut.tv"
+  title: "HTXpunk Productions",
+  description: "AI-powered music video generator by HTXpunk Productions"
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

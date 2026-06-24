@@ -1,82 +1,81 @@
 """
-Stage 6b: Storyboard Builder
-- Uses GPT-4o to map lyrics + timestamps to visual scenes
-- Each scene produces an open frame and a close frame for a 5-second clip
+Stage 5b: Storyboard Builder
+Maps lyrics + timestamps to visual scenes using Groq (free tier).
 """
 import json
 from openai import OpenAI
 from config import settings
 
-client = OpenAI(api_key=settings.openai_api_key)
+
+def _groq_client():
+    return OpenAI(api_key=settings.groq_api_key, base_url="https://api.groq.com/openai/v1")
 
 
-def build_scene_plan(
-    treatment: dict,
-    elements: dict,
-    transcript: dict,
-    analysis: dict
-) -> list[dict]:
-    """Returns ordered list of storyboard panels (open/close pairs per clip)."""
-    duration = transcript.get("duration", 180)
-    num_clips = int(duration / 5) + 1
+def build_scene_plan(treatment: dict, elements: dict, analysis: dict) -> list[dict]:
+    """Returns ordered list of storyboard panels."""
+    client = _groq_client()
 
-    bg_names = [b["name"] for b in elements.get("backgrounds", [])]
+    transcript = analysis.get("transcript", {})
+    song_duration = analysis.get("song_duration", 180)
+    num_panels = max(6, int(song_duration / 8))
+
+    bg_list = [{"id": b["id"], "name": b["name"]} for b in elements.get("backgrounds", [])]
     char_states = {
-        c["name"]: [s["state_name"] for s in c.get("states", [])]
+        c["name"]: [{"state_id": s["state_id"], "name": s["state_name"]}
+                    for s in c.get("states", [])]
         for c in elements.get("characters", [])
     }
     prop_states = {
-        p["name"]: [s["state_name"] for s in p.get("states", [])]
+        p["name"]: [{"state_id": s["state_id"], "name": s["state_name"]}
+                    for s in p.get("states", [])]
         for p in elements.get("props", [])
     }
 
-    prompt = f"""You are a music video storyboard director.
-
-TREATMENT LOGLINE: {treatment.get("logline", "")}
-VISUAL STYLE: {treatment.get("visual_style", "")}
-
-AVAILABLE BACKGROUNDS: {json.dumps(bg_names)}
-CHARACTER STATES: {json.dumps(char_states)}
-PROP STATES: {json.dumps(prop_states)}
-
-SONG SEGMENTS:
-{json.dumps(transcript.get("segments", []), indent=2)}
-
-The song is {duration:.1f}s long. We need {num_clips} clips of 5 seconds each.
-Each clip needs TWO panels: an opening frame and a closing frame.
-RunwayML will animate between them.
-
-Return a JSON array of panels:
-[
-  {{
-    "panel_id": "panel_001",
-    "clip_index": 0,
-    "frame_type": "open",
-    "timestamp_start": 0.0,
-    "background_id": "bg_001",
-    "elements_visible": [
-      {{"state_id": "char_001_neutral", "x": 0.5, "y": 0.75, "scale": 0.4, "z_index": 1}}
-    ],
-    "scene_description": "What the viewer sees and feels",
-    "lyric_at_this_moment": "lyric text"
-  }}
-]
-
-Rules:
-- Every clip_index needs exactly one "open" and one "close" panel
-- Order: clip 0 open, clip 0 close, clip 1 open, clip 1 close, ...
-- Match visual energy to emotional content of the lyrics at that timestamp
-Return ONLY a valid JSON array (not wrapped in an object)."""
+    prompt_lines = [
+        "Create a storyboard for this music video.",
+        "",
+        "TREATMENT:",
+        f"Logline: {treatment.get('logline', '')}",
+        f"Style: {treatment.get('visual_style', '')}",
+        f"Narrative: {treatment.get('narrative_structure', '')}",
+        "",
+        "AVAILABLE BACKGROUNDS (use id to reference):",
+        json.dumps(bg_list, indent=2),
+        "",
+        "CHARACTER STATES (use state_id to reference):",
+        json.dumps(char_states, indent=2),
+        "",
+        "PROP STATES (use state_id to reference):",
+        json.dumps(prop_states, indent=2),
+        "",
+        "SONG SEGMENTS:",
+        json.dumps(transcript.get("segments", [])[:30], indent=2),
+        "",
+        f"Song duration: ~{song_duration}s. Create {num_panels} storyboard panels.",
+        "",
+        'Return a JSON object: {"panels": [{"panel_id": "panel_001", "panel_index": 0,',
+        '"timestamp_start": 0.0, "timestamp_end": 8.0, "background_id": "bg_001",',
+        '"elements_visible": [{"state_id": "char_001_neutral", "x": 0.5, "y": 0.75, "scale": 0.4, "z_index": 1}],',
+        '"energy_level": 0.6, "scene_description": "...", "lyric_at_this_moment": "..."}]}',
+        "",
+        "Rules:",
+        f"- Cover the full song duration across {num_panels} panels",
+        "- Match visual energy (0.0-1.0) to song energy at each moment",
+        "- Use background_id values from AVAILABLE BACKGROUNDS",
+        "- Use state_id values from CHARACTER/PROP STATES",
+        "- Vary character positions and states to tell the visual story",
+    ]
 
     response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": prompt}],
+        model=settings.groq_model,
         response_format={"type": "json_object"},
-        temperature=0.6
+        temperature=0.6,
+        messages=[
+            {"role": "system", "content": "You are a music video storyboard director. Return JSON only."},
+            {"role": "user", "content": "\n".join(prompt_lines)},
+        ],
     )
+
     result = json.loads(response.choices[0].message.content)
-    if isinstance(result, dict):
-        for v in result.values():
-            if isinstance(v, list):
-                return v
-    return result
+    panels = result.get("panels", result) if isinstance(result, dict) else result
+    return panels if isinstance(panels, list) else []

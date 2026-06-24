@@ -3,10 +3,16 @@ Stage 6a: Compositor
 - Takes a background image and a list of (element_image, position, scale) tuples
 - Composites them into a single storyboard panel image
 """
-import httpx
 from PIL import Image
 import io
-from utils.storage import upload_bytes
+from utils.storage import url_to_local_path, upload_bytes
+
+
+def _read_storage_url(url: str) -> bytes:
+    """Read a /storage/... URL directly from the local filesystem (no HTTP)."""
+    local_path = url_to_local_path(url)
+    with open(local_path, "rb") as f:
+        return f.read()
 
 
 def composite_panel(
@@ -19,18 +25,18 @@ def composite_panel(
     Composites elements onto a background. Returns URL of the composited panel.
 
     elements format:
-        url     : str   - public URL of transparent PNG element
+        url     : str   - /storage/... path of transparent PNG element
         x       : float - 0.0–1.0 horizontal position (center of element)
         y       : float - 0.0–1.0 vertical position (center of element)
         scale   : float - relative scale (1.0 = full canvas width)
         z_index : int   - layer order (higher = in front)
     """
-    bg_bytes = httpx.get(background_url, timeout=30).content
+    bg_bytes = _read_storage_url(background_url)
     canvas = Image.open(io.BytesIO(bg_bytes)).convert("RGBA")
     W, H = canvas.size
 
     for elem in sorted(elements, key=lambda e: e.get("z_index", 0)):
-        elem_bytes = httpx.get(elem["url"], timeout=30).content
+        elem_bytes = _read_storage_url(elem["url"])
         elem_img = Image.open(io.BytesIO(elem_bytes)).convert("RGBA")
 
         target_w = int(W * elem.get("scale", 0.25))

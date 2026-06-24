@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { api } from '@/lib/api'
 
@@ -12,6 +12,27 @@ export default function NewProjectPage() {
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
+  const [seriesList, setSeriesList] = useState<any[]>([])
+  const [seriesId, setSeriesId] = useState('')
+  const [showNewSeries, setShowNewSeries] = useState(false)
+  const [newSeriesName, setNewSeriesName] = useState('')
+
+  useEffect(() => {
+    api.series.list().then(setSeriesList).catch(() => {})
+  }, [])
+
+  const handleCreateSeries = async () => {
+    if (!newSeriesName.trim()) return
+    try {
+      const s = await api.series.create(newSeriesName.trim(), artist)
+      setSeriesList(prev => [s, ...prev])
+      setSeriesId(s.id)
+      setShowNewSeries(false)
+      setNewSeriesName('')
+    } catch {
+      alert('Could not create series.')
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -23,6 +44,7 @@ export default function NewProjectPage() {
       formData.append('title', title)
       formData.append('artist', artist)
       formData.append('file', file)
+      if (seriesId) formData.append('series_id', seriesId)
       const project = await api.projects.uploadAudio(formData)
       router.push(`/projects/${project.id}`)
     } catch (err: any) {
@@ -37,9 +59,10 @@ export default function NewProjectPage() {
         <a href="/" className="text-purple-400 text-sm hover:underline">← Back to projects</a>
 
         <h1 className="text-3xl font-bold mt-6 mb-2">New Music Video</h1>
-        <p className="text-gray-400 mb-8">Upload a song and the pipeline will handle the rest.</p>
+        <p className="text-gray-400 mb-8">Upload a song and the pipeline handles the rest.</p>
 
         <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Title */}
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1">Song Title *</label>
             <input
@@ -52,6 +75,7 @@ export default function NewProjectPage() {
             />
           </div>
 
+          {/* Artist */}
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1">Artist</label>
             <input
@@ -63,6 +87,55 @@ export default function NewProjectPage() {
             />
           </div>
 
+          {/* Series */}
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1">
+              Part of a Series?
+              <span className="text-gray-500 font-normal ml-2">— links this video to recurring characters & style</span>
+            </label>
+            <div className="flex gap-2">
+              <select
+                value={seriesId}
+                onChange={e => setSeriesId(e.target.value)}
+                className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-purple-500"
+              >
+                <option value="">— Standalone video —</option>
+                {seriesList.map(s => (
+                  <option key={s.id} value={s.id}>{s.name}{s.artist ? ` (${s.artist})` : ''}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => setShowNewSeries(v => !v)}
+                className="px-3 border border-gray-700 rounded-lg text-gray-400 hover:border-purple-500 hover:text-purple-400 transition text-sm"
+              >
+                + New
+              </button>
+            </div>
+
+            {showNewSeries && (
+              <div className="mt-2 flex gap-2">
+                <input
+                  type="text"
+                  value={newSeriesName}
+                  onChange={e => setNewSeriesName(e.target.value)}
+                  placeholder="Series name…"
+                  className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-600 text-sm focus:outline-none focus:border-purple-500"
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  onClick={handleCreateSeries}
+                  disabled={!newSeriesName.trim()}
+                  className="px-3 bg-purple-700 hover:bg-purple-600 disabled:bg-gray-700 rounded-lg text-sm text-white transition"
+                >
+                  Create
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Audio file */}
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1">Audio File *</label>
             <div
@@ -103,7 +176,7 @@ export default function NewProjectPage() {
             disabled={!file || !title || uploading}
             className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold py-3 rounded-lg transition-colors"
           >
-            {uploading ? 'Uploading & starting analysis...' : 'Upload & Start Pipeline'}
+            {uploading ? 'Uploading & starting analysis…' : 'Upload & Start Pipeline'}
           </button>
         </form>
 
@@ -114,7 +187,6 @@ export default function NewProjectPage() {
             <li>AI generates a visual treatment — you review and approve</li>
             <li>Backgrounds and character elements are generated (~5–10 min)</li>
             <li>Storyboard is built — you review and approve panel order</li>
-            <li>5-second clips are animated via RunwayML (~15–20 min)</li>
             <li>Final video is assembled with your audio</li>
           </ol>
         </div>
