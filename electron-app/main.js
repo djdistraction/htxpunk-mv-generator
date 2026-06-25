@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, Tray } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage } = require('electron');
 const path = require('path');
 const isDev = require('electron-is-dev');
 const { spawn } = require('child_process');
@@ -22,6 +22,24 @@ let mainWindow;
 let tray;
 let backendProcess;
 let frontendUrl = isDev ? 'http://localhost:3000' : 'app://react';
+
+// Embedded fallback icon (32px) so the tray never depends on a file existing.
+const FALLBACK_ICON_DATA_URL =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAoUlEQVR4nGNgGOmAEZdEjdXb/9S2rOWYMIZ9TPSyHJe5GA6gleW4zGfCJ0kPRzBhE6SnI7CmAXoCFmIVNh8VwhCrtX5Hshp0MOAhMOqAUQcQnQuwAWypnlQw4CEw6oABdwBFiZCYopgQGPAQGHXAgDsA3kqld4uIgQHSSh7wEBg8DsDWaaAlgNnHhE2QXpZjOIAejkA3H2saoJUj6B3NRAEAnLAymQiraYcAAAAASUVORK5CYII=';
+
+// Build a nativeImage from a file, falling back to the embedded icon if the
+// file is missing or unreadable. Never throws.
+function loadIconImage(filePath) {
+  try {
+    if (filePath && fs.existsSync(filePath)) {
+      const img = nativeImage.createFromPath(filePath);
+      if (!img.isEmpty()) return img;
+    }
+  } catch (e) {
+    console.warn('Icon load failed, using fallback:', e.message);
+  }
+  return nativeImage.createFromDataURL(FALLBACK_ICON_DATA_URL);
+}
 
 // Paths
 const appDataPath = path.join(os.homedir(), '.htxpunk-mv-generator');
@@ -206,7 +224,7 @@ function createWindow(config) {
       contextIsolation: true,
       preload: preload,
     },
-    icon: path.join(__dirname, 'assets', 'icon.png'),
+    icon: loadIconImage(path.join(__dirname, 'assets', 'icon.png')),
   });
 
   if (isDev) {
@@ -235,7 +253,7 @@ function showSetupWizard() {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
     },
-    icon: path.join(__dirname, 'assets', 'icon.png'),
+    icon: loadIconImage(path.join(__dirname, 'assets', 'icon.png')),
   });
 
   const setupFile = path.join(__dirname, 'setup.html');
@@ -325,17 +343,21 @@ app.on('ready', async () => {
     // Create main window
     createWindow(config);
 
-    // Create tray
-    const trayIcon = path.join(__dirname, 'assets', 'tray-icon.png');
-    tray = new Tray(trayIcon);
-    const contextMenu = createTrayMenu(config);
-    tray.setContextMenu(contextMenu);
-    tray.setTitle('HTXpunk MV');
-    tray.on('click', () => {
-      if (mainWindow) {
-        mainWindow.isVisible() ? mainWindow.hide() : mainWindow.show();
-      }
-    });
+    // Create tray (non-fatal: a tray failure should never crash the app)
+    try {
+      const trayImage = loadIconImage(path.join(__dirname, 'assets', 'tray-icon.png'));
+      tray = new Tray(trayImage);
+      const contextMenu = createTrayMenu(config);
+      tray.setContextMenu(contextMenu);
+      tray.setToolTip('HTXpunk MV Generator');
+      tray.on('click', () => {
+        if (mainWindow) {
+          mainWindow.isVisible() ? mainWindow.hide() : mainWindow.show();
+        }
+      });
+    } catch (trayErr) {
+      console.warn('Tray icon could not be created (continuing without it):', trayErr.message);
+    }
   } catch (err) {
     console.error('Startup error:', err);
     require('electron').dialog.showErrorBox('Startup Error', err.message);
