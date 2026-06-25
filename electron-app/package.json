@@ -1,66 +1,41 @@
 {
   "name": "htxpunk-mv-generator",
   "version": "1.0.0",
-  "description": "AI-powered music video generator - Desktop application",
-  "main": "dist/main.js",
-  "homepage": "./",
+  "description": "HTXpunk Music Video Generator - Desktop App",
+  "main": "main.js",
   "author": "HTXpunk Productions",
   "license": "Proprietary",
   "scripts": {
-    "dev": "concurrently \"npm run dev:electron\" \"npm run dev:renderer\"",
-    "dev:electron": "electron-dev .",
-    "dev:renderer": "react-scripts start",
-    "build": "npm run build:renderer && npm run build:electron",
-    "build:renderer": "react-scripts build",
-    "build:electron": "electron-builder",
-    "dist": "npm run build && electron-builder -p never",
-    "dist:mac": "npm run build && electron-builder --mac -p never",
-    "dist:win": "npm run build && electron-builder --win -p never",
-    "dist:linux": "npm run build && electron-builder --linux -p never"
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux"
   },
   "dependencies": {
-    "axios": "^1.7.2",
-    "electron-squirrel-startup": "^1.1.1",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-scripts": "5.0.1",
-    "web-vitals": "^2.1.4"
+    "electron-is-dev": "^2.0.0"
   },
   "devDependencies": {
-    "@testing-library/jest-dom": "^5.16.5",
-    "@testing-library/react": "^13.4.0",
-    "@testing-library/user-event": "^13.5.0",
-    "@types/electron": "^1.6.10",
-    "concurrently": "^8.2.0",
     "electron": "^27.0.0",
-    "electron-builder": "^24.6.4",
-    "electron-dev": "^1.0.1",
-    "typescript": "^4.9.5"
+    "electron-builder": "^24.6.4"
   },
   "build": {
     "appId": "tv.thevoodoohut.mvgenerator",
     "productName": "HTXpunk MV Generator",
-    "directories": {
-      "buildResources": "assets"
-    },
     "files": [
-      "dist/**/*",
-      "node_modules/**/*",
-      "build/**/*",
+      "main.js",
+      "preload.js",
+      "setup.html",
+      "public/**/*",
       "backend/**/*",
       "!backend/storage/**/*",
-      "!backend/.pytest_cache/**/*",
-      "!backend/__pycache__/**/*",
-      "!backend/htxpunk.db"
+      "!backend/__pycache__/**/*"
     ],
     "win": {
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
-        },
-        {
-          "target": "portable",
           "arch": ["x64"]
         }
       ]
@@ -69,16 +44,13 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
       "shortcutName": "HTXpunk MV Generator"
     },
     "mac": {
-      "target": ["dmg", "zip"],
-      "category": "public.app-category.video"
+      "target": ["dmg", "zip"]
     },
     "linux": {
-      "target": ["AppImage", "deb"],
-      "category": "Video"
+      "target": ["AppImage"]
     }
   }
 }
