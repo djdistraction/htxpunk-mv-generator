@@ -58,7 +58,7 @@ function loadConfig() {
   }
   return {
     groqApiKey: '',
-    hfToken: '',
+    geminiApiKey: '',
     storagePath: path.join(appDataPath, 'storage'),
     backendPort: 8000,
     frontendPort: 3000,
@@ -75,7 +75,8 @@ function saveConfig(config) {
 // Generate .env file
 function generateEnvFile(config) {
   const envContent = `GROQ_API_KEY=${config.groqApiKey}
-HF_TOKEN=${config.hfToken}
+GEMINI_API_KEY=${config.geminiApiKey || ''}
+IMAGE_BACKEND=auto
 STORAGE_BACKEND=local
 LOCAL_STORAGE_PATH=${config.storagePath}
 DATABASE_URL=sqlite+aiosqlite:///${path.join(config.storagePath, 'htxpunk.db')}
@@ -144,7 +145,8 @@ function startBackend(config) {
         PYTHONUNBUFFERED: '1',
         PYTHONPATH: backendPath,
         GROQ_API_KEY: config.groqApiKey,
-        HF_TOKEN: config.hfToken,
+        GEMINI_API_KEY: config.geminiApiKey || '',
+        IMAGE_BACKEND: 'auto',
         STORAGE_BACKEND: 'local',
         LOCAL_STORAGE_PATH: config.storagePath,
         DATABASE_URL: `sqlite+aiosqlite:///${path.join(config.storagePath, 'htxpunk.db')}`,

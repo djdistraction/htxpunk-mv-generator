@@ -9,19 +9,13 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
 
-    # Image generation — HF Inference Providers (swap to local ComfyUI later)
-    hf_token: str = ""
-    hf_image_model: str = "black-forest-labs/FLUX.1-schnell"
-    # Provider routing for the new HF Inference Providers system.
-    # "auto" lets HF pick an available provider (default). You can pin a
-    # specific one — e.g. "fal-ai", "replicate", "nebius", "together" — via
-    # HF_PROVIDER in .env if "auto" can't serve the model on your account.
-    hf_provider: str = "auto"
-    # Image backend: "auto" uses HF FLUX when HF_TOKEN is set, otherwise falls
-    # back to the offline placeholder renderer. Force one with:
-    #   "huggingface" = always call HF (errors if no token)
+    # Image generation — Gemini free tier by default ($0, 500 images/day)
+    gemini_api_key: str = ""
+    # Image backend: "auto" uses Gemini when GEMINI_API_KEY is set, otherwise
+    # falls back to the offline placeholder renderer. Force one with:
+    #   "gemini" = always call Gemini (errors if no key)
     #   "placeholder" = always render local placeholder frames (no API, $0,
-    #                    works offline — useful for end-to-end demos/tests)
+    #                    works offline — useful for demos/tests)
     image_backend: str = "auto"
 
     # Audio — local Whisper model size: tiny / base / small / medium
@@ -63,8 +57,8 @@ def validate_settings():
     warnings = []
     if not settings.groq_api_key or settings.groq_api_key == "gsk_YOUR_API_KEY_HERE":
         warnings.append("⚠️  GROQ_API_KEY not set — set it in .env to use LLM features")
-    if not settings.hf_token or settings.hf_token == "hf_YOUR_TOKEN_HERE":
-        warnings.append("⚠️  HF_TOKEN not set — set it in .env to use image generation")
+    if not settings.gemini_api_key or settings.gemini_api_key == "AIzaSy_YOUR_API_KEY_HERE":
+        logger.info("ℹ️  GEMINI_API_KEY not set — using free offline placeholder images ($0)")
 
     if warnings:
         logger.warning("Configuration warnings:")

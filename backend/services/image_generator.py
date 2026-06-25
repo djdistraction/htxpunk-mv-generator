@@ -1,21 +1,13 @@
 """
-Stages 4-5 — Image Generation
-Uses Hugging Face Inference Providers with FLUX.1-schnell, with an offline
-placeholder fallback so the whole pipeline runs end-to-end at $0.
-
-NOTE: HuggingFace retired the old serverless endpoint
-(api-inference.huggingface.co) and replaced it with the Inference Providers
-system, which routes through router.huggingface.co. The InferenceClient picks
-a provider via the `provider` argument ("auto" by default). Usage is billed
-against your HF account; free accounts get a small monthly credit.
+Image Generation — Gemini 2.5 Flash Image with offline fallback
 
 Image backend selection (settings.image_backend):
-  "auto"        — HF FLUX when HF_TOKEN is present, else placeholder
-  "huggingface" — always call HF (raises if no token)
-  "placeholder" — always render local placeholder frames (no API, offline)
+  "auto"        — Gemini when GEMINI_API_KEY is set, else placeholder
+  "gemini"      — always call Gemini (raises if no key)
+  "placeholder" — always render local placeholder frames (no API, offline, $0)
 
-To pin a specific provider (e.g. fal-ai, replicate, nebius): set HF_PROVIDER.
-When you have a local GPU: point at your own ComfyUI API instead.
+Gemini free tier: 500 images/day, no credit card needed.
+Placeholder renderer: offline, no API, works without any credentials.
 """
 import io
 import time
@@ -29,15 +21,15 @@ from utils.storage import upload_bytes
 # ── Backend selection ─────────────────────────────────────────────────────────
 
 def _use_placeholder() -> bool:
-    """Decide whether to render placeholder frames instead of calling HF."""
+    """Decide whether to render placeholder frames instead of calling Gemini."""
     backend = (settings.image_backend or "auto").lower()
     if backend == "placeholder":
         return True
-    if backend == "huggingface":
+    if backend == "gemini":
         return False
-    # auto: use placeholder when no usable HF token is configured
-    token = (settings.hf_token or "").strip()
-    return not token or token == "hf_YOUR_TOKEN_HERE"
+    # auto: use placeholder when no usable Gemini key is configured
+    key = (settings.gemini_api_key or "").strip()
+    return not key or key == "AIzaSy_YOUR_API_KEY_HERE"
 
 
 # ── Placeholder renderer (offline, no API) ────────────────────────────────────
@@ -128,72 +120,48 @@ def render_placeholder(prompt: str, width: int, height: int,
     return buf.getvalue()
 
 
-# ── HF FLUX renderer ──────────────────────────────────────────────────────────
+# ── Gemini renderer ──────────────────────────────────────────────────────────
 
-def _generate_hf(full_prompt: str, width: int, height: int) -> bytes:
-    from huggingface_hub import InferenceClient
-    # provider goes in the constructor; "auto" lets HF route to an available
-    # provider for the model. api_key takes the HF token for HF routing.
-    client = InferenceClient(provider=settings.hf_provider, api_key=settings.hf_token)
+def _generate_gemini(full_prompt: str, width: int, height: int, negative_prompt: str = "") -> bytes:
+    """Generate image using Gemini 2.5 Flash Image."""
+    from gemini_image_generator import generate_with_gemini
+    import tempfile
 
-    max_retries = 3
-    retry_delay = 5
-    for attempt in range(max_retries):
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        output_path = f.name
+
+    try:
+        output_path = generate_with_gemini(
+            api_key=settings.gemini_api_key,
+            prompt=full_prompt,
+            negative_prompt=negative_prompt,
+            width=width,
+            height=height,
+            output_path=output_path,
+        )
+        with open(output_path, "rb") as f:
+            return f.read()
+    finally:
+        import os
         try:
-            # HF routing can rate-limit; a small pause between calls avoids 429s
-            time.sleep(2)
-            image = client.text_to_image(
-                full_prompt,
-                model=settings.hf_image_model,
-                width=width,
-                height=height,
-            )
-            buf = io.BytesIO()
-            image.save(buf, format="PNG")
-            return buf.getvalue()
-        except Exception as e:
-            error_str = str(e)
-            # A dead/old endpoint hostname is a permanent failure — don't burn
-            # retries on it. This points at a stale huggingface_hub install.
-            if "api-inference.huggingface.co" in error_str and (
-                "getaddrinfo" in error_str or "NameResolutionError" in error_str
-            ):
-                raise RuntimeError(
-                    "huggingface_hub is calling the retired endpoint "
-                    "'api-inference.huggingface.co'. Upgrade the library "
-                    "(pip install -U huggingface_hub, >=0.28) so it uses the new "
-                    "Inference Providers router, then restart the backend."
-                ) from e
-            if attempt < max_retries - 1:
-                if "NameResolutionError" in error_str or "getaddrinfo failed" in error_str:
-                    print(f"Network error (DNS/connectivity), retrying in {retry_delay}s... (attempt {attempt + 1}/{max_retries})")
-                    time.sleep(retry_delay)
-                    retry_delay = min(retry_delay * 2, 30)
-                elif "401" in error_str or "Unauthorized" in error_str:
-                    raise ValueError(f"HuggingFace authentication failed. Check HF_TOKEN in .env is valid. Error: {error_str}")
-                elif "429" in error_str:
-                    print(f"Rate limited, waiting {retry_delay * 2}s... (attempt {attempt + 1}/{max_retries})")
-                    time.sleep(retry_delay * 2)
-                else:
-                    print(f"Image generation error, retrying... (attempt {attempt + 1}/{max_retries}): {error_str}")
-                    time.sleep(retry_delay)
-            else:
-                raise
+            os.unlink(output_path)
+        except OSError:
+            pass
 
 
 def generate_image(prompt: str, style_suffix: str = "", width: int = 1024, height: int = 576,
-                   label: str = "", subtitle: str = "") -> bytes:
+                   label: str = "", subtitle: str = "", negative_prompt: str = "") -> bytes:
     """Generate an image and return raw PNG bytes.
 
-    Routes to HF FLUX or the offline placeholder renderer based on
-    settings.image_backend. Retries HF on transient network errors.
+    Routes to Gemini or the offline placeholder renderer based on
+    settings.image_backend. Gemini is the default cloud backend (free tier).
     """
     full_prompt = f"{prompt}. {style_suffix}".strip(" .")
 
     if _use_placeholder():
         return render_placeholder(full_prompt, width, height, label=label, subtitle=subtitle)
 
-    return _generate_hf(full_prompt, width, height)
+    return _generate_gemini(full_prompt, width, height, negative_prompt)
 
 
 def generate_background(project_id: str, bg_id: str, prompt: str, style_suffix: str = "") -> str:

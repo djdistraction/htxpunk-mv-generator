@@ -280,24 +280,30 @@
 
             <!-- Step 1: API Keys -->
             <div class="setup-step active" id="step1">
-                <div class="step-title">Get API Keys</div>
+                <div class="step-title">Configure AI Services</div>
                 <div class="step-description">
-                    You'll need two free API keys to power your videos.
+                    Choose your AI providers. All are free tier, and image generation is optional.
                 </div>
 
                 <div class="form-group">
-                    <label>Groq API Key *</label>
-                    <input type="password" id="groqApiKey" placeholder="gsk_..." />
+                    <label>Groq API Key (LLM) *</label>
+                    <div style="display: flex; gap: 8px;">
+                        <input type="password" id="groqApiKey" placeholder="gsk_..." style="flex: 1;" />
+                        <span id="groqValidation" style="padding: 12px; color: #888;">○</span>
+                    </div>
                     <div class="help-text">
-                        Get free at <a href="https://console.groq.com" target="_blank">console.groq.com</a> (no credit card needed)
+                        Get free at <a href="https://console.groq.com" target="_blank">console.groq.com</a> (required; powers text analysis)
                     </div>
                 </div>
 
                 <div class="form-group">
-                    <label>HuggingFace Token *</label>
-                    <input type="password" id="hfToken" placeholder="hf_..." />
+                    <label>Gemini API Key (Image Generation) — Optional</label>
+                    <div style="display: flex; gap: 8px;">
+                        <input type="password" id="geminiApiKey" placeholder="AIzaSy..." style="flex: 1;" />
+                        <span id="geminiValidation" style="padding: 12px; color: #888;">○</span>
+                    </div>
                     <div class="help-text">
-                        Get free at <a href="https://huggingface.co/settings/tokens" target="_blank">huggingface.co/settings/tokens</a>
+                        Get free at <a href="https://aistudio.google.com" target="_blank">aistudio.google.com</a> (500 free images/day). Skip this and frames will render as $0 offline placeholders.
                     </div>
                 </div>
 
@@ -407,22 +413,72 @@
             }
         }
 
-        function validateStep(step) {
+        async function testGroqKey(apiKey) {
+            try {
+                const response = await fetch('https://api.groq.com/openai/v1/models', {
+                    headers: { 'Authorization': `Bearer ${apiKey}` },
+                    timeout: 5000,
+                });
+                return response.ok;
+            } catch (err) {
+                return false;
+            }
+        }
+
+        async function testGeminiKey(apiKey) {
+            try {
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2-5-flash:generateContent?key=${apiKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contents: [{ parts: [{ text: 'test' }] }] }),
+                    timeout: 5000,
+                });
+                return response.ok;
+            } catch (err) {
+                return false;
+            }
+        }
+
+        async function validateStep(step) {
             const errorEl = document.getElementById(`step${step}Error`);
             if (errorEl) errorEl.style.display = 'none';
 
             if (step === 1) {
                 const groqKey = document.getElementById('groqApiKey').value.trim();
-                const hfToken = document.getElementById('hfToken').value.trim();
+                const geminiKey = document.getElementById('geminiApiKey').value.trim();
 
                 if (!groqKey) {
                     showError('step1Error', 'Please enter your Groq API key');
                     return false;
                 }
-                if (!hfToken) {
-                    showError('step1Error', 'Please enter your HuggingFace token');
+
+                // Validate Groq key
+                document.getElementById('groqValidation').textContent = '⏳';
+                const groqValid = await testGroqKey(groqKey);
+                document.getElementById('groqValidation').textContent = groqValid ? '✓' : '✗';
+                document.getElementById('groqValidation').style.color = groqValid ? '#3c3' : '#c33';
+
+                if (!groqValid) {
+                    showError('step1Error', 'Groq API key is invalid. Check it at https://console.groq.com/keys');
                     return false;
                 }
+
+                // Gemini is optional, but validate if provided
+                if (geminiKey) {
+                    document.getElementById('geminiValidation').textContent = '⏳';
+                    const geminiValid = await testGeminiKey(geminiKey);
+                    document.getElementById('geminiValidation').textContent = geminiValid ? '✓' : '✗';
+                    document.getElementById('geminiValidation').style.color = geminiValid ? '#3c3' : '#c33';
+
+                    if (!geminiValid) {
+                        showError('step1Error', 'Gemini API key is invalid. Get one at https://aistudio.google.com');
+                        return false;
+                    }
+                } else {
+                    document.getElementById('geminiValidation').textContent = 'optional';
+                    document.getElementById('geminiValidation').style.color = '#888';
+                }
+
                 return true;
             }
             if (step === 2) {
@@ -457,7 +513,7 @@
         function finishSetup() {
             const config = {
                 groqApiKey: document.getElementById('groqApiKey').value,
-                hfToken: document.getElementById('hfToken').value,
+                geminiApiKey: document.getElementById('geminiApiKey').value,
                 storagePath: document.getElementById('storagePath').value,
                 backendPort: parseInt(document.getElementById('backendPort').value),
                 frontendPort: 3000,
@@ -479,8 +535,10 @@
         // Set default storage path
         if (window.electron) {
             window.electron.getConfig().then(config => {
-                document.getElementById('storagePath').value = config.storagePath;
-                document.getElementById('backendPort').value = config.backendPort;
+                document.getElementById('storagePath').value = config.storagePath || '';
+                document.getElementById('backendPort').value = config.backendPort || 8000;
+                document.getElementById('groqApiKey').value = config.groqApiKey || '';
+                document.getElementById('geminiApiKey').value = config.geminiApiKey || '';
                 document.getElementById('summaryPath').textContent = config.storagePath;
                 document.getElementById('summaryPort').textContent = config.backendPort;
             });
