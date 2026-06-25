@@ -61,8 +61,9 @@ This is a full-stack AI music video generator that transforms song uploads into 
 | Audio | Faster-Whisper (CPU int8 quantized) | ~140MB model |
 | Image Gen | HuggingFace FLUX.1-schnell free API | 2s rate limit |
 | Background Removal | rembg + onnxruntime | Local, no API needed |
-| Video Composition | Remotion (React) | Node.js based video rendering |
-| Video Assembly | FFmpeg | Ken Burns motion, audio sync |
+| Image fallback | Pillow placeholder renderer | Offline frames when no HF_TOKEN ($0) |
+| Video Assembly | FFmpeg (default) | Ken Burns motion, audio sync, per-shot timing |
+| Video Assembly (opt-in) | Remotion (React) | Node-based; set VIDEO_BACKEND=remotion |
 | Task Queue | In-memory orchestrator (no Celery/Redis) | Runs in main uvicorn process |
 
 ---
@@ -195,6 +196,9 @@ layout.tsx (metadata, Tailwind setup)
     ├── treatment/
     │   ├── page.tsx (route wrapper)
     │   └── TreatmentDetail.tsx (review & approve treatment)
+    ├── manifest/
+    │   ├── page.tsx (route wrapper)
+    │   └── ManifestDetail.tsx (shot manifest table, approval/rejection)
     ├── elements/
     │   ├── page.tsx (route wrapper)
     │   └── ElementsList.tsx (asset gallery with regenerate)
@@ -210,8 +214,8 @@ layout.tsx (metadata, Tailwind setup)
 - Axios-based with 2-minute timeout for uploads
 - Auto-logs network errors with backend URL hint
 - Methods grouped by resource:
-  - `api.projects.{list, get, uploadAudio}`
-  - `api.pipeline.{approveTreatment, reviseTreatment, approveStoryboard, regenerateImage}`
+  - `api.projects.{list, get, uploadAudio, addReferences}`
+  - `api.pipeline.{approveTreatment, reviseTreatment, getShotManifests, approveManifests, reviseManifests, importProductionGuide, approveStoryboard, regenerateImage}`
   - `api.assets.list`
   - `api.series.{list, get, create}`
 
@@ -249,7 +253,73 @@ layout.tsx (metadata, Tailwind setup)
 
 **series** (for recurring characters/style)
 - id, name, artist
-- style_prompt, characters (JSON), color_palette (JSON)
+- style_prompt, characters (JSON), color_palette (JSON), continuity_bible (JSON)
+
+**shot_manifests** (production guide structure)
+- id (UUID)
+- project_id (FK)
+- shot_number, start_time, end_time, audio_cue
+- location, characters (JSON), camera, action, mood
+- continuity_rules (JSON), negative_constraints (JSON)
+- status (draft | reviewing | approved | locked | rejected)
+- locked_prompts (JSON, frozen after approval), asset_refs (JSON)
+
+---
+
+## Shot Manifest System
+
+The shot manifest layer provides production-grade structure for video generation:
+
+### Using Production Guides
+
+Import a production guide Excel file (e.g., shot sheet with timecodes, characters, continuity rules):
+
+```bash
+# From the frontend: upload file via UI
+POST /api/pipeline/{project_id}/import-production-guide
+
+# The API parses the file and creates shot manifests
+# Project transitions to awaiting_manifest_approval for human review
+```
+
+### Seeding the WOW OH! Demo
+
+The canonical demo ships embedded — **no external file needed**:
+
+```bash
+cd backend
+python seed_wow_oh.py
+# Optional: import from an Excel shot sheet instead
+python seed_wow_oh.py /path/to/WOW_OH_Production_Shot_Sheet.xlsx
+```
+
+This creates:
+- A "WOW OH!" series with locked characters + continuity bible (`services/wow_oh_data.py`)
+- A demo project with 30 shot manifests parked at `awaiting_manifest_approval`
+
+Approve the plan in the UI (or via the API) and the pipeline renders a full
+video. With no `HF_TOKEN`, frames render as offline placeholders
+(`IMAGE_BACKEND=placeholder`) so you get a complete preview video at $0.
+
+### Manifest-driven generation
+
+Once manifests are approved (`manifest_approved` stage), `run_manifest_generation`
+turns **each shot into a full-frame image**: it builds the prompt from the shot
+(characters + action + location + camera + mood) plus the series continuity
+bible (palette, motion style), and a negative prompt from the shot's
+`negative_constraints` + the bible's `banned_mistakes`. Each frame becomes a
+storyboard panel carrying its shot duration, then the project pauses at
+`awaiting_storyboard_approval`. Approving assembles the video (ffmpeg) using the
+per-shot timecodes. See `services/shot_prompt.py`.
+
+### Workflow
+
+1. **Import / seed**: production guide (Excel) or embedded data → shot manifests (draft)
+2. **Review**: human reviews shot manifests for accuracy and continuity
+3. **Approve**: locks the plan → `manifest_approved` → per-shot frame generation
+4. **Reject**: request changes → regenerates treatment with feedback
+5. **Generate**: locked manifests drive image generation with frozen prompts + constraints
+6. **Render**: approve storyboard → ffmpeg assembles the timed Ken Burns video
 
 ---
 

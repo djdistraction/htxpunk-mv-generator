@@ -15,6 +15,7 @@ const STAGE_LABELS: Record<string, string> = {
   elements_ready: 'Elements designed',
   generating_images: 'Generating images…',
   images_ready: 'Images ready',
+  awaiting_manifest_approval: '✋ Production plan ready for review',
   building_storyboard: 'Building storyboard…',
   awaiting_storyboard_approval: '✋ Storyboard ready for review',
   storyboard_approved: 'Storyboard approved',
@@ -25,6 +26,7 @@ const STAGE_LABELS: Record<string, string> = {
 
 const APPROVAL_LINKS: Record<string, { label: string; href: string }> = {
   awaiting_treatment_approval: { label: 'Review Creative Vision →', href: 'treatment' },
+  awaiting_manifest_approval: { label: 'Review Production Plan →', href: 'manifest' },
   awaiting_storyboard_approval: { label: 'Review Storyboard →', href: 'storyboard' },
 }
 
@@ -33,6 +35,7 @@ const STAGE_ORDER = [
   'treatment_pending', 'awaiting_treatment_approval', 'treatment_approved',
   'extracting_elements', 'elements_ready',
   'generating_images', 'images_ready',
+  'awaiting_manifest_approval',
   'building_storyboard', 'awaiting_storyboard_approval', 'storyboard_approved',
   'assembling', 'complete',
 ]
@@ -142,9 +145,10 @@ export default function ProjectDetail({ id }: { id: string }) {
         )}
 
         {/* Sub-page links */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           {[
             { label: 'Treatment', href: 'treatment', stages: ['awaiting_treatment_approval'] },
+            { label: 'Manifest', href: 'manifest', stages: ['awaiting_manifest_approval'] },
             { label: 'Elements', href: 'elements', stages: ['elements_ready', 'generating_images', 'images_ready', 'building_storyboard', 'awaiting_storyboard_approval', 'storyboard_approved', 'assembling', 'complete'] },
             { label: 'Storyboard', href: 'storyboard', stages: ['awaiting_storyboard_approval', 'storyboard_approved', 'assembling', 'complete'] },
             { label: 'Production', href: 'production', stages: ['assembling', 'complete'] },

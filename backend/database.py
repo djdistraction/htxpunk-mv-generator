@@ -66,6 +66,29 @@ class SeriesRow(Base):
     style_prompt = Column(Text)    # carries into every project treatment
     characters = Column(Text)      # JSON — character definitions to seed element extraction
     color_palette = Column(Text)   # JSON
+    continuity_bible = Column(Text)   # JSON — locked visual universe rules, banned mistakes, references
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+class ShotManifestRow(Base):
+    """Shot manifest — production guide structure with locked visual plan."""
+    __tablename__ = "shot_manifests"
+    id = Column(String, primary_key=True)
+    project_id = Column(String)      # FK to projects
+    shot_number = Column(String)     # e.g., "1", "2a" for editorial numbering
+    start_time = Column(String)      # timecode or seconds (e.g., "00:00:05" or "5.0")
+    end_time = Column(String)
+    audio_cue = Column(Text)         # lyric or sound trigger
+    location = Column(String)        # scene location (e.g., "office", "club")
+    characters = Column(Text)        # JSON — list of characters & states in this shot
+    camera = Column(Text)            # camera instruction (e.g., "wide establishing, pan left")
+    action = Column(Text)            # visual action/what happens
+    mood = Column(String)            # emotional tone
+    continuity_rules = Column(Text)  # JSON — rules for consistency with other shots
+    negative_constraints = Column(Text)  # JSON — what NOT to generate
+    status = Column(String, default="draft")  # draft | reviewing | approved | locked | rejected
+    locked_prompts = Column(Text)    # JSON — approved prompts after review, frozen for generation
+    asset_refs = Column(Text)        # JSON — list of asset IDs created from this shot
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow)
 
@@ -82,6 +105,7 @@ def _migrate_db():
     _add_column_if_missing(conn, "projects", "revision_notes", "TEXT")
     _add_column_if_missing(conn, "projects", "panel_order", "TEXT")
     _add_column_if_missing(conn, "projects", "user_brief", "TEXT")
+    _add_column_if_missing(conn, "series", "continuity_bible", "TEXT")
     conn.commit()
     conn.close()
 
@@ -262,7 +286,7 @@ def db_get_series(series_id: str) -> dict | None:
     if not row:
         return None
     d = dict(row)
-    for field in ("characters", "color_palette"):
+    for field in ("characters", "color_palette", "continuity_bible"):
         if d.get(field):
             d[field] = json.loads(d[field])
     return d
@@ -275,7 +299,7 @@ def db_list_series() -> list[dict]:
     result = []
     for row in rows:
         d = dict(row)
-        for field in ("characters", "color_palette"):
+        for field in ("characters", "color_palette", "continuity_bible"):
             if d.get(field):
                 d[field] = json.loads(d[field])
         result.append(d)
@@ -289,6 +313,77 @@ def db_update_series(series_id: str, **kwargs):
         conn.execute(
             f"UPDATE series SET {key}=?, updated_at=? WHERE id=?",
             (value, datetime.utcnow().isoformat(), series_id)
+        )
+    conn.commit()
+    conn.close()
+
+
+# ── Shot Manifest helpers ────────────────────────────────────────────────────
+
+def db_create_shot_manifest(project_id: str, shot_number: str, start_time: str, end_time: str,
+                            audio_cue: str = "", location: str = "", characters: list = None,
+                            camera: str = "", action: str = "", mood: str = "",
+                            continuity_rules: list = None, negative_constraints: list = None) -> str:
+    """Create a new shot manifest. Returns manifest_id."""
+    manifest_id = str(uuid.uuid4())
+    conn = _sync_db()
+    now = datetime.utcnow().isoformat()
+    conn.execute(
+        """INSERT INTO shot_manifests
+           (id, project_id, shot_number, start_time, end_time, audio_cue, location,
+            characters, camera, action, mood, continuity_rules, negative_constraints,
+            status, created_at, updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (manifest_id, project_id, shot_number, start_time, end_time, audio_cue, location,
+         json.dumps(characters or []), camera, action, mood,
+         json.dumps(continuity_rules or []), json.dumps(negative_constraints or []),
+         "draft", now, now)
+    )
+    conn.commit()
+    conn.close()
+    return manifest_id
+
+def db_get_shot_manifest(manifest_id: str) -> dict | None:
+    """Retrieve a single shot manifest."""
+    conn = _sync_db()
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM shot_manifests WHERE id=?", (manifest_id,)).fetchone()
+    conn.close()
+    if not row:
+        return None
+    d = dict(row)
+    for field in ("characters", "continuity_rules", "negative_constraints", "locked_prompts", "asset_refs"):
+        if d.get(field):
+            d[field] = json.loads(d[field])
+    return d
+
+def db_list_shot_manifests(project_id: str) -> list[dict]:
+    """List all shot manifests for a project, ordered by start_time."""
+    conn = _sync_db()
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT * FROM shot_manifests WHERE project_id=? ORDER BY start_time ASC",
+        (project_id,)
+    ).fetchall()
+    conn.close()
+    result = []
+    for row in rows:
+        d = dict(row)
+        for field in ("characters", "continuity_rules", "negative_constraints", "locked_prompts", "asset_refs"):
+            if d.get(field):
+                d[field] = json.loads(d[field])
+        result.append(d)
+    return result
+
+def db_update_shot_manifest(manifest_id: str, **kwargs):
+    """Update a shot manifest."""
+    conn = _sync_db()
+    for key, value in kwargs.items():
+        if isinstance(value, (dict, list)):
+            value = json.dumps(value)
+        conn.execute(
+            f"UPDATE shot_manifests SET {key}=?, updated_at=? WHERE id=?",
+            (value, datetime.utcnow().isoformat(), manifest_id)
         )
     conn.commit()
     conn.close()

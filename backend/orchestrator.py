@@ -41,12 +41,14 @@ STAGE_WORKERS: dict[str, str] = {
     "treatment_approved":  "run_element_extraction",
     "elements_ready":      "run_image_generation",
     "images_ready":        "run_storyboard_build",
+    "manifest_approved":   "run_manifest_generation",
     "storyboard_approved": "run_video_assembly",
 }
 
 # Stages where a human must act — orchestrator skips them
 HUMAN_GATES = {
     "awaiting_treatment_approval",
+    "awaiting_manifest_approval",
     "awaiting_storyboard_approval",
 }
 
@@ -57,12 +59,13 @@ TERMINAL_STAGES = {"complete", "error"}
 # If the server restarts mid-flight, reset these back to their dispatch stage
 # so the orchestrator can re-pick them up.
 TRANSITIONAL_RESET: dict[str, str] = {
-    "analyzing":            "uploaded",
-    "treatment_pending":    "analyzed",
-    "extracting_elements":  "treatment_approved",
-    "generating_images":    "elements_ready",
-    "building_storyboard":  "images_ready",
-    "assembling":           "storyboard_approved",
+    "analyzing":                  "uploaded",
+    "treatment_pending":          "analyzed",
+    "extracting_elements":        "treatment_approved",
+    "generating_images":          "elements_ready",
+    "building_storyboard":        "images_ready",
+    "generating_manifest_images": "manifest_approved",
+    "assembling":                 "storyboard_approved",
 }
 
 # ── State ─────────────────────────────────────────────────────────────────────

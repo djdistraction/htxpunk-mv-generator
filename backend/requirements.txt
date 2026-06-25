@@ -35,3 +35,9 @@ pydantic-settings==2.5.2
 httpx==0.27.2
 python-dotenv==1.0.1
 pydub==0.25.1
+
+# Production guide import (Excel parsing)
+openpyxl==3.1.5
+
+# Video assembly — bundled ffmpeg binary fallback when ffmpeg isn't on PATH
+imageio-ffmpeg==0.5.1

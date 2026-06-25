@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     # specific one — e.g. "fal-ai", "replicate", "nebius", "together" — via
     # HF_PROVIDER in .env if "auto" can't serve the model on your account.
     hf_provider: str = "auto"
+    # Image backend: "auto" uses HF FLUX when HF_TOKEN is set, otherwise falls
+    # back to the offline placeholder renderer. Force one with:
+    #   "huggingface" = always call HF (errors if no token)
+    #   "placeholder" = always render local placeholder frames (no API, $0,
+    #                    works offline — useful for end-to-end demos/tests)
+    image_backend: str = "auto"
 
     # Audio — local Whisper model size: tiny / base / small / medium
     whisper_model: str = "base"

@@ -23,6 +23,9 @@ from database import (
     db_create_asset,
     db_get_assets,
     db_update_asset,
+    db_get_series,
+    db_list_shot_manifests,
+    db_update_shot_manifest,
 )
 from utils.storage import url_to_local_path
 
@@ -265,6 +268,87 @@ def run_storyboard_build(project_id: str):
     # ⏸ Orchestrator pauses here until human calls /approve-storyboard
 
 
+# ── Manifest-driven generation ───────────────────────────────────────────────
+
+def run_manifest_generation(project_id: str):
+    """Generate one full-frame image per locked shot manifest and turn each into
+    a storyboard panel, then pause at awaiting_storyboard_approval.
+
+    This is the manifest-driven path: an approved production plan deterministically
+    drives image generation (prompt built from each shot + series continuity bible),
+    bypassing freeform treatment/element extraction.
+    """
+    from services.image_generator import generate_shot_frame
+    from services.shot_prompt import (
+        build_shot_prompt, build_negative_prompt, shot_duration_seconds,
+    )
+    _set_stage(project_id, "generating_manifest_images")
+    project = _get_project(project_id)
+
+    manifests = db_list_shot_manifests(project_id)
+    if not manifests:
+        raise ValueError(f"No shot manifests found for project {project_id}")
+
+    # Series continuity bible drives a coherent look across all shots
+    continuity_bible = {}
+    style_prompt = ""
+    if project.get("series_id"):
+        series = db_get_series(project["series_id"])
+        if series:
+            continuity_bible = series.get("continuity_bible") or {}
+            style_prompt = series.get("style_prompt") or ""
+
+    logger.info("[Worker] Manifest generation: %d shots for %s",
+                len(manifests), project_id[:8])
+
+    # Clear any stale panels from a previous run so re-generation is clean
+    for old in db_get_assets(project_id, asset_type="storyboard_panel"):
+        db_update_asset(old["id"], asset_type="storyboard_panel_old")
+
+    for i, shot in enumerate(manifests):
+        prompt = build_shot_prompt(shot, continuity_bible, style_prompt)
+        negative = build_negative_prompt(shot, continuity_bible)
+        duration = shot_duration_seconds(shot, default=settings_clip_default())
+        style_suffix = f"Avoid: {negative}" if negative else ""
+
+        shot_no = shot.get("shot_number") or str(i + 1)
+        subtitle = shot.get("audio_cue") or ""
+        url = generate_shot_frame(
+            project_id, f"shot_{shot_no}", prompt,
+            style_suffix=style_suffix,
+            label=f"Shot {shot_no}",
+            subtitle=subtitle,
+        )
+
+        asset_id = db_create_asset(
+            project_id, "storyboard_panel", f"Shot {shot_no}",
+            url, prompt,
+            panel_index=i,
+            duration=duration,
+            energy_level=0.6,
+            lyric=shot.get("audio_cue") or "",
+            shot_number=shot_no,
+            shot_manifest_id=shot["id"],
+        )
+        # Record which asset this shot produced + freeze the prompt used
+        db_update_shot_manifest(
+            shot["id"],
+            asset_refs=[asset_id],
+            locked_prompts={"image_prompt": prompt, "negative_prompt": negative},
+            status="locked",
+        )
+
+    _set_stage(project_id, "awaiting_storyboard_approval")
+    logger.info("[Worker] Manifest frames generated for %s — awaiting approval",
+                project_id[:8])
+    # ⏸ Orchestrator pauses here until human calls /approve-storyboard
+
+
+def settings_clip_default() -> float:
+    from config import settings
+    return float(settings.clip_duration)
+
+
 # ── Stage 6: Video Assembly ──────────────────────────────────────────────────
 
 def run_video_assembly(project_id: str):
@@ -300,11 +384,16 @@ def run_video_assembly(project_id: str):
             "image_url": p.get("url"),
             "panel_index": p.get("panel_index", i),
             "energy_level": p.get("energy_level", 0.5),
+            "duration": p.get("duration"),   # per-shot seconds (manifest path)
+            "lyric": p.get("lyric") or "",
         }
         for i, p in enumerate(panels)
     ]
 
-    audio_path = url_to_local_path(project["audio_url"])
+    # Audio is optional: a manifest-only demo project may have no song attached,
+    # in which case we render a silent video from the panel durations.
+    audio_url = project.get("audio_url")
+    audio_path = url_to_local_path(audio_url) if audio_url else ""
     video_url = assemble_music_video(
         project_id=project_id,
         audio_path=audio_path,
