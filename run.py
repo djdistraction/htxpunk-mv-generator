@@ -18,6 +18,7 @@ Usage:
     py run.py                # backend + frontend, opens in your browser
     py run.py --electron     # backend + frontend + the Electron desktop app
     py run.py --no-install   # skip dependency installation (faster restarts)
+    py run.py --diagnose     # run network diagnostics and exit
 
 You can leave this window open while you use the app. Press Ctrl+C here to
 shut everything down.
@@ -453,7 +454,18 @@ def main() -> None:
                         help="Open the Electron desktop app instead of a browser tab")
     parser.add_argument("--no-install", action="store_true",
                         help="Skip dependency installation")
+    parser.add_argument("--diagnose", action="store_true",
+                        help="Run network diagnostics and exit")
     args = parser.parse_args()
+
+    # Handle --diagnose flag
+    if args.diagnose:
+        print("\033[1;36m" + "=" * 60)
+        print("  HTXpunk Network Diagnostic Tool")
+        print("=" * 60 + "\033[0m\n")
+        diagnose_script = ROOT / "diagnose_network.py"
+        subprocess.run([sys.executable, str(diagnose_script)])
+        sys.exit(0)
 
     print("\033[1;35m" + "=" * 60)
     print("  HTXpunk MV Generator — Launcher")
