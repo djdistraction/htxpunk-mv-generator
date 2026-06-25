@@ -47,6 +47,7 @@ STAGE_WORKERS: dict[str, str] = {
 # Stages where a human must act — orchestrator skips them
 HUMAN_GATES = {
     "awaiting_treatment_approval",
+    "awaiting_manifest_approval",
     "awaiting_storyboard_approval",
 }
 
