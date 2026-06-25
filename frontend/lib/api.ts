@@ -56,6 +56,26 @@ export const api = {
       const { data } = await client.post(`/api/pipeline/${id}/revise-treatment`, { feedback })
       return data
     },
+    getShotManifests: async (id: string) => {
+      const { data } = await client.get(`/api/pipeline/${id}/shot-manifests`)
+      return data
+    },
+    approveManifests: async (id: string, payload?: { revision_notes?: string }) => {
+      const { data } = await client.post(`/api/pipeline/${id}/approve-manifests`, payload ?? {})
+      return data
+    },
+    reviseManifests: async (id: string, payload: { revision_notes: string }) => {
+      const { data } = await client.post(`/api/pipeline/${id}/revise-manifests`, payload)
+      return data
+    },
+    importProductionGuide: async (id: string, file: File) => {
+      const formData = new FormData()
+      formData.append('file', file)
+      const { data } = await client.post(`/api/pipeline/${id}/import-production-guide`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      return data
+    },
     approveStoryboard: async (id: string, payload: { panel_order: string[] }) => {
       const { data } = await client.post(`/api/pipeline/${id}/approve-storyboard`, payload)
       return data
