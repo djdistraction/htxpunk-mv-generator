@@ -275,6 +275,16 @@ layout.tsx (metadata, Tailwind setup)
 - **Fix:** Ensure `HF_TOKEN` in `.env` matches your HuggingFace read token
 - Token must have "Read access to contents of all public gated repos and private repos you can access"
 
+**Error:** `NameResolutionError` / `getaddrinfo failed` for `api-inference.huggingface.co`
+- **Cause:** HuggingFace retired the old serverless endpoint. That hostname no
+  longer resolves anywhere — it is not a local network problem.
+- **Fix:** Upgrade the client so it uses the new Inference Providers router:
+  `pip install -U huggingface_hub` (needs >=0.28), then restart the backend.
+  Routing is controlled by `HF_PROVIDER` in `.env` (default `auto`).
+- **Note:** Inference Providers usage is billed against your HF account; free
+  accounts get a small monthly credit. Pin a provider via `HF_PROVIDER`
+  (e.g. `fal-ai`, `replicate`, `nebius`) if `auto` can't serve the model.
+
 ### Video assembly hangs
 **Error:** Progress stuck at "Assembling…" for >30 min
 - **Likely:** FFmpeg or audio sync issue. Check orchestrator logs.

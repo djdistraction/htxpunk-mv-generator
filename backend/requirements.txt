@@ -12,8 +12,11 @@ groq==0.11.0
 # Audio transcription — faster-whisper: Python 3.13 compatible, faster than openai-whisper
 faster-whisper==1.1.1
 
-# Image generation — Hugging Face free inference API
-huggingface-hub==0.25.2
+# Image generation — Hugging Face Inference Providers
+# >=0.28 required: earlier versions hardcode the retired
+# api-inference.huggingface.co endpoint. 0.28+ routes through the Inference
+# Providers system (router.huggingface.co) and supports the `provider` arg.
+huggingface-hub>=0.28,<1.0
 Pillow>=12.1.0
 
 # Background removal — for element cutouts
