@@ -4,7 +4,7 @@
 This is a full-stack AI music video generator that transforms song uploads into complete animated music videos with:
 - Automatic transcription & mood analysis
 - AI-generated visual treatments (Groq/Llama 3.3)
-- Background & character element generation (HuggingFace FLUX)
+- Background & character element generation (Gemini 2.5 Flash Image)
 - Storyboard composition & video assembly (FFmpeg with Ken Burns)
 - Human approval gates at treatment & storyboard stages
 
@@ -43,7 +43,8 @@ This is a full-stack AI music video generator that transforms song uploads into 
   - `audio_analyzer.py` — Whisper transcription + Groq analysis
   - `treatment_generator.py` — Groq visual treatment from analysis
   - `element_extractor.py` — Groq visual registry
-  - `image_generator.py` — HuggingFace FLUX background/element gen
+  - `image_generator.py` — Gemini image generation + offline Pillow fallback
+  - `gemini_image_generator.py` — Gemini 2.5 Flash Image client (free tier)
   - `storyboard_builder.py` — Scene planning
   - `compositor.py` — Pillow compositing panels
   - `video_assembler.py` — FFmpeg video & audio sync
@@ -59,9 +60,9 @@ This is a full-stack AI music video generator that transforms song uploads into 
 | Database | SQLite + SQLAlchemy (async) | No server needed |
 | LLM | Groq (Llama 3.3 70B) free tier | OpenAI-compatible API |
 | Audio | Faster-Whisper (CPU int8 quantized) | ~140MB model |
-| Image Gen | HuggingFace FLUX.1-schnell free API | 2s rate limit |
+| Image Gen | Gemini 2.5 Flash Image free tier | 500 images/day, no credit card |
+| Image fallback | Pillow placeholder renderer | Offline frames when no GEMINI_API_KEY ($0) |
 | Background Removal | rembg + onnxruntime | Local, no API needed |
-| Image fallback | Pillow placeholder renderer | Offline frames when no HF_TOKEN ($0) |
 | Video Assembly | FFmpeg (default) | Ken Burns motion, audio sync, per-shot timing |
 | Video Assembly (opt-in) | Remotion (React) | Node-based; set VIDEO_BACKEND=remotion |
 | Task Queue | In-memory orchestrator (no Celery/Redis) | Runs in main uvicorn process |
@@ -70,28 +71,47 @@ This is a full-stack AI music video generator that transforms song uploads into 
 
 ## Setup
 
-### 1. Get Free API Keys
-- **Groq**: https://console.groq.com (no credit card)
-- **HuggingFace**: https://huggingface.co → Settings → Access Tokens → New token (read)
+### Desktop App (Recommended)
+```bash
+cd electron-app
+npm install
+npm run start
+```
+This launches the **setup wizard** on first run:
+1. Enter Groq API key (required, takes 30 seconds to get from console.groq.com)
+2. Enter Gemini API key (optional: 500 free images/day, or skip for free offline frames)
+3. Choose storage folder
+4. Backend + frontend start automatically
+5. App opens at http://127.0.0.1:8000
 
-### 2. Create `.env` from template
+**Updating API keys later:**
+- Click ⚙️ Settings in the app (or /settings in web)
+- Add/update keys with live validation
+- Restart the app to apply changes
+
+### Manual Setup (Web/CLI mode)
+
+**1. Get Free API Keys**
+- **Groq** (required): https://console.groq.com (no credit card, takes 30s)
+- **Gemini** (optional): https://aistudio.google.com (500 free images/day, no credit card)
+
+**2. Create `.env`**
 ```bash
 cp .env.example .env
-# Edit .env and add GROQ_API_KEY and HF_TOKEN
+# Edit .env:
+GROQ_API_KEY=gsk_...
+GEMINI_API_KEY=AIzaSy_...  # optional
+IMAGE_BACKEND=auto         # auto|gemini|placeholder
 ```
 
-### 3. Backend
+**3. Backend**
 ```bash
 cd backend
 pip install -r requirements.txt
-# Terminal 1: API server
 uvicorn main:app --reload --port 8000
-
-# Terminal 2: (optional diagnostics)
-python -c "from config import settings; settings.validate_settings()"
 ```
 
-### 4. Frontend
+**4. Frontend**
 ```bash
 cd frontend
 npm install
@@ -106,6 +126,46 @@ npm install
 npx remotion studio
 # Opens http://localhost:3030
 ```
+
+---
+
+## First-Run Onboarding
+
+When the Electron app starts for the first time, it shows a **3-step setup wizard**:
+
+### Step 1: API Keys Configuration
+- **Groq API Key** (required): Takes 30 seconds to get from console.groq.com
+  - Validator checks the key with a real API call
+  - Gives instant visual feedback: ✓ (green) or ✗ (red)
+- **Gemini API Key** (optional): Get from aistudio.google.com (500 free images/day)
+  - Can skip this step entirely
+  - If skipped: video renders with free offline placeholder frames ($0)
+  - If provided: validator checks with a real API call before saving
+
+### Step 2: Storage Configuration
+- Choose where to store generated images and videos (recommended: 50GB+ free space)
+- Set backend port (default 8000, usually fine)
+
+### Step 3: Confirmation
+- Review settings and click Finish
+- Backend auto-starts, database initializes, frontend opens
+
+### Settings After Install
+
+Users can update/add API keys later without reinstalling:
+
+1. Open the app → click ⚙️ Settings (or navigate to `/settings`)
+2. Paste new API keys
+3. Click Validate to check they work
+4. Click Save Settings
+5. Restart the app for changes to take effect
+
+### Configuration Storage
+
+The Electron app stores configuration in **`~/.htxpunk-mv-generator/`**:
+- `config.json` — user settings (API keys, port, storage path)
+- `.env` — generated from config, auto-injected into backend
+- Logs, database, and generated videos stored in the user's chosen storage folder
 
 ---
 
@@ -162,10 +222,13 @@ print(result)
 ### Environment Variables
 
 **Required:**
-- `GROQ_API_KEY` — from https://console.groq.com
-- `HF_TOKEN` — from https://huggingface.co
+- `GROQ_API_KEY` — from https://console.groq.com (takes 30 seconds, no credit card)
 
-**Optional:**
+**Optional (but recommended for generated images):**
+- `GEMINI_API_KEY` — from https://aistudio.google.com (500 free images/day, no credit card)
+- `IMAGE_BACKEND` — auto (Gemini if key present, else placeholder), gemini, or placeholder
+
+**Other Optional:**
 - `WHISPER_MODEL` — tiny | base (default) | small | medium
 - `VIDEO_BACKEND` — ffmpeg (default) | runway (experimental)
 - `DATABASE_URL` — sqlite+aiosqlite:/// (default) or postgresql+asyncpg://
@@ -173,13 +236,14 @@ print(result)
 
 ### Upgrade Paths (all via `.env` only, no code changes):
 
-| Now (Free) | Later (GPU/Cloud) |
+| Now (Free) | Later (Faster/Better) |
 |---|---|
 | Groq / Llama 3.3 | Ollama (local GPU) or OpenAI GPT-4o |
-| HuggingFace FLUX | Local FLUX (GPU) or Replicate |
-| Local storage | Cloudflare R2 |
+| Gemini 2.5 Flash Image (free tier) | OpenAI DALL-E 3, Replicate, local FLUX (GPU) |
+| Offline placeholder frames | Real images from Gemini or other providers |
+| Local storage | Cloudflare R2, S3 |
 | SQLite | Supabase / PostgreSQL |
-| Remotion | Local GPU render or commercial |
+| FFmpeg Ken Burns | Wan2.1 or Remotion (GPU render, faster) |
 
 ---
 
@@ -341,19 +405,22 @@ per-shot timecodes. See `services/shot_prompt.py`.
 - Check CORS: frontend on `:3000` should be allowed by backend (it is by default)
 
 ### Image generation fails
-**Error:** `ValueError: HF_TOKEN not set` or `401 Unauthorized`
-- **Fix:** Ensure `HF_TOKEN` in `.env` matches your HuggingFace read token
-- Token must have "Read access to contents of all public gated repos and private repos you can access"
+**Issue:** Frames rendering as placeholders instead of Gemini images
+- **Likely:** `GEMINI_API_KEY` not set, or key is invalid
+- **Fix:** 
+  - Get a free key at https://aistudio.google.com (no credit card, takes 30s)
+  - Set `GEMINI_API_KEY=AIzaSy_...` in `.env`
+  - Update via app Settings (/settings) if using Electron (no restart needed once you restart)
+  - Restart the backend
+- **Note:** Gemini free tier: 500 images/day. If you hit the limit, frames fall back to placeholders.
 
-**Error:** `NameResolutionError` / `getaddrinfo failed` for `api-inference.huggingface.co`
-- **Cause:** HuggingFace retired the old serverless endpoint. That hostname no
-  longer resolves anywhere — it is not a local network problem.
-- **Fix:** Upgrade the client so it uses the new Inference Providers router:
-  `pip install -U huggingface_hub` (needs >=0.28), then restart the backend.
-  Routing is controlled by `HF_PROVIDER` in `.env` (default `auto`).
-- **Note:** Inference Providers usage is billed against your HF account; free
-  accounts get a small monthly credit. Pin a provider via `HF_PROVIDER`
-  (e.g. `fal-ai`, `replicate`, `nebius`) if `auto` can't serve the model.
+**Error:** `401 Unauthorized` from Gemini
+- **Fix:** Check that `GEMINI_API_KEY` is correct at https://aistudio.google.com
+- Verify the key hasn't been revoked or disabled
+
+**Error:** Rate limited (500 images/day exceeded)
+- **Temporary:** Frames render as offline placeholders until quota resets next day
+- **Permanent upgrade:** Switch to paid Gemini tier or Replicate
 
 ### Video assembly hangs
 **Error:** Progress stuck at "Assembling…" for >30 min
@@ -374,9 +441,9 @@ per-shot timecodes. See `services/shot_prompt.py`.
 - Default is `base` (15-25s on CPU, good accuracy)
 
 ### Image Generation
-- HuggingFace free API has 2s rate limit between calls
-- Total time: ~5-10 min for 4 backgrounds + 8-12 character states
-- GPU upgrade would reduce to <1 min
+- Gemini free tier: ~3-5 min for typical shot (includes API latency + retry waits)
+- Quota: 500 images/day, resets daily
+- Upgrade to paid Gemini or Replicate for faster/unlimited: <1 min with GPU
 
 ### Video Assembly
 - FFmpeg Ken Burns: 15-25 min for typical 4-min song (CPU bound)
@@ -392,7 +459,8 @@ per-shot timecodes. See `services/shot_prompt.py`.
 
 - [ ] Backend running: `curl http://localhost:8000/health`
 - [ ] Frontend running: `http://localhost:3000` loads
-- [ ] `.env` has `GROQ_API_KEY` and `HF_TOKEN`
+- [ ] `.env` has `GROQ_API_KEY` (required)
+- [ ] `.env` has `GEMINI_API_KEY` (optional; skip for free offline frames)
 - [ ] Storage directory created: `ls backend/storage/`
 - [ ] Database created: `ls backend/htxpunk.db`
 - [ ] Orchestrator started: check backend logs for "Chimera Tower online"
