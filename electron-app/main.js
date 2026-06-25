@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, Menu, Tray } = require('electron');
 const path = require('path');
 const isDev = require('electron-is-dev');
 const { spawn } = require('child_process');
+const http = require('http');
 const fs = require('fs');
 const os = require('os');
 
@@ -69,12 +70,55 @@ WHISPER_MODEL=base
   fs.writeFileSync(envPath, envContent);
 }
 
+// Poll the backend /health endpoint until it responds (or we time out).
+// This is far more reliable than parsing uvicorn's log output, which goes
+// to stderr in a format that can change between versions.
+function waitForBackend(port, timeoutMs = 90000) {
+  return new Promise((resolve, reject) => {
+    const startTime = Date.now();
+
+    const attempt = () => {
+      const req = http.get(
+        { host: '127.0.0.1', port, path: '/health', timeout: 2000 },
+        (res) => {
+          // Drain the response so the socket can be reused/closed.
+          res.resume();
+          if (res.statusCode === 200) {
+            resolve(true);
+          } else {
+            retry();
+          }
+        }
+      );
+      req.on('error', retry);
+      req.on('timeout', () => {
+        req.destroy();
+        retry();
+      });
+    };
+
+    const retry = () => {
+      if (Date.now() - startTime > timeoutMs) {
+        reject(
+          new Error(
+            'Backend did not become healthy in time. It may have failed to ' +
+              'start (e.g. port already in use, or Python dependencies missing).'
+          )
+        );
+      } else {
+        setTimeout(attempt, 1000);
+      }
+    };
+
+    attempt();
+  });
+}
+
 // Start backend
 function startBackend(config) {
   return new Promise((resolve, reject) => {
     try {
       const backendPath = path.join(__dirname, '..', 'backend');
-      const pythonScript = path.join(backendPath, 'main.py');
 
       // Set environment variables
       const env = {
@@ -93,40 +137,56 @@ function startBackend(config) {
         fs.mkdirSync(config.storagePath, { recursive: true });
       }
 
-      // Spawn uvicorn process
-      backendProcess = spawn('py', ['-m', 'uvicorn', 'main:app', '--port', config.backendPort, '--host', '127.0.0.1'], {
-        cwd: backendPath,
-        env,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
+      // Spawn uvicorn process. We capture stdout/stderr purely for logging;
+      // readiness is detected by polling /health, not by parsing this output.
+      backendProcess = spawn(
+        'py',
+        ['-m', 'uvicorn', 'main:app', '--port', String(config.backendPort), '--host', '127.0.0.1'],
+        {
+          cwd: backendPath,
+          env,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        }
+      );
 
-      let backendStarted = false;
+      let exitedEarly = false;
 
       backendProcess.stdout.on('data', (data) => {
-        const output = data.toString();
-        console.log('[Backend]', output);
-        if (output.includes('Uvicorn running on') || output.includes('Chimera Tower online')) {
-          if (!backendStarted) {
-            backendStarted = true;
-            resolve(true);
-          }
-        }
+        console.log('[Backend]', data.toString());
       });
 
       backendProcess.stderr.on('data', (data) => {
-        console.error('[Backend]', data.toString());
+        // uvicorn logs (including the "Application startup complete" line)
+        // are written to stderr — this is normal, not an error.
+        console.log('[Backend]', data.toString());
       });
 
       backendProcess.on('error', (err) => {
+        exitedEarly = true;
         reject(new Error(`Failed to start backend: ${err.message}`));
       });
 
-      // Timeout after 30 seconds
-      setTimeout(() => {
-        if (!backendStarted) {
-          reject(new Error('Backend startup timeout'));
+      backendProcess.on('exit', (code) => {
+        if (code !== null && code !== 0) {
+          exitedEarly = true;
+          reject(
+            new Error(
+              `Backend process exited with code ${code} before becoming ready. ` +
+                'Check that port ' + config.backendPort + ' is free and that ' +
+                'the Python dependencies are installed.'
+            )
+          );
         }
-      }, 30000);
+      });
+
+      // Wait for the health endpoint to respond instead of scraping logs.
+      waitForBackend(config.backendPort)
+        .then(() => {
+          if (!exitedEarly) resolve(true);
+        })
+        .catch((err) => {
+          if (!exitedEarly) reject(err);
+        });
     } catch (err) {
       reject(err);
     }
