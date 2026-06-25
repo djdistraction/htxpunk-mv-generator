@@ -24,6 +24,7 @@ class ProjectRow(Base):
     series_id = Column(String)           # optional: link to a series
     stage = Column(String, default="uploaded")
     audio_url = Column(String)
+    user_brief = Column(Text)            # user's free-text creative vision (optional)
     analysis = Column(Text)              # JSON
     treatment = Column(Text)             # JSON
     elements = Column(Text)              # JSON
@@ -80,6 +81,7 @@ def _migrate_db():
     _add_column_if_missing(conn, "projects", "series_id", "TEXT")
     _add_column_if_missing(conn, "projects", "revision_notes", "TEXT")
     _add_column_if_missing(conn, "projects", "panel_order", "TEXT")
+    _add_column_if_missing(conn, "projects", "user_brief", "TEXT")
     conn.commit()
     conn.close()
 

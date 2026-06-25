@@ -65,11 +65,29 @@ def transcribe_audio(audio_path: str) -> dict:
         "segments": segments,
     }
 
-def analyze_song(transcript: dict, audio_path: str) -> dict:
-    """Use Groq LLM to interpret the song's meaning and generate visual keywords."""
+def analyze_song(transcript: dict, audio_path: str,
+                 creative_brief: str = "", reference_notes: str = "") -> dict:
+    """Use Groq LLM to interpret the song's meaning and generate visual keywords.
+
+    If the user supplied a creative brief or reference material, weave it in so
+    the analysis reflects their vision rather than starting from a blank slate.
+    """
     lyrics_with_timestamps = "\n".join(
         f"[{seg['start']:.1f}s] {seg['text']}" for seg in transcript["segments"]
     )
+
+    context_block = ""
+    if creative_brief.strip():
+        context_block += (
+            f"\n\nARTIST'S CREATIVE VISION (prioritize this — it is what they want):\n"
+            f"\"{creative_brief.strip()}\""
+        )
+    if reference_notes.strip():
+        context_block += (
+            f"\n\nSUPPORTING REFERENCES the artist provided (characters, places, "
+            f"mood boards, ideas):\n{reference_notes.strip()}"
+        )
+
     client = _groq_client()
     response = client.chat.completions.create(
         model=settings.groq_model,
@@ -83,7 +101,7 @@ def analyze_song(transcript: dict, audio_path: str) -> dict:
             {"role": "user", "content": f"""Analyze this song's lyrics and structure.
 
 LYRICS WITH TIMESTAMPS:
-{lyrics_with_timestamps}
+{lyrics_with_timestamps}{context_block}
 
 Return JSON with these fields:
 - themes: list of 3-5 main themes
@@ -99,11 +117,14 @@ Return JSON with these fields:
     )
     return json.loads(response.choices[0].message.content)
 
-def run_full_analysis(audio_path: str) -> dict:
+def run_full_analysis(audio_path: str, creative_brief: str = "",
+                      reference_notes: str = "") -> dict:
     """Run transcription + analysis. Called by pipeline worker."""
     print(f"Transcribing {audio_path}...")
     transcript = transcribe_audio(audio_path)
     print("Analyzing song meaning...")
-    analysis = analyze_song(transcript, audio_path)
+    analysis = analyze_song(transcript, audio_path,
+                            creative_brief=creative_brief,
+                            reference_notes=reference_notes)
     analysis["transcript"] = transcript
     return analysis

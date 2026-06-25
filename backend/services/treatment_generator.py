@@ -15,13 +15,31 @@ def generate_treatment(
     analysis: dict,
     revision_notes: str = "",
     series: dict | None = None,
+    creative_brief: str = "",
+    reference_notes: str = "",
 ) -> dict:
     """
     Generate a full visual treatment from song analysis.
     - revision_notes: if set, regenerate addressing user feedback
     - series: if set, inherit series style/characters for continuity
+    - creative_brief: the artist's free-text vision for the video
+    - reference_notes: descriptions of reference files the artist uploaded
     """
     client = _groq_client()
+
+    brief_block = ""
+    if creative_brief.strip():
+        brief_block = (
+            f"\n\nARTIST'S CREATIVE VISION — treat this as the primary brief. The "
+            f"treatment must honor it:\n\"{creative_brief.strip()}\""
+        )
+    if reference_notes.strip():
+        brief_block += (
+            f"\n\nREFERENCE MATERIAL the artist supplied. Incorporate these specific "
+            f"characters, places, and ideas (reuse their names and descriptions; do "
+            f"not invent replacements for things already described here):\n"
+            f"{reference_notes.strip()}"
+        )
 
     revision_block = ""
     if revision_notes:
@@ -60,6 +78,7 @@ def generate_treatment(
                 "content": (
                     "Create a complete music video visual treatment.\n\n"
                     f"SONG ANALYSIS:\n{json.dumps(analysis, indent=2)}"
+                    f"{brief_block}"
                     f"{series_block}"
                     f"{revision_block}\n\n"
                     "Return JSON with:\n"

@@ -28,6 +28,7 @@
       "preload.js",
       "setup.html",
       "public/**/*",
+      "assets/**/*",
       "backend/**/*",
       "!backend/storage/**/*",
       "!backend/__pycache__/**/*"

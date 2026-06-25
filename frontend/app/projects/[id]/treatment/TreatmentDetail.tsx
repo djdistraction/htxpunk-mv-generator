@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { api } from '@/lib/api'
+import ReferenceUploader, { ReferenceItem, appendReferences } from '@/components/ReferenceUploader'
 
 export default function TreatmentDetail({ id }: { id: string }) {
   const router = useRouter()
@@ -11,6 +12,7 @@ export default function TreatmentDetail({ id }: { id: string }) {
   const [working, setWorking] = useState(false)
   const [mode, setMode] = useState<'review' | 'changes'>('review')
   const [feedback, setFeedback] = useState('')
+  const [references, setReferences] = useState<ReferenceItem[]>([])
 
   useEffect(() => {
     const load = async () => {
@@ -41,10 +43,17 @@ export default function TreatmentDetail({ id }: { id: string }) {
   }
 
   const handleRequestChanges = async () => {
-    if (!feedback.trim()) return
+    if (!feedback.trim() && references.length === 0) return
     setWorking(true)
     try {
-      await api.pipeline.reviseTreatment(id, feedback.trim())
+      // Attach any new reference files first so the regenerated treatment
+      // incorporates them, then submit the written feedback.
+      if (references.length > 0) {
+        const form = new FormData()
+        appendReferences(form, references)
+        await api.projects.addReferences(id, form)
+      }
+      await api.pipeline.reviseTreatment(id, feedback.trim() || 'Incorporate the newly added reference files.')
       router.push(`/projects/${id}`)
     } catch {
       alert('Could not submit feedback. Is the backend running?')
@@ -193,16 +202,22 @@ export default function TreatmentDetail({ id }: { id: string }) {
                   className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-yellow-500 resize-none"
                   autoFocus
                 />
+                <div>
+                  <p className="text-gray-400 text-sm mb-2">
+                    Have something that shows what you mean? Attach it — images, mood boards, or notes.
+                  </p>
+                  <ReferenceUploader items={references} onChange={setReferences} accent="yellow" />
+                </div>
                 <div className="flex gap-3">
                   <button
                     onClick={handleRequestChanges}
-                    disabled={working || !feedback.trim()}
+                    disabled={working || (!feedback.trim() && references.length === 0)}
                     className="flex-1 bg-yellow-600 hover:bg-yellow-700 disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold py-3 rounded-lg transition-colors"
                   >
                     {working ? 'Submitting…' : '↩ Regenerate with these changes'}
                   </button>
                   <button
-                    onClick={() => { setMode('review'); setFeedback('') }}
+                    onClick={() => { setMode('review'); setFeedback(''); setReferences([]) }}
                     className="px-5 border border-gray-700 rounded-lg text-gray-400 hover:border-gray-500 transition-colors"
                   >
                     Cancel

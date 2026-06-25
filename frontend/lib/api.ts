@@ -35,6 +35,16 @@ export const api = {
       })
       return data
     },
+    listReferences: async (id: string) => {
+      const { data } = await client.get(`/api/projects/${id}/references`)
+      return data
+    },
+    addReferences: async (id: string, formData: FormData) => {
+      const { data } = await client.post(`/api/projects/${id}/references`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      return data
+    },
   },
 
   pipeline: {

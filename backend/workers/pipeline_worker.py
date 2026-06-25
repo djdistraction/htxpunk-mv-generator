@@ -43,6 +43,32 @@ def _get_project(project_id: str) -> dict:
     return project
 
 
+def _collect_creative_context(project_id: str, project: dict) -> tuple[str, str]:
+    """Gather the user's creative input for this project.
+
+    Returns (creative_brief, reference_notes). The brief is free text; the notes
+    are a readable summary of every reference file the user attached (description,
+    where it fits, and any extracted document text). Both feed the LLM so it
+    builds on the user's vision instead of starting from scratch.
+    """
+    creative_brief = (project.get("user_brief") or "").strip()
+
+    refs = db_get_assets(project_id, asset_type="reference")
+    lines: list[str] = []
+    for ref in refs:
+        kind = ref.get("kind") or "file"
+        name = ref.get("description") or ref.get("filename") or "reference"
+        parts = [f"- [{kind}] {name}"]
+        if ref.get("role"):
+            parts.append(f"role/placement: {ref['role']}")
+        if ref.get("extracted_text"):
+            snippet = ref["extracted_text"].strip().replace("\n", " ")
+            parts.append(f"content: {snippet[:1500]}")
+        lines.append("; ".join(parts))
+    reference_notes = "\n".join(lines)
+    return creative_brief, reference_notes
+
+
 # ── Stage 1: Audio Analysis ───────────────────────────────────────────────────
 
 def run_audio_analysis(project_id: str):
@@ -61,7 +87,15 @@ def run_audio_analysis(project_id: str):
             f.write(httpx.get(audio_url, timeout=120).content)
             audio_path = f.name
 
-    result = run_full_analysis(audio_path)
+    creative_brief, reference_notes = _collect_creative_context(project_id, project)
+    if creative_brief or reference_notes:
+        logger.info("[Worker] Incorporating user brief/references for %s", project_id[:8])
+
+    result = run_full_analysis(
+        audio_path,
+        creative_brief=creative_brief,
+        reference_notes=reference_notes,
+    )
     db_update_project(project_id, stage="analyzed", analysis=result)
     logger.info("[Worker] Audio analysis complete for %s", project_id[:8])
 
@@ -77,6 +111,7 @@ def run_treatment_generation(project_id: str):
 
     analysis = project.get("analysis") or {}
     revision_notes = project.get("revision_notes") or ""
+    creative_brief, reference_notes = _collect_creative_context(project_id, project)
 
     # Load series data for continuity if this project belongs to a series
     series = None
@@ -85,7 +120,13 @@ def run_treatment_generation(project_id: str):
         if series:
             logger.info("[Worker] Loading series '%s' for continuity", series.get("name"))
 
-    treatment = generate_treatment(analysis, revision_notes=revision_notes, series=series)
+    treatment = generate_treatment(
+        analysis,
+        revision_notes=revision_notes,
+        series=series,
+        creative_brief=creative_brief,
+        reference_notes=reference_notes,
+    )
 
     # Clear revision notes after use
     db_update_project(

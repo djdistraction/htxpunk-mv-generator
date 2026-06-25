@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { api } from '@/lib/api'
+import ReferenceUploader, { ReferenceItem, appendReferences } from '@/components/ReferenceUploader'
 
 export default function NewProjectPage() {
   const router = useRouter()
@@ -10,6 +11,8 @@ export default function NewProjectPage() {
   const [title, setTitle] = useState('')
   const [artist, setArtist] = useState('')
   const [file, setFile] = useState<File | null>(null)
+  const [brief, setBrief] = useState('')
+  const [references, setReferences] = useState<ReferenceItem[]>([])
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
   const [seriesList, setSeriesList] = useState<any[]>([])
@@ -45,6 +48,8 @@ export default function NewProjectPage() {
       formData.append('artist', artist)
       formData.append('file', file)
       if (seriesId) formData.append('series_id', seriesId)
+      if (brief.trim()) formData.append('brief', brief.trim())
+      if (references.length > 0) appendReferences(formData, references)
       const project = await api.projects.uploadAudio(formData)
       router.push(`/projects/${project.id}`)
     } catch (err: any) {
@@ -59,7 +64,10 @@ export default function NewProjectPage() {
         <a href="/" className="text-purple-400 text-sm hover:underline">← Back to projects</a>
 
         <h1 className="text-3xl font-bold mt-6 mb-2">New Music Video</h1>
-        <p className="text-gray-400 mb-8">Upload a song and the pipeline handles the rest.</p>
+        <p className="text-gray-400 mb-8">
+          The song is all you need to start. Share your vision and any reference
+          files too, and the AI will build on your ideas instead of guessing.
+        </p>
 
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* Title */}
@@ -165,6 +173,30 @@ export default function NewProjectPage() {
             />
           </div>
 
+          {/* Creative vision */}
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1">
+              Your Vision
+              <span className="text-gray-500 font-normal ml-2">— optional, but it helps a lot</span>
+            </label>
+            <textarea
+              value={brief}
+              onChange={e => setBrief(e.target.value)}
+              rows={4}
+              placeholder="Describe what you picture for this video — the story, mood, characters, settings, references, anything. The more you share, the closer the AI lands to your idea. Leave it blank and the AI will create a vision from the song alone."
+              className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-600 text-sm focus:outline-none focus:border-purple-500 resize-none"
+            />
+          </div>
+
+          {/* Reference files */}
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1">
+              Reference Files
+              <span className="text-gray-500 font-normal ml-2">— images, mood boards, lyrics, scripts, notes</span>
+            </label>
+            <ReferenceUploader items={references} onChange={setReferences} />
+          </div>
+
           {error && (
             <div className="bg-red-900/30 border border-red-700 rounded-lg p-3 text-red-300 text-sm">
               {error}
@@ -184,8 +216,8 @@ export default function NewProjectPage() {
           <div className="p-4 bg-gray-900 rounded-lg border border-gray-800">
             <h3 className="text-sm font-semibold text-gray-300 mb-2">Pipeline Timeline</h3>
             <ol className="text-gray-500 text-sm space-y-1 list-decimal list-inside">
-              <li>Audio is transcribed and analyzed (~1 min)</li>
-              <li>AI generates a visual treatment — you review and approve</li>
+              <li>Audio is transcribed and analyzed — folding in your vision & references (~1 min)</li>
+              <li>AI generates a visual treatment — you review, attach more, and approve</li>
               <li>Backgrounds and character elements are generated (~5–10 min)</li>
               <li>Storyboard is built — you review and approve panel order</li>
               <li>Final video is assembled with your audio (~15–25 min)</li>
