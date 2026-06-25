@@ -9,9 +9,14 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
 
-    # Image generation — HF free inference API (swap to local ComfyUI later)
+    # Image generation — HF Inference Providers (swap to local ComfyUI later)
     hf_token: str = ""
     hf_image_model: str = "black-forest-labs/FLUX.1-schnell"
+    # Provider routing for the new HF Inference Providers system.
+    # "auto" lets HF pick an available provider (default). You can pin a
+    # specific one — e.g. "fal-ai", "replicate", "nebius", "together" — via
+    # HF_PROVIDER in .env if "auto" can't serve the model on your account.
+    hf_provider: str = "auto"
 
     # Audio — local Whisper model size: tiny / base / small / medium
     whisper_model: str = "base"

@@ -64,7 +64,7 @@ def check_env_vars():
     else:
         print(f"⚠ GROQ_API_KEY doesn't look like a valid Groq key (should start with gsk_)")
 
-    return hf_token and groq_key
+    return bool(hf_token and groq_key)
 
 def check_hf_api():
     """Test HuggingFace API connectivity and authentication."""
@@ -114,7 +114,11 @@ def main():
 
     print("\n=== Basic Connectivity ===")
     all_ok &= check_dns("google.com")
-    all_ok &= check_dns("api-inference.huggingface.co")
+    # The current HF Inference Providers endpoint. (The old
+    # api-inference.huggingface.co was retired and no longer resolves —
+    # checking it would always "fail" and is not a real problem.)
+    all_ok &= check_dns("router.huggingface.co")
+    all_ok &= check_dns("huggingface.co")
     all_ok &= check_http_connectivity("https://www.google.com")
 
     print("\n=== Configuration ===")
@@ -134,7 +138,7 @@ def main():
         print("1. DNS/Network issues:")
         print("   - Check your internet connection (try: ping google.com)")
         print("   - Restart your router")
-        print("   - If on VPN/corporate network, check if api-inference.huggingface.co is blocked")
+        print("   - If on VPN/corporate network, check if router.huggingface.co is blocked")
         print("   - Try a different DNS (e.g., 8.8.8.8)")
         print("")
         print("2. HuggingFace Token issues:")

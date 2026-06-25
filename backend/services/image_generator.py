@@ -1,12 +1,17 @@
 """
 Stages 4-5 — Image Generation
-Uses Hugging Face Inference API (free tier) with FLUX.1-schnell.
-No API cost. Rate limited — adds ~2-3s delay between calls automatically.
+Uses Hugging Face Inference Providers with FLUX.1-schnell.
 
-To upgrade to paid FLUX.1-dev on Replicate:
-  Set image_backend=replicate in config and add replicate_api_key.
+NOTE: HuggingFace retired the old serverless endpoint
+(api-inference.huggingface.co) and replaced it with the Inference Providers
+system, which routes through router.huggingface.co. The InferenceClient picks
+a provider via the `provider` argument ("auto" by default). Usage is billed
+against your HF account; free accounts get a small monthly credit.
+
+To pin a specific provider (e.g. fal-ai, replicate, nebius):
+  Set HF_PROVIDER in .env.
 When you have a local GPU:
-  Set image_backend=local and point at your ComfyUI API.
+  Point at your own ComfyUI API instead.
 """
 import io
 import time
@@ -20,14 +25,16 @@ def generate_image(prompt: str, style_suffix: str = "", width: int = 1024, heigh
     full_prompt = f"{prompt}. {style_suffix}".strip(" .")
 
     from huggingface_hub import InferenceClient
-    client = InferenceClient(token=settings.hf_token)
+    # provider goes in the constructor; "auto" lets HF route to an available
+    # provider for the model. api_key takes the HF token for HF routing.
+    client = InferenceClient(provider=settings.hf_provider, api_key=settings.hf_token)
 
     max_retries = 3
     retry_delay = 5
 
     for attempt in range(max_retries):
         try:
-            # HF free tier needs a small pause between calls to avoid 429s
+            # HF routing can rate-limit; a small pause between calls avoids 429s
             time.sleep(2)
 
             image = client.text_to_image(
@@ -40,8 +47,19 @@ def generate_image(prompt: str, style_suffix: str = "", width: int = 1024, heigh
             image.save(buf, format="PNG")
             return buf.getvalue()
         except Exception as e:
+            error_str = str(e)
+            # A dead/old endpoint hostname is a permanent failure — don't burn
+            # retries on it. This points at a stale huggingface_hub install.
+            if "api-inference.huggingface.co" in error_str and (
+                "getaddrinfo" in error_str or "NameResolutionError" in error_str
+            ):
+                raise RuntimeError(
+                    "huggingface_hub is calling the retired endpoint "
+                    "'api-inference.huggingface.co'. Upgrade the library "
+                    "(pip install -U huggingface_hub, >=0.28) so it uses the new "
+                    "Inference Providers router, then restart the backend."
+                ) from e
             if attempt < max_retries - 1:
-                error_str = str(e)
                 if "NameResolutionError" in error_str or "getaddrinfo failed" in error_str:
                     print(f"Network error (DNS/connectivity), retrying in {retry_delay}s... (attempt {attempt + 1}/{max_retries})")
                     time.sleep(retry_delay)
