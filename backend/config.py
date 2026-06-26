@@ -9,14 +9,11 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
 
-    # Image generation — Gemini free tier by default ($0, 500 images/day)
+    # Image generation — Gemini free tier (500 images/day)
     gemini_api_key: str = ""
-    # Image backend: "auto" uses Gemini when GEMINI_API_KEY is set, otherwise
-    # falls back to the offline placeholder renderer. Force one with:
-    #   "gemini" = always call Gemini (errors if no key)
-    #   "placeholder" = always render local placeholder frames (no API, $0,
-    #                    works offline — useful for demos/tests)
-    image_backend: str = "auto"
+    # Image backend: "gemini" (default, uses Gemini API)
+    # For development/testing only: "placeholder" renders offline (no API, $0)
+    image_backend: str = "gemini"
 
     # Audio — local Whisper model size: tiny / base / small / medium
     whisper_model: str = "base"
@@ -54,13 +51,19 @@ settings = Settings()
 
 # Validation on startup
 def validate_settings():
-    warnings = []
+    errors = []
     if not settings.groq_api_key or settings.groq_api_key == "gsk_YOUR_API_KEY_HERE":
-        warnings.append("⚠️  GROQ_API_KEY not set — set it in .env to use LLM features")
+        errors.append("❌ GROQ_API_KEY not set")
     if not settings.gemini_api_key or settings.gemini_api_key == "AIzaSy_YOUR_API_KEY_HERE":
-        logger.info("ℹ️  GEMINI_API_KEY not set — using free offline placeholder images ($0)")
+        if settings.image_backend != "placeholder":
+            errors.append("❌ GEMINI_API_KEY not set (or set IMAGE_BACKEND=placeholder for dev-only mode)")
 
-    if warnings:
-        logger.warning("Configuration warnings:")
-        for w in warnings:
-            logger.warning(w)
+    if errors:
+        logger.error("Configuration errors:")
+        for e in errors:
+            logger.error(e)
+        if settings.image_backend != "placeholder":
+            raise RuntimeError(
+                "Missing required API keys. Set GROQ_API_KEY and GEMINI_API_KEY in .env, "
+                "or IMAGE_BACKEND=placeholder for offline development mode only."
+            )

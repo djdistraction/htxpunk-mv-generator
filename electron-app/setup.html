@@ -297,13 +297,13 @@
                 </div>
 
                 <div class="form-group">
-                    <label>Gemini API Key (Image Generation) — Optional</label>
+                    <label>Gemini API Key (Image Generation) *</label>
                     <div style="display: flex; gap: 8px;">
                         <input type="password" id="geminiApiKey" placeholder="AIzaSy..." style="flex: 1;" />
                         <span id="geminiValidation" style="padding: 12px; color: #888;">○</span>
                     </div>
                     <div class="help-text">
-                        Get free at <a href="https://aistudio.google.com" target="_blank">aistudio.google.com</a> (500 free images/day). Skip this and frames will render as $0 offline placeholders.
+                        Get free at <a href="https://aistudio.google.com" target="_blank">aistudio.google.com</a> (takes 30 seconds, no credit card). Free tier: 500 images/day.
                     </div>
                 </div>
 
@@ -344,9 +344,10 @@
 
                 <div style="background: #f9f9f9; padding: 16px; border-radius: 6px; margin-bottom: 20px;">
                     <div style="font-size: 14px; line-height: 1.8; color: #555;">
+                        <div style="margin-bottom: 10px;">✓ Groq + Gemini keys will be securely saved</div>
                         <div style="margin-bottom: 10px;">✓ Backend will start on port <span id="summaryPort">8000</span></div>
                         <div style="margin-bottom: 10px;">✓ Storage at: <span id="summaryPath" style="word-break: break-all;"></span></div>
-                        <div>✓ API keys will be securely saved</div>
+                        <div>✓ You're ready to generate videos!</div>
                     </div>
                 </div>
 
@@ -448,7 +449,11 @@
                 const geminiKey = document.getElementById('geminiApiKey').value.trim();
 
                 if (!groqKey) {
-                    showError('step1Error', 'Please enter your Groq API key');
+                    showError('step1Error', 'Groq API key is required');
+                    return false;
+                }
+                if (!geminiKey) {
+                    showError('step1Error', 'Gemini API key is required (get free at aistudio.google.com)');
                     return false;
                 }
 
@@ -463,20 +468,15 @@
                     return false;
                 }
 
-                // Gemini is optional, but validate if provided
-                if (geminiKey) {
-                    document.getElementById('geminiValidation').textContent = '⏳';
-                    const geminiValid = await testGeminiKey(geminiKey);
-                    document.getElementById('geminiValidation').textContent = geminiValid ? '✓' : '✗';
-                    document.getElementById('geminiValidation').style.color = geminiValid ? '#3c3' : '#c33';
+                // Validate Gemini key
+                document.getElementById('geminiValidation').textContent = '⏳';
+                const geminiValid = await testGeminiKey(geminiKey);
+                document.getElementById('geminiValidation').textContent = geminiValid ? '✓' : '✗';
+                document.getElementById('geminiValidation').style.color = geminiValid ? '#3c3' : '#c33';
 
-                    if (!geminiValid) {
-                        showError('step1Error', 'Gemini API key is invalid. Get one at https://aistudio.google.com');
-                        return false;
-                    }
-                } else {
-                    document.getElementById('geminiValidation').textContent = 'optional';
-                    document.getElementById('geminiValidation').style.color = '#888';
+                if (!geminiValid) {
+                    showError('step1Error', 'Gemini API key is invalid. Get one at https://aistudio.google.com');
+                    return false;
                 }
 
                 return true;

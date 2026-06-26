@@ -21,15 +21,9 @@ from utils.storage import upload_bytes
 # ── Backend selection ─────────────────────────────────────────────────────────
 
 def _use_placeholder() -> bool:
-    """Decide whether to render placeholder frames instead of calling Gemini."""
-    backend = (settings.image_backend or "auto").lower()
-    if backend == "placeholder":
-        return True
-    if backend == "gemini":
-        return False
-    # auto: use placeholder when no usable Gemini key is configured
-    key = (settings.gemini_api_key or "").strip()
-    return not key or key == "AIzaSy_YOUR_API_KEY_HERE"
+    """Check if running in placeholder mode (dev-only, offline)."""
+    backend = (settings.image_backend or "gemini").lower()
+    return backend == "placeholder"
 
 
 # ── Placeholder renderer (offline, no API) ────────────────────────────────────

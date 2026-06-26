@@ -83,14 +83,18 @@ export default function SettingsPage() {
       setMessage('Groq API key is required');
       return;
     }
+    if (!geminiKey) {
+      setMessage('Gemini API key is required');
+      return;
+    }
 
     if (groqStatus !== 'valid') {
       setMessage('Please validate the Groq API key first');
       return;
     }
 
-    if (geminiKey && geminiStatus !== 'valid') {
-      setMessage('Please validate the Gemini API key (or leave it empty)');
+    if (geminiStatus !== 'valid') {
+      setMessage('Please validate the Gemini API key first');
       return;
     }
 
@@ -176,7 +180,7 @@ export default function SettingsPage() {
           {/* Gemini Key */}
           <div className="space-y-3 pt-4 border-t border-gray-700">
             <div className="flex items-center justify-between">
-              <label className="font-semibold text-lg">Gemini API Key (Optional)</label>
+              <label className="font-semibold text-lg">Gemini API Key *</label>
               <button
                 onClick={validateGemini}
                 className={`px-4 py-2 rounded-lg font-medium transition flex items-center gap-2 ${
@@ -198,7 +202,7 @@ export default function SettingsPage() {
             </div>
             <input
               type="password"
-              placeholder="AIzaSy_... (leave empty for free offline frames)"
+              placeholder="AIzaSy_..."
               value={geminiKey}
               onChange={(e) => {
                 setGeminiKey(e.target.value);
@@ -211,7 +215,7 @@ export default function SettingsPage() {
               <a href="https://aistudio.google.com" target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:underline">
                 aistudio.google.com
               </a>
-              . Free: 500 images/day. Optional: if you skip this, the system renders free offline placeholder frames.
+              . Free: 500 images/day, no credit card.
             </p>
           </div>
 

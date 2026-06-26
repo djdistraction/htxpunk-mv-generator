@@ -61,7 +61,6 @@ This is a full-stack AI music video generator that transforms song uploads into 
 | LLM | Groq (Llama 3.3 70B) free tier | OpenAI-compatible API |
 | Audio | Faster-Whisper (CPU int8 quantized) | ~140MB model |
 | Image Gen | Gemini 2.5 Flash Image free tier | 500 images/day, no credit card |
-| Image fallback | Pillow placeholder renderer | Offline frames when no GEMINI_API_KEY ($0) |
 | Background Removal | rembg + onnxruntime | Local, no API needed |
 | Video Assembly | FFmpeg (default) | Ken Burns motion, audio sync, per-shot timing |
 | Video Assembly (opt-in) | Remotion (React) | Node-based; set VIDEO_BACKEND=remotion |
@@ -78,8 +77,10 @@ npm install
 npm run start
 ```
 This launches the **setup wizard** on first run:
-1. Enter Groq API key (required, takes 30 seconds to get from console.groq.com)
-2. Enter Gemini API key (optional: 500 free images/day, or skip for free offline frames)
+1. Enter Groq API key (required, 30 seconds to get from console.groq.com)
+2. Enter Gemini API key (required, 30 seconds to get from aistudio.google.com)
+   - Both validated with real API calls before accepting
+   - Visual feedback: ✓ (valid) or ✗ (invalid)
 3. Choose storage folder
 4. Backend + frontend start automatically
 5. App opens at http://127.0.0.1:8000
@@ -91,17 +92,17 @@ This launches the **setup wizard** on first run:
 
 ### Manual Setup (Web/CLI mode)
 
-**1. Get Free API Keys**
-- **Groq** (required): https://console.groq.com (no credit card, takes 30s)
-- **Gemini** (optional): https://aistudio.google.com (500 free images/day, no credit card)
+**1. Get Free API Keys** (both required)
+- **Groq** (text/audio analysis): https://console.groq.com (no credit card, takes 30s)
+- **Gemini** (image generation): https://aistudio.google.com (500 free images/day, no credit card, takes 30s)
 
 **2. Create `.env`**
 ```bash
 cp .env.example .env
 # Edit .env:
 GROQ_API_KEY=gsk_...
-GEMINI_API_KEY=AIzaSy_...  # optional
-IMAGE_BACKEND=auto         # auto|gemini|placeholder
+GEMINI_API_KEY=AIzaSy_...
+IMAGE_BACKEND=gemini  # Production mode. Use "placeholder" for dev-only offline mode.
 ```
 
 **3. Backend**
@@ -137,10 +138,10 @@ When the Electron app starts for the first time, it shows a **3-step setup wizar
 - **Groq API Key** (required): Takes 30 seconds to get from console.groq.com
   - Validator checks the key with a real API call
   - Gives instant visual feedback: ✓ (green) or ✗ (red)
-- **Gemini API Key** (optional): Get from aistudio.google.com (500 free images/day)
-  - Can skip this step entirely
-  - If skipped: video renders with free offline placeholder frames ($0)
-  - If provided: validator checks with a real API call before saving
+- **Gemini API Key** (required): Takes 30 seconds to get from aistudio.google.com
+  - Validator checks the key with a real API call
+  - 500 free images/day, no credit card needed
+  - Gives instant visual feedback: ✓ (green) or ✗ (red)
 
 ### Step 2: Storage Configuration
 - Choose where to store generated images and videos (recommended: 50GB+ free space)
@@ -223,10 +224,10 @@ print(result)
 
 **Required:**
 - `GROQ_API_KEY` — from https://console.groq.com (takes 30 seconds, no credit card)
+- `GEMINI_API_KEY` — from https://aistudio.google.com (takes 30 seconds, 500 free images/day)
 
-**Optional (but recommended for generated images):**
-- `GEMINI_API_KEY` — from https://aistudio.google.com (500 free images/day, no credit card)
-- `IMAGE_BACKEND` — auto (Gemini if key present, else placeholder), gemini, or placeholder
+**Optional (development only):**
+- `IMAGE_BACKEND` — "gemini" (production, default) | "placeholder" (dev-only offline, no API)
 
 **Other Optional:**
 - `WHISPER_MODEL` — tiny | base (default) | small | medium
@@ -405,22 +406,20 @@ per-shot timecodes. See `services/shot_prompt.py`.
 - Check CORS: frontend on `:3000` should be allowed by backend (it is by default)
 
 ### Image generation fails
-**Issue:** Frames rendering as placeholders instead of Gemini images
-- **Likely:** `GEMINI_API_KEY` not set, or key is invalid
-- **Fix:** 
-  - Get a free key at https://aistudio.google.com (no credit card, takes 30s)
-  - Set `GEMINI_API_KEY=AIzaSy_...` in `.env`
-  - Update via app Settings (/settings) if using Electron (no restart needed once you restart)
-  - Restart the backend
-- **Note:** Gemini free tier: 500 images/day. If you hit the limit, frames fall back to placeholders.
+**Error:** `RuntimeError: Missing required API keys` or backend won't start
+- **Fix:** Ensure both keys are set in `.env`:
+  - `GROQ_API_KEY=gsk_...` from https://console.groq.com
+  - `GEMINI_API_KEY=AIzaSy_...` from https://aistudio.google.com
+- **Dev mode only:** Set `IMAGE_BACKEND=placeholder` to run offline (no API keys needed, images are non-functional placeholders)
 
 **Error:** `401 Unauthorized` from Gemini
 - **Fix:** Check that `GEMINI_API_KEY` is correct at https://aistudio.google.com
 - Verify the key hasn't been revoked or disabled
+- Update via Settings (/settings) in the app
 
-**Error:** Rate limited (500 images/day exceeded)
-- **Temporary:** Frames render as offline placeholders until quota resets next day
-- **Permanent upgrade:** Switch to paid Gemini tier or Replicate
+**Error:** Rate limited (500 images/day quota exceeded)
+- **Immediate:** Generation fails with clear error (system does not degrade gracefully)
+- **Fix:** Wait until quota resets (midnight UTC) or upgrade to paid Gemini tier or Replicate
 
 ### Video assembly hangs
 **Error:** Progress stuck at "Assembling…" for >30 min
@@ -460,7 +459,7 @@ per-shot timecodes. See `services/shot_prompt.py`.
 - [ ] Backend running: `curl http://localhost:8000/health`
 - [ ] Frontend running: `http://localhost:3000` loads
 - [ ] `.env` has `GROQ_API_KEY` (required)
-- [ ] `.env` has `GEMINI_API_KEY` (optional; skip for free offline frames)
+- [ ] `.env` has `GEMINI_API_KEY` (required)
 - [ ] Storage directory created: `ls backend/storage/`
 - [ ] Database created: `ls backend/htxpunk.db`
 - [ ] Orchestrator started: check backend logs for "Chimera Tower online"
