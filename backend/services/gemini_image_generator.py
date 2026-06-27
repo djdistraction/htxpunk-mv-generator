@@ -1,16 +1,55 @@
-"""Gemini 2.5 Flash Image — Free tier image generation (500 images/day)."""
+"""Gemini 2.5 Flash Image — Free tier image generation (500 images/day).
+
+Uses the dedicated image model `gemini-2.5-flash-image` via the
+generateContent REST endpoint. The image comes back base64-encoded in
+candidates[0].content.parts[*].inlineData.data — note the image part is not
+necessarily parts[0] when the model also returns a text part, so we scan all
+parts for the first inlineData.
+"""
 
 import logging
 import base64
 import time
+from math import gcd
 from pathlib import Path
 import requests
 
 logger = logging.getLogger(__name__)
 
-GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2-5-flash:generateContent"
+GEMINI_MODEL = "gemini-2.5-flash-image"
+GEMINI_API_URL = (
+    f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+)
+# Aspect ratios the model accepts; we snap the requested W×H to the nearest.
+SUPPORTED_ASPECTS = {
+    "1:1": 1.0, "3:4": 0.75, "4:3": 1.333, "9:16": 0.5625,
+    "16:9": 1.778, "2:3": 0.667, "3:2": 1.5, "4:5": 0.8, "5:4": 1.25,
+}
 MAX_RETRIES = 3
 INITIAL_BACKOFF = 2  # seconds
+
+
+def _aspect_ratio(width: int, height: int) -> str:
+    """Snap an arbitrary W×H to the closest aspect ratio the model supports."""
+    if not width or not height:
+        return "16:9"
+    target = width / height
+    return min(SUPPORTED_ASPECTS, key=lambda k: abs(SUPPORTED_ASPECTS[k] - target))
+
+
+def _extract_image_b64(data: dict) -> str:
+    """Pull the base64 image out of a generateContent response, scanning all parts."""
+    candidates = data.get("candidates") or []
+    if not candidates:
+        raise RuntimeError(f"Gemini returned no candidates: {data}")
+    parts = candidates[0].get("content", {}).get("parts") or []
+    for part in parts:
+        inline = part.get("inlineData") or part.get("inline_data")
+        if inline and inline.get("data"):
+            return inline["data"]
+    raise RuntimeError(
+        f"Gemini response contained no image part (parts={[list(p.keys()) for p in parts]})"
+    )
 
 
 def generate_with_gemini(
@@ -25,27 +64,21 @@ def generate_with_gemini(
     Generate an image using Gemini 2.5 Flash Image.
 
     Returns the base64-encoded PNG data (or saves to file if output_path provided).
-    Falls back gracefully if API fails.
+    Raises a clear RuntimeError/ValueError on failure (no silent fallback).
     """
     if not api_key:
         raise ValueError("GEMINI_API_KEY not set")
 
-    # Build the request
+    full_prompt = prompt
+    if negative_prompt:
+        full_prompt += f"\n\nAvoid the following: {negative_prompt}"
+
+    # responseModalities is required for image output; imageConfig sets the ratio.
     request_body = {
-        "contents": [
-            {
-                "parts": [
-                    {
-                        "text": f"Generate a photorealistic image based on this description:\n\n{prompt}"
-                        + (f"\n\nDo NOT include: {negative_prompt}" if negative_prompt else "")
-                        + f"\n\nDimensions: {width}x{height}"
-                    }
-                ]
-            }
-        ],
-        "generation_config": {
-            "temperature": 0.8,
-            "top_p": 0.95,
+        "contents": [{"parts": [{"text": full_prompt}]}],
+        "generationConfig": {
+            "responseModalities": ["IMAGE"],
+            "imageConfig": {"aspectRatio": _aspect_ratio(width, height)},
         },
     }
 
@@ -58,28 +91,19 @@ def generate_with_gemini(
                 f"{GEMINI_API_URL}?key={api_key}",
                 json=request_body,
                 headers={"Content-Type": "application/json"},
-                timeout=60,
+                timeout=120,
             )
 
             if response.status_code == 200:
-                data = response.json()
-
-                # Extract image from response
-                try:
-                    image_data = data["candidates"][0]["content"]["parts"][0]["inlineData"]["data"]
-
-                    if output_path:
-                        path = Path(output_path)
-                        path.parent.mkdir(parents=True, exist_ok=True)
-                        with open(output_path, "wb") as f:
-                            f.write(base64.b64decode(image_data))
-                        logger.info(f"[gemini] Generated image: {output_path}")
-                        return output_path
-                    else:
-                        return image_data
-                except (KeyError, IndexError, TypeError) as e:
-                    logger.error(f"[gemini] Unexpected response format: {data}")
-                    raise RuntimeError(f"Gemini returned unexpected format: {e}")
+                image_data = _extract_image_b64(response.json())
+                if output_path:
+                    path = Path(output_path)
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(output_path, "wb") as f:
+                        f.write(base64.b64decode(image_data))
+                    logger.info(f"[gemini] Generated image: {output_path}")
+                    return output_path
+                return image_data
 
             elif response.status_code == 429:
                 # Rate limit
@@ -89,8 +113,14 @@ def generate_with_gemini(
                 time.sleep(wait_time)
                 backoff *= 2
 
-            elif response.status_code == 401:
-                raise RuntimeError("Gemini API key invalid or expired")
+            elif response.status_code in (401, 403):
+                raise RuntimeError("Gemini API key invalid, expired, or lacks access")
+
+            elif response.status_code == 404:
+                raise RuntimeError(
+                    f"Gemini model '{GEMINI_MODEL}' not found — the model name or API "
+                    f"version may have changed: {response.text[:200]}"
+                )
 
             elif response.status_code == 400:
                 error_msg = response.json().get("error", {}).get("message", "")
