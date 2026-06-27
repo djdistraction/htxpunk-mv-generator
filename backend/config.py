@@ -9,11 +9,15 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
 
-    # Image generation — Gemini free tier (500 images/day)
-    gemini_api_key: str = ""
-    # Image backend: "gemini" (default, uses Gemini API)
-    # For development/testing only: "placeholder" renders offline (no API, $0)
-    image_backend: str = "gemini"
+    # Image generation backends
+    gemini_api_key: str = ""              # Gemini (paid — requires billing)
+    cloudflare_account_id: str = ""       # Workers AI (free daily allocation)
+    cloudflare_api_token: str = ""        # token scoped to "Workers AI"
+    # Image backend:
+    #   "cloudflare"  — Workers AI FLUX.1-schnell (free tier)
+    #   "gemini"      — Gemini/Imagen (requires a billing-enabled Google project)
+    #   "placeholder" — offline render, dev/testing only (no API, $0)
+    image_backend: str = "cloudflare"
 
     # Audio — local Whisper model size: tiny / base / small / medium
     whisper_model: str = "base"
@@ -51,19 +55,28 @@ settings = Settings()
 
 # Validation on startup
 def validate_settings():
+    backend = (settings.image_backend or "cloudflare").lower()
     errors = []
+
     if not settings.groq_api_key or settings.groq_api_key == "gsk_YOUR_API_KEY_HERE":
         errors.append("❌ GROQ_API_KEY not set")
-    if not settings.gemini_api_key or settings.gemini_api_key == "AIzaSy_YOUR_API_KEY_HERE":
-        if settings.image_backend != "placeholder":
-            errors.append("❌ GEMINI_API_KEY not set (or set IMAGE_BACKEND=placeholder for dev-only mode)")
+
+    if backend == "cloudflare":
+        if not settings.cloudflare_account_id or not settings.cloudflare_api_token:
+            errors.append(
+                "❌ CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN required for "
+                "IMAGE_BACKEND=cloudflare"
+            )
+    elif backend == "gemini":
+        if not settings.gemini_api_key or settings.gemini_api_key == "AIzaSy_YOUR_API_KEY_HERE":
+            errors.append("❌ GEMINI_API_KEY required for IMAGE_BACKEND=gemini")
+    # backend == "placeholder": no image credentials needed (dev/offline only)
 
     if errors:
         logger.error("Configuration errors:")
         for e in errors:
             logger.error(e)
-        if settings.image_backend != "placeholder":
-            raise RuntimeError(
-                "Missing required API keys. Set GROQ_API_KEY and GEMINI_API_KEY in .env, "
-                "or IMAGE_BACKEND=placeholder for offline development mode only."
-            )
+        raise RuntimeError(
+            "Missing required configuration: " + "; ".join(errors) + ". "
+            "Set the keys in .env, or use IMAGE_BACKEND=placeholder for offline dev mode."
+        )
