@@ -119,7 +119,10 @@ def render_placeholder(prompt: str, width: int, height: int,
 
 def _generate_gemini(full_prompt: str, width: int, height: int, negative_prompt: str = "") -> bytes:
     """Generate image using Gemini 2.5 Flash Image (requires billing-enabled project)."""
-    from gemini_image_generator import generate_with_gemini
+    try:
+        from services.gemini_image_generator import generate_with_gemini
+    except ModuleNotFoundError:
+        from gemini_image_generator import generate_with_gemini
     import tempfile
 
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
@@ -146,7 +149,10 @@ def _generate_gemini(full_prompt: str, width: int, height: int, negative_prompt:
 
 def _generate_cloudflare(full_prompt: str, width: int, height: int, negative_prompt: str = "") -> bytes:
     """Generate image using Cloudflare Workers AI FLUX.1-schnell (free tier)."""
-    from cloudflare_image_generator import generate_with_cloudflare
+    try:
+        from services.cloudflare_image_generator import generate_with_cloudflare
+    except ModuleNotFoundError:
+        from cloudflare_image_generator import generate_with_cloudflare
     return generate_with_cloudflare(
         account_id=settings.cloudflare_account_id,
         api_token=settings.cloudflare_api_token,
