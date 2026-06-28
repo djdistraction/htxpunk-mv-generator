@@ -179,7 +179,7 @@ export default function ManifestDetail({ id }: { id: string }) {
                     </p>
                   </div>
                 </div>
-                {manifests.find((s) => s.id === expandedShot)?.continuity_rules?.length > 0 && (
+                {(manifests.find((s) => s.id === expandedShot)?.continuity_rules?.length ?? 0) > 0 && (
                   <div>
                     <span className="text-gray-500 block text-xs uppercase mb-2">Continuity Rules</span>
                     <ul className="list-disc list-inside space-y-1 text-gray-300 text-sm">
@@ -191,7 +191,7 @@ export default function ManifestDetail({ id }: { id: string }) {
                     </ul>
                   </div>
                 )}
-                {manifests.find((s) => s.id === expandedShot)?.negative_constraints?.length > 0 && (
+                {(manifests.find((s) => s.id === expandedShot)?.negative_constraints?.length ?? 0) > 0 && (
                   <div>
                     <span className="text-gray-500 block text-xs uppercase mb-2">Negative Constraints</span>
                     <ul className="list-disc list-inside space-y-1 text-gray-400 text-sm">

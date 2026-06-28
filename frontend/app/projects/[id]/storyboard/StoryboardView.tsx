@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { api } from '@/lib/api'
+import { api, mediaUrl } from '@/lib/api'
 
 export default function StoryboardView({ id }: { id: string }) {
   const router = useRouter()
@@ -47,6 +47,37 @@ export default function StoryboardView({ id }: { id: string }) {
     setPanels(next)
   }
 
+  const [regenerating, setRegenerating] = useState<Record<string, boolean>>({})
+
+  const regeneratePanel = async (panel: any) => {
+    setRegenerating(r => ({ ...r, [panel.id]: true }))
+    try {
+      await api.pipeline.regenerateImage(id, {
+        asset_id: panel.id,
+        new_prompt: panel.prompt || panel.label || 'shot frame',
+      })
+      // Regeneration runs in the background; poll the asset list until the
+      // image URL changes, then refresh so the new frame shows.
+      const before = panel.url
+      const started = Date.now()
+      const poll = setInterval(async () => {
+        const assets = await api.assets.list(id)
+        const updated = assets.find((a: any) => a.id === panel.id)
+        if ((updated && updated.url !== before) || Date.now() - started > 90000) {
+          clearInterval(poll)
+          const sb = assets
+            .filter((a: any) => a.asset_type === 'storyboard_panel' || a.asset_type === 'panel')
+            .sort((a: any, b: any) => (a.panel_index ?? 0) - (b.panel_index ?? 0))
+          setPanels(sb)
+          setRegenerating(r => ({ ...r, [panel.id]: false }))
+        }
+      }, 4000)
+    } catch {
+      alert('Failed to start regeneration.')
+      setRegenerating(r => ({ ...r, [panel.id]: false }))
+    }
+  }
+
   if (loading) return (
     <div className="min-h-screen bg-black text-white flex items-center justify-center p-8">
       <div className="text-center">
@@ -77,7 +108,8 @@ export default function StoryboardView({ id }: { id: string }) {
           <div>
             <h1 className="text-3xl font-bold">Storyboard Review</h1>
             <p className="text-gray-500 mt-1">
-              {panels.length} panels · Reorder with arrows then approve to begin video generation.
+              {panels.length} frames · Review each image, ↻ redo any you don't like, reorder with ← →.
+              Approve only when you're ready to generate video.
             </p>
           </div>
           <button
@@ -97,9 +129,14 @@ export default function StoryboardView({ id }: { id: string }) {
               <div key={panel.id} className="bg-gray-900 rounded-xl overflow-hidden border border-gray-800">
                 <div className="aspect-video bg-gray-800 relative">
                   {panel.url ? (
-                    <img src={panel.url} alt={`Panel ${i + 1}`} className="w-full h-full object-cover" />
+                    <img src={mediaUrl(panel.url)} alt={`Panel ${i + 1}`} className="w-full h-full object-cover" />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-gray-600 text-xs">No image</div>
+                  )}
+                  {regenerating[panel.id] && (
+                    <div className="absolute inset-0 bg-black/70 flex items-center justify-center">
+                      <span className="animate-spin text-2xl">🎨</span>
+                    </div>
                   )}
                   <div className="absolute top-1 left-1 bg-black/70 text-white text-xs px-1.5 py-0.5 rounded">
                     {i + 1}
@@ -116,18 +153,28 @@ export default function StoryboardView({ id }: { id: string }) {
                   {panel.lyric_at_this_moment && (
                     <p className="text-gray-400 text-xs italic truncate">&ldquo;{panel.lyric_at_this_moment}&rdquo;</p>
                   )}
-                  <div className="flex justify-between mt-2">
+                  <div className="flex items-center justify-between mt-2">
                     <button
                       onClick={() => movePanel(i, -1)}
                       disabled={i === 0}
                       className="text-gray-500 hover:text-white disabled:opacity-20 text-sm px-1"
+                      title="Move earlier"
                     >
                       ←
+                    </button>
+                    <button
+                      onClick={() => regeneratePanel(panel)}
+                      disabled={!!regenerating[panel.id]}
+                      className="text-gray-500 hover:text-purple-300 disabled:opacity-30 text-xs px-2 py-0.5 rounded border border-gray-700 hover:border-purple-600 transition-colors"
+                      title="Regenerate this frame"
+                    >
+                      ↻ redo
                     </button>
                     <button
                       onClick={() => movePanel(i, 1)}
                       disabled={i === panels.length - 1}
                       className="text-gray-500 hover:text-white disabled:opacity-20 text-sm px-1"
+                      title="Move later"
                     >
                       →
                     </button>
