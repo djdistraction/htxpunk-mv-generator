@@ -1,4 +1,4 @@
-"""Gemini 2.5 Flash Image — Free tier image generation (500 images/day).
+"""Gemini 2.5 Flash Image generation.
 
 Uses the dedicated image model `gemini-2.5-flash-image` via the
 generateContent REST endpoint. The image comes back base64-encoded in
@@ -10,7 +10,6 @@ parts for the first inlineData.
 import logging
 import base64
 import time
-from math import gcd
 from pathlib import Path
 import requests
 
