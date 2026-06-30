@@ -60,18 +60,26 @@ export default function StoryboardView({ id }: { id: string }) {
       // image URL changes, then refresh so the new frame shows.
       const before = panel.url
       const started = Date.now()
-      const poll = setInterval(async () => {
-        const assets = await api.assets.list(id)
-        const updated = assets.find((a: any) => a.id === panel.id)
-        if ((updated && updated.url !== before) || Date.now() - started > 90000) {
-          clearInterval(poll)
-          const sb = assets
-            .filter((a: any) => a.asset_type === 'storyboard_panel' || a.asset_type === 'panel')
-            .sort((a: any, b: any) => (a.panel_index ?? 0) - (b.panel_index ?? 0))
-          setPanels(sb)
+      const pollOnce = async () => {
+        try {
+          const assets = await api.assets.list(id)
+          const updated = assets.find((a: any) => a.id === panel.id)
+          const timedOut = Date.now() - started > 90000
+          if ((updated && updated.url !== before) || timedOut) {
+            const sb = assets
+              .filter((a: any) => a.asset_type === 'storyboard_panel' || a.asset_type === 'panel')
+              .sort((a: any, b: any) => (a.panel_index ?? 0) - (b.panel_index ?? 0))
+            setPanels(sb)
+            setRegenerating(r => ({ ...r, [panel.id]: false }))
+            return
+          }
+          setTimeout(pollOnce, 4000)
+        } catch {
           setRegenerating(r => ({ ...r, [panel.id]: false }))
+          alert('Failed while polling regeneration status.')
         }
-      }, 4000)
+      }
+      pollOnce()
     } catch {
       alert('Failed to start regeneration.')
       setRegenerating(r => ({ ...r, [panel.id]: false }))
