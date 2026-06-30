@@ -57,8 +57,14 @@ settings = Settings()
 def validate_settings():
     backend = (settings.image_backend or "cloudflare").lower()
     errors = []
+    valid_backends = {"cloudflare", "gemini", "placeholder"}
 
-    if not settings.groq_api_key or settings.groq_api_key == "gsk_YOUR_API_KEY_HERE":
+    if backend not in valid_backends:
+        errors.append("❌ IMAGE_BACKEND must be one of: cloudflare, gemini, placeholder")
+
+    if backend in {"cloudflare", "gemini"} and (
+        not settings.groq_api_key or settings.groq_api_key == "gsk_YOUR_API_KEY_HERE"
+    ):
         errors.append("❌ GROQ_API_KEY not set")
 
     if backend == "cloudflare":
