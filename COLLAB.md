@@ -31,7 +31,7 @@ results. Cloud Claude writes the code and pushes; you are its hands on the real 
 
 | | Cloud Claude (Claude Code) | Local Claude (Claude Desktop + Desktop Commander) |
 |---|---|---|
-| Runs in | a remote Linux cloud container | the owner's Windows PC (`C:\Users\booki\HTXpunk LLC\htxpunk-mv-generator`) |
+| Runs in | a remote Linux cloud container | the owner's Windows PC (local clone of this repo) |
 | Can | author code, push to GitHub, read/comment on the PR | run the app, test, build/sign the installer, fix machine-specific issues |
 | Cannot | touch the Windows PC, reach `api.cloudflare.com`, run a GUI | hold the full project history a cold start lacks |
 | Triggered by | PR comments (delivered as wake events) | the human, or by reading Cloud Claude's PR comments |
