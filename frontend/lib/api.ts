@@ -12,8 +12,8 @@ export const apiBaseUrl = API_URL
  */
 export function mediaUrl(url?: string | null): string {
   if (!url) return ''
-  if (/^https?:\/\//i.test(url) || url.startsWith('data:')) return url
-  return `${API_URL}${url.startsWith('/') ? '' : '/'}${url}`
+  if (/^(https?:\/\/|data:|blob:)/i.test(url)) return url
+  return new URL(url, API_URL).toString()
 }
 
 const client = axios.create({
