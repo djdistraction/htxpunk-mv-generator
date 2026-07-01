@@ -100,6 +100,14 @@ def _fit_dims(width: int, height: int) -> tuple[int, int]:
     return w, h
 
 
+def _round_frames_for_ltx(duration_seconds: float, fps: int) -> int:
+    """LTX-Video's causal VAE has 8x temporal compression: num_frames must be
+    8k+1. Round the requested duration to the nearest valid frame count."""
+    raw = max(9, round(duration_seconds * fps))
+    k = round((raw - 1) / 8)
+    return max(9, k * 8 + 1)
+
+
 @app.function(
     gpu="A10G",
     image=video_image,
@@ -173,3 +181,95 @@ def test_image_to_video(image_path: str, prompt: str = "cinematic motion, subtle
     with open(out_path, "wb") as f:
         f.write(video_bytes)
     print(f"✅ Wrote {out_path} ({len(video_bytes)} bytes) — open it and watch the motion.")
+
+
+@app.local_entrypoint()
+def test_shot_clip(project_id: str, shot_number: str = ""):
+    """Layer 2 test that IS production work: turn one already-approved shot's
+    locked prompt + generated still into its real video clip, at its real
+    duration, and register it as a video_clip asset for that project.
+
+    If the clip looks right, it isn't a throwaway — it's shot N's actual clip,
+    ready for Layer 4 (pipeline assembly) to pick up later. No re-generation
+    needed once this passes.
+
+    Usage:
+        modal run backend/services/modal_video_worker.py::test_shot_clip \\
+            --project-id <id> [--shot-number 1]
+
+    Omit --shot-number to use the first shot that already has a generated still
+    (e.g. from a make_wow_oh_images.py run).
+    """
+    import sys
+    from pathlib import Path as _Path
+
+    backend_dir = _Path(__file__).resolve().parent.parent
+    sys.path.insert(0, str(backend_dir))
+
+    from database import db_get_assets, db_create_asset, db_list_shot_manifests
+    from utils.storage import url_to_local_path, upload_bytes
+    from services.shot_prompt import shot_duration_seconds
+
+    manifests = db_list_shot_manifests(project_id)
+    if not manifests:
+        raise SystemExit(f"No shot manifests found for project {project_id}")
+
+    panels_by_manifest = {
+        p.get("shot_manifest_id"): p
+        for p in db_get_assets(project_id, asset_type="storyboard_panel")
+    }
+
+    shot = panel = None
+    if shot_number:
+        for m in manifests:
+            if str(m.get("shot_number")) == str(shot_number) and m["id"] in panels_by_manifest:
+                shot, panel = m, panels_by_manifest[m["id"]]
+                break
+        if not shot:
+            raise SystemExit(
+                f"Shot {shot_number} not found, or has no generated still yet — "
+                f"run make_wow_oh_images.py first."
+            )
+    else:
+        for m in manifests:
+            if m["id"] in panels_by_manifest:
+                shot, panel = m, panels_by_manifest[m["id"]]
+                break
+        if not shot:
+            raise SystemExit("No shot has a generated still yet — run make_wow_oh_images.py first.")
+
+    # Reuse the EXACT prompt frozen when the still was approved, plus a motion
+    # cue — this is the real production prompt, not a stand-in.
+    locked = shot.get("locked_prompts") or {}
+    base_prompt = locked.get("image_prompt") or shot.get("action") or "cinematic scene"
+    prompt = f"{base_prompt}. Subtle natural motion, cinematic camera movement."
+
+    image_path = url_to_local_path(panel["url"])
+    with open(image_path, "rb") as f:
+        image_bytes = f.read()
+
+    duration = float(panel.get("duration") or shot_duration_seconds(shot))
+    fps = 24
+    num_frames = _round_frames_for_ltx(duration, fps)
+
+    print(f"Shot {shot.get('shot_number')}: \"{prompt[:90]}\"")
+    print(f"  source still : {image_path}")
+    print(f"  target       : {duration:.1f}s -> {num_frames} frames @ {fps}fps")
+    print("First run downloads/caches LTX-Video weights (several GB) — this can take 5-15 minutes.")
+
+    video_bytes = generate_video_clip_remote.remote(image_bytes, prompt, num_frames, fps)
+
+    key = f"{project_id}/clips/shot_{shot.get('shot_number')}.mp4"
+    clip_url = upload_bytes(video_bytes, key, "video/mp4")
+    clip_local = url_to_local_path(clip_url)
+
+    asset_id = db_create_asset(
+        project_id, "video_clip", f"Shot {shot.get('shot_number')} clip",
+        clip_url, prompt,
+        shot_manifest_id=shot["id"], panel_asset_id=panel["id"],
+        duration=duration, fps=fps, num_frames=num_frames,
+    )
+
+    print(f"✅ Wrote real clip: {clip_local} ({len(video_bytes)} bytes)")
+    print(f"   Registered as asset {asset_id} (asset_type=video_clip) for project {project_id}.")
+    print("   Watch it — if the motion looks right, this shot is DONE, not a test to redo.")

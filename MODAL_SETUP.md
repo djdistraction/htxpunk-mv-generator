@@ -28,30 +28,44 @@ Safe to re-run any time as a smoke test — a few seconds of GPU time.
 
 ## Layer 2 — image-to-video (LTX-Video) — do this next
 
+Use **`test_shot_clip`**, not a throwaway image — it pulls a real shot's exact
+locked prompt (frozen when the still was approved) and real duration from an
+already-seeded project, and registers the output as a real `video_clip` asset.
+If it works, you're not left with a test file to discard — that shot is done.
+
 ```bash
-modal run backend/services/modal_video_worker.py::test_image_to_video \
-    --image-path backend/storage/<project-id>/shots/shot_1.png \
-    --prompt "a dancer moving to the beat, subtle camera push in"
+modal run backend/services/modal_video_worker.py::test_shot_clip \
+    --project-id <id>
 ```
 
-Use any real generated frame — e.g. one of the shots from a `make_wow_oh_images.py`
-run (`backend/storage/<project-id>/shots/shot_N.png`).
+`--project-id` is one printed by `make_wow_oh_images.py` (or any project with
+generated storyboard stills). Omit `--shot-number` to auto-pick the first shot
+that already has a generated still; pass `--shot-number 3` to target a specific
+one.
 
 **Heavier than Layer 1** — first run downloads/caches the LTX-Video model weights
 (several GB), so budget **5-15 minutes** for that run only. Weights are cached in
 a Modal Volume, so every run after that is much faster (just generation time,
-roughly 1-3 min). GPU: A10G (24GB).
+roughly 1-3 min). GPU: A10G (24GB). Frame count is derived from the shot's real
+duration (rounded to LTX's required 8k+1 frames), not a fixed test length.
 
 Expected output:
 ```
-Sending ... to Modal for image-to-video generation…
+Shot 1: "Mr_V. Mr. V slumped at a desk under a flickering fluorescent light. ..."
+  source still : backend/storage/<id>/shots/shot_1.png
+  target       : 6.0s -> 145 frames @ 24fps
 First run downloads/caches LTX-Video weights (several GB) — this can take 5-15 minutes.
-✅ Wrote layer2_test_output.mp4 (... bytes) — open it and watch the motion.
+✅ Wrote real clip: backend/storage/<id>/clips/shot_1.mp4 (... bytes)
+   Registered as asset ... (asset_type=video_clip) for project <id>.
 ```
 
-- ✅ Open `layer2_test_output.mp4` — does it show real motion (not a static image)?
+- ✅ Open the clip — does it show real motion (not a static image)? If yes, that
+  shot's clip is done — no need to regenerate it later.
 - ❌ Out-of-memory error → tell Cloud Claude; the fix is bumping `gpu="A100"`, not a rewrite.
 - ❌ Any other error → paste it back verbatim.
+
+(A lower-level `test_image_to_video --image-path ... --prompt ...` entrypoint
+still exists for testing an arbitrary image outside any project, if ever needed.)
 
 **Report the result (and whether the clip looks right) as a `RESULT:` comment on PR #6.**
 
