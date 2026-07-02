@@ -220,11 +220,11 @@ Test retry logic:
 
 | Category | Files | Impact |
 |----------|-------|--------|
-| Backend Errors | 6 new, 5 modified | High - Better reliability |
-| Frontend Types | 3 new, 8 modified | High - Better DX |
-| Testing | 5 new | High - Better confidence |
-| Infrastructure | 2 modified | Medium - Better UX |
-| **Total** | **29 files** | **Production-ready** |
+| Backend Errors (planned) | 6 new, 5 modified | High - Better reliability |
+| Frontend Types (planned) | 3 new, 8 modified | High - Better DX |
+| Testing (planned) | 5 new | High - Better confidence |
+| Infrastructure (planned) | 2 modified | Medium - Better UX |
+| **Total (planned)** | **29 files** | **Pending implementation** |
 
 ## Priority Implementation Order
 
