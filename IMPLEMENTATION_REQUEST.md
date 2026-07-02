@@ -1,6 +1,6 @@
-# Code Review Implementation Request
+# Implementation plan (future work)
 
-This document outlines all changes needed to implement the comprehensive code review improvements.
+This document lists planned changes; the items below are not implemented unless they appear in code changes in this PR.
 
 ## Backend Changes
 
