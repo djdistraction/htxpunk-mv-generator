@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { api, mediaUrl } from '@/lib/api'
 
@@ -49,6 +49,21 @@ export default function StoryboardView({ id }: { id: string }) {
 
   const [regenerating, setRegenerating] = useState<Record<string, boolean>>({})
 
+  // Track in-flight poll timeouts so we can cancel them on unmount, and guard
+  // state updates so a poll that resolves after the user has navigated away
+  // doesn't call setState on an unmounted component or fire stray requests.
+  const isMountedRef = useRef(true)
+  const pollTimeoutIdsRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set())
+
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+      pollTimeoutIdsRef.current.forEach(clearTimeout)
+      pollTimeoutIdsRef.current.clear()
+    }
+  }, [])
+
   const regeneratePanel = async (panel: any) => {
     setRegenerating(r => ({ ...r, [panel.id]: true }))
     try {
@@ -61,8 +76,10 @@ export default function StoryboardView({ id }: { id: string }) {
       const before = panel.url
       const started = Date.now()
       const pollOnce = async () => {
+        if (!isMountedRef.current) return
         try {
           const assets = await api.assets.list(id)
+          if (!isMountedRef.current) return
           const updated = assets.find((a: any) => a.id === panel.id)
           const timedOut = Date.now() - started > 90000
           if ((updated && updated.url !== before) || timedOut) {
@@ -73,14 +90,17 @@ export default function StoryboardView({ id }: { id: string }) {
             setRegenerating(r => ({ ...r, [panel.id]: false }))
             return
           }
-          setTimeout(pollOnce, 4000)
+          const timeoutId = setTimeout(pollOnce, 4000)
+          pollTimeoutIdsRef.current.add(timeoutId)
         } catch {
+          if (!isMountedRef.current) return
           setRegenerating(r => ({ ...r, [panel.id]: false }))
           alert('Failed while polling regeneration status.')
         }
       }
       pollOnce()
     } catch {
+      if (!isMountedRef.current) return
       alert('Failed to start regeneration.')
       setRegenerating(r => ({ ...r, [panel.id]: false }))
     }
