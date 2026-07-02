@@ -433,8 +433,13 @@ def regenerate_single_image(project_id: str, asset_id: str, new_prompt: str):
             if negative:
                 style_suffix = (style_suffix + " " if style_suffix else "") + f"Avoid: {negative}"
 
+        import time
+
         shot_no = asset.get("shot_number") or asset.get("label") or asset_id[:6]
-        shot_id = "shot_" + re.sub(r"[^A-Za-z0-9_-]+", "_", str(shot_no)).strip("_")
+        # Suffix with a timestamp so each re-roll writes a new storage key —
+        # otherwise the URL never changes and the frontend's poll-until-
+        # updated logic spins until timeout even on a successful redo.
+        shot_id = "shot_" + re.sub(r"[^A-Za-z0-9_-]+", "_", str(shot_no)).strip("_") + f"_{int(time.time())}"
         new_url = generate_shot_frame(
             project_id, shot_id, new_prompt,
             style_suffix=style_suffix,

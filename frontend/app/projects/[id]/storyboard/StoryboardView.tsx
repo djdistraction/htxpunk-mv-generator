@@ -158,8 +158,8 @@ export default function StoryboardView({ id }: { id: string }) {
                   )}
                 </div>
                 <div className="p-2">
-                  {panel.lyric_at_this_moment && (
-                    <p className="text-gray-400 text-xs italic truncate">&ldquo;{panel.lyric_at_this_moment}&rdquo;</p>
+                  {(panel.lyric_at_this_moment || panel.lyric) && (
+                    <p className="text-gray-400 text-xs italic truncate">&ldquo;{panel.lyric_at_this_moment || panel.lyric}&rdquo;</p>
                   )}
                   <div className="flex items-center justify-between mt-2">
                     <button
