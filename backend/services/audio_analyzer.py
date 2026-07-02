@@ -17,6 +17,22 @@ _whisper_model = None
 def _get_whisper():
     global _whisper_model
     if _whisper_model is None:
+        import os
+        # Work around a known huggingface_hub bug: the first WhisperModel(...)
+        # call triggers a threaded snapshot_download() of the model files.
+        # When progress bars are disabled (the default outside an interactive
+        # terminal), huggingface_hub swaps in `disabled_tqdm`, which never
+        # initializes the class-level `_lock` real tqdm sets up — so the
+        # first thread to touch it crashes with
+        # "type object 'disabled_tqdm' has no attribute '_lock'".
+        # Forcing progress bars on avoids the broken stand-in entirely.
+        os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "0")
+        try:
+            from huggingface_hub.utils import enable_progress_bars
+            enable_progress_bars()
+        except Exception:
+            pass
+
         from faster_whisper import WhisperModel
         print(f"Loading faster-whisper '{settings.whisper_model}' model...")
         _whisper_model = WhisperModel(
