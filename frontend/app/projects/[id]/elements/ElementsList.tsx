@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { api } from '@/lib/api'
+import { api, mediaUrl } from '@/lib/api'
 
 export default function ElementsList({ id }: { id: string }) {
   const [assets, setAssets] = useState<any[]>([])
@@ -83,7 +83,7 @@ export default function ElementsList({ id }: { id: string }) {
                 <div className="aspect-square bg-gray-800 relative">
                   {asset.url ? (
                     <img
-                      src={asset.url}
+                      src={mediaUrl(asset.url)}
                       alt={asset.label || asset.asset_type}
                       className="w-full h-full object-contain"
                       style={{

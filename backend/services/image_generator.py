@@ -23,7 +23,7 @@ from utils.storage import upload_bytes
 
 def _use_placeholder() -> bool:
     """Check if running in placeholder mode (dev-only, offline)."""
-    backend = (settings.image_backend or "gemini").lower()
+    backend = (settings.image_backend or "cloudflare").lower()
     return backend == "placeholder"
 
 

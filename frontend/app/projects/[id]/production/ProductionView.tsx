@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { api } from '@/lib/api'
+import { api, mediaUrl } from '@/lib/api'
 
 const STAGE_PROGRESS: Record<string, number> = {
   assembling: 85,
@@ -36,6 +36,11 @@ export default function ProductionView({ id }: { id: string }) {
 
   const progress = STAGE_PROGRESS[project.stage] ?? 0
   const finalVideo = clips.find(c => c.asset_type === 'final_video')
+  // The ffmpeg backend stores the video URL on the project itself, not as an asset.
+  // Support both: project.video_url (primary path) and a final_video asset (future path).
+  const finalVideoUrl = project.video_url
+    ? mediaUrl(project.video_url)
+    : (finalVideo?.url ? mediaUrl(finalVideo.url) : '')
   const clipList = clips.filter(c => c.asset_type === 'clip')
   const readyClips = clipList.filter(c => c.url)
 
@@ -64,12 +69,12 @@ export default function ProductionView({ id }: { id: string }) {
           </div>
         )}
 
-        {finalVideo?.url && (
+        {finalVideoUrl && (
           <div className="mb-10 bg-gray-900 rounded-xl overflow-hidden border border-purple-800">
             <div className="p-4 border-b border-gray-800 flex items-center justify-between">
               <h2 className="font-semibold text-green-400">✅ Final Music Video</h2>
               <a
-                href={finalVideo.url}
+                href={finalVideoUrl}
                 download
                 className="text-sm bg-purple-600 hover:bg-purple-700 px-4 py-1.5 rounded-lg transition-colors"
               >
@@ -77,7 +82,7 @@ export default function ProductionView({ id }: { id: string }) {
               </a>
             </div>
             <video
-              src={finalVideo.url}
+              src={finalVideoUrl}
               controls
               className="w-full"
               style={{ maxHeight: '480px', background: '#000' }}
@@ -94,7 +99,7 @@ export default function ProductionView({ id }: { id: string }) {
               {clipList.map((clip: any, i: number) => (
                 <div key={clip.id} className="bg-gray-900 rounded-lg overflow-hidden border border-gray-800">
                   {clip.url ? (
-                    <video src={clip.url} controls muted className="w-full aspect-video object-cover" />
+                    <video src={mediaUrl(clip.url)} controls muted className="w-full aspect-video object-cover" />
                   ) : (
                     <div className="aspect-video bg-gray-800 flex items-center justify-center">
                       <div className="text-center">
