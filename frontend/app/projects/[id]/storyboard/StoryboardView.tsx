@@ -221,40 +221,44 @@ export default function StoryboardView({ id }: { id: string }) {
                   <div className="flex items-center justify-between mt-2">
                     <button
                       onClick={() => movePanel(i, -1)}
-                      disabled={i === 0}
+                      disabled={i === 0 || !canApprove}
                       className="text-gray-500 hover:text-white disabled:opacity-20 text-sm px-1"
                       title="Move earlier"
                     >
                       ←
                     </button>
-                    <button
-                      onClick={() => regeneratePanel(panel)}
-                      disabled={!!regenerating[panel.id] || !!uploading[panel.id]}
-                      className="text-gray-500 hover:text-purple-300 disabled:opacity-30 text-xs px-2 py-0.5 rounded border border-gray-700 hover:border-purple-600 transition-colors"
-                      title="Regenerate with AI"
-                    >
-                      ↻ redo
-                    </button>
-                    <label
-                      className="text-gray-500 hover:text-green-300 disabled:opacity-30 text-xs px-2 py-0.5 rounded border border-gray-700 hover:border-green-600 transition-colors cursor-pointer"
-                      title="Upload your own image for this shot"
-                    >
-                      ⬆ upload
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
+                    {canApprove && (
+                      <button
+                        onClick={() => regeneratePanel(panel)}
                         disabled={!!regenerating[panel.id] || !!uploading[panel.id]}
-                        onChange={(e) => {
-                          const file = e.target.files?.[0]
-                          e.target.value = ''
-                          if (file) uploadPanelImage(panel, file)
-                        }}
-                      />
-                    </label>
+                        className="text-gray-500 hover:text-purple-300 disabled:opacity-30 text-xs px-2 py-0.5 rounded border border-gray-700 hover:border-purple-600 transition-colors"
+                        title="Regenerate with AI"
+                      >
+                        ↻ redo
+                      </button>
+                    )}
+                    {canApprove && (
+                      <label
+                        className="text-gray-500 hover:text-green-300 text-xs px-2 py-0.5 rounded border border-gray-700 hover:border-green-600 transition-colors cursor-pointer"
+                        title="Upload your own image for this shot"
+                      >
+                        ⬆ upload
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          disabled={!!regenerating[panel.id] || !!uploading[panel.id]}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0]
+                            e.target.value = ''
+                            if (file) uploadPanelImage(panel, file)
+                          }}
+                        />
+                      </label>
+                    )}
                     <button
                       onClick={() => movePanel(i, 1)}
-                      disabled={i === panels.length - 1}
+                      disabled={i === panels.length - 1 || !canApprove}
                       className="text-gray-500 hover:text-white disabled:opacity-20 text-sm px-1"
                       title="Move later"
                     >
