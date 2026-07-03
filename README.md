@@ -2,7 +2,7 @@
 
 An AI-powered pipeline that turns song uploads into complete animated music videos with human approval gates for treatment, manifest, and storyboard stages.
 
-Built by **HTXpunk Productions** · Runs locally · Upgrade path via `.env` settings.
+Built by **HTXpunk Productions** · Runs locally with optional cloud backends · Upgrade path via `.env` settings.
 
 ---
 
@@ -17,7 +17,7 @@ Song Upload
 ↓ [Human Approval]
 ③ Element Extraction  — visual registry (characters, locations, props, states)
 ↓
-④ Image Generation    — Cloudflare / Gemini 2.5 Flash Image / placeholder backend
+④ Image Generation    — Cloudflare Workers AI / Gemini 2.5 Flash Image / placeholder backend
 ↓
 ⑤ Storyboard Build    — Pillow compositing + panel ordering
 ↓ [Human Approval]
@@ -56,7 +56,7 @@ cp .env.example .env
 # GROQ_API_KEY=...
 
 # 3) Choose image backend in .env:
-# IMAGE_BACKEND=cloudflare  -> set CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN (default in .env.example)
+# IMAGE_BACKEND=cloudflare  -> set CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN
 # IMAGE_BACKEND=gemini      -> set GEMINI_API_KEY
 # IMAGE_BACKEND=placeholder -> offline development mode
 
