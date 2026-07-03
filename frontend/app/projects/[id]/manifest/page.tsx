@@ -7,3 +7,4 @@ export default async function Page({
 }) {
   const { id } = await params
   return <ManifestDetail id={id} />
+}

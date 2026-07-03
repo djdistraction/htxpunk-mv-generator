@@ -1,13 +1,14 @@
 """
-Image Generation — Gemini 2.5 Flash Image with offline fallback
+Image Generation — pluggable backends
 
 Image backend selection (settings.image_backend):
-  "auto"        — Gemini when GEMINI_API_KEY is set, else placeholder
-  "gemini"      — always call Gemini (raises if no key)
-  "placeholder" — always render local placeholder frames (no API, offline, $0)
+  "cloudflare"  — Workers AI FLUX.1-schnell (free daily allocation)
+  "gemini"      — Gemini/Imagen (requires a billing-enabled Google project)
+  "placeholder" — offline render, dev/testing only (no API, $0)
 
-Gemini free tier: 500 images/day, no credit card needed.
-Placeholder renderer: offline, no API, works without any credentials.
+Cloudflare Workers AI has a free daily allocation. Gemini image generation is
+paid-only (its free tier excludes image output). The placeholder renderer needs
+no credentials and is for offline development/testing.
 """
 import io
 import time
@@ -117,8 +118,11 @@ def render_placeholder(prompt: str, width: int, height: int,
 # ── Gemini renderer ──────────────────────────────────────────────────────────
 
 def _generate_gemini(full_prompt: str, width: int, height: int, negative_prompt: str = "") -> bytes:
-    """Generate image using Gemini 2.5 Flash Image."""
-    from gemini_image_generator import generate_with_gemini
+    """Generate image using Gemini 2.5 Flash Image (requires billing-enabled project)."""
+    try:
+        from services.gemini_image_generator import generate_with_gemini
+    except ModuleNotFoundError:
+        from gemini_image_generator import generate_with_gemini
     import tempfile
 
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
@@ -143,6 +147,22 @@ def _generate_gemini(full_prompt: str, width: int, height: int, negative_prompt:
             pass
 
 
+def _generate_cloudflare(full_prompt: str, width: int, height: int, negative_prompt: str = "") -> bytes:
+    """Generate image using Cloudflare Workers AI FLUX.1-schnell (free tier)."""
+    try:
+        from services.cloudflare_image_generator import generate_with_cloudflare
+    except ModuleNotFoundError:
+        from cloudflare_image_generator import generate_with_cloudflare
+    return generate_with_cloudflare(
+        account_id=settings.cloudflare_account_id,
+        api_token=settings.cloudflare_api_token,
+        prompt=full_prompt,
+        negative_prompt=negative_prompt,
+        width=width,
+        height=height,
+    )
+
+
 def generate_image(prompt: str, style_suffix: str = "", width: int = 1024, height: int = 576,
                    label: str = "", subtitle: str = "", negative_prompt: str = "") -> bytes:
     """Generate an image and return raw PNG bytes.
@@ -152,10 +172,13 @@ def generate_image(prompt: str, style_suffix: str = "", width: int = 1024, heigh
     """
     full_prompt = f"{prompt}. {style_suffix}".strip(" .")
 
-    if _use_placeholder():
+    backend = (settings.image_backend or "cloudflare").lower()
+    if backend == "placeholder":
         return render_placeholder(full_prompt, width, height, label=label, subtitle=subtitle)
-
-    return _generate_gemini(full_prompt, width, height, negative_prompt)
+    if backend == "gemini":
+        return _generate_gemini(full_prompt, width, height, negative_prompt)
+    # default: cloudflare
+    return _generate_cloudflare(full_prompt, width, height, negative_prompt)
 
 
 def generate_background(project_id: str, bg_id: str, prompt: str, style_suffix: str = "") -> str:

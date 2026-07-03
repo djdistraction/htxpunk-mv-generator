@@ -2,6 +2,20 @@ import axios, { AxiosError } from 'axios'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
+export const apiBaseUrl = API_URL
+
+/**
+ * Resolve an asset URL for use in <img src>. Backend returns relative
+ * "/storage/..." paths served by FastAPI on the API origin (:8000), but the
+ * frontend runs on a different origin (:3000), so relative URLs would 404.
+ * Prefix them with the API base. Absolute URLs (http/https, e.g. R2) pass through.
+ */
+export function mediaUrl(url?: string | null): string {
+  if (!url) return ''
+  if (/^(https?:\/\/|data:|blob:)/i.test(url)) return url
+  return new URL(url, API_URL).toString()
+}
+
 const client = axios.create({
   baseURL: API_URL,
   timeout: 120000, // 2 minute timeout for long uploads

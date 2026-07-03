@@ -27,12 +27,22 @@ export default function SettingsPage() {
     }
   }
 
+  async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 5000) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, { ...options, signal: controller.signal });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
   async function testGroqKey(key: string) {
     if (!key) return false;
     try {
-      const response = await fetch('https://api.groq.com/openai/v1/models', {
+      const response = await fetchWithTimeout('https://api.groq.com/openai/v1/models', {
         headers: { Authorization: `Bearer ${key}` },
-      });
+      }, 5000);
       return response.ok;
     } catch {
       return false;
@@ -41,16 +51,11 @@ export default function SettingsPage() {
 
   async function testGeminiKey(key: string) {
     if (!key) return false;
+    // Validate by listing models — cheap, fast, and doesn't burn image quota.
     try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2-5-flash:generateContent?key=${key}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: 'test' }] }],
-          }),
-        }
+      const response = await fetchWithTimeout(
+        `https://generativelanguage.googleapis.com/v1beta/models?key=${key}`,
+        {}, 5000
       );
       return response.ok;
     } catch {

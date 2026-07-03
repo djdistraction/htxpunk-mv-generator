@@ -408,16 +408,50 @@ def run_video_assembly(project_id: str):
 # ── Utility: Regenerate a single image ───────────────────────────────────────
 
 def regenerate_single_image(project_id: str, asset_id: str, new_prompt: str):
-    """Regenerate one background or element image in place."""
-    from services.image_generator import generate_element
+    """Regenerate one image in place. Storyboard panels re-render as full frames
+    via the configured image backend; elements/backgrounds use the element path."""
     assets = db_get_assets(project_id)
     asset = next((a for a in assets if a.get("id") == asset_id), None)
     if not asset:
         raise ValueError(f"Asset {asset_id} not found")
-    remove_bg = asset.get("asset_type") == "element"
+
+    asset_type = asset.get("asset_type")
     style_suffix = asset.get("style_suffix", "")
-    new_url = generate_element(
-        project_id, asset_id, new_prompt, style_suffix, remove_bg=remove_bg
-    )
+
+    if asset_type in ("storyboard_panel", "panel"):
+        # Full-frame shot: same generator the manifest path uses, so a re-roll
+        # matches the rest of the storyboard (16:9, no background removal).
+        from services.image_generator import generate_shot_frame
+        import re
+
+        # Preserve any locked negative prompt so a re-roll matches the original constraints.
+        manifest_id = asset.get("shot_manifest_id")
+        if manifest_id:
+            from database import db_get_shot_manifest
+            manifest = db_get_shot_manifest(manifest_id) or {}
+            negative = (manifest.get("locked_prompts") or {}).get("negative_prompt") or ""
+            if negative:
+                style_suffix = (style_suffix + " " if style_suffix else "") + f"Avoid: {negative}"
+
+        import uuid
+
+        shot_no = asset.get("shot_number") or asset.get("label") or asset_id[:6]
+        # Suffix with a UUID fragment so each re-roll writes a unique storage key —
+        # otherwise the URL never changes and the frontend's poll-until-
+        # updated logic spins until timeout even on a successful redo.
+        shot_id = "shot_" + re.sub(r"[^A-Za-z0-9_-]+", "_", str(shot_no)).strip("_") + f"_{uuid.uuid4().hex[:8]}"
+        new_url = generate_shot_frame(
+            project_id, shot_id, new_prompt,
+            style_suffix=style_suffix,
+            label=asset.get("label") or f"Shot {shot_no}",
+            subtitle=asset.get("lyric") or "",
+        )
+    else:
+        from services.image_generator import generate_element
+        remove_bg = asset_type == "element"
+        new_url = generate_element(
+            project_id, asset_id, new_prompt, style_suffix, remove_bg=remove_bg
+        )
+
     db_update_asset(asset_id, url=new_url, prompt=new_prompt)
-    logger.info("[Worker] Regenerated asset %s", asset_id[:8])
+    logger.info("[Worker] Regenerated asset %s (%s)", asset_id[:8], asset_type)
