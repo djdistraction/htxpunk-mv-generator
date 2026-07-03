@@ -118,7 +118,10 @@ export default function StoryboardView({ id }: { id: string }) {
     </div>
   )
 
-  if (!project || project.stage !== 'awaiting_storyboard_approval') return (
+  const VIEWABLE_STAGES = ['awaiting_storyboard_approval', 'storyboard_approved', 'assembling', 'complete']
+  const canApprove = project?.stage === 'awaiting_storyboard_approval'
+
+  if (!project || !VIEWABLE_STAGES.includes(project.stage)) return (
     <div className="min-h-screen bg-black text-white flex items-center justify-center p-8">
       <div className="text-center max-w-md">
         <p className="text-gray-400 mb-2">Storyboard not ready for review.</p>
@@ -139,17 +142,20 @@ export default function StoryboardView({ id }: { id: string }) {
           <div>
             <h1 className="text-3xl font-bold">Storyboard Review</h1>
             <p className="text-gray-500 mt-1">
-              {panels.length} frames · Review each image, ↻ redo any you don't like, reorder with ← →.
-              Approve only when you're ready to generate video.
+              {project.stage === 'awaiting_storyboard_approval'
+                ? `${panels.length} frames · Review each image, ↻ redo any you don't like, reorder with ← →. Approve only when you're ready to generate video.`
+                : `${panels.length} frames · Storyboard locked after approval.`}
             </p>
           </div>
-          <button
-            onClick={handleApprove}
-            disabled={approving}
-            className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 text-white font-semibold px-6 py-3 rounded-lg transition-colors"
-          >
-            {approving ? 'Starting generation…' : '✓ Approve & Generate Video'}
-          </button>
+          {canApprove && (
+            <button
+              onClick={handleApprove}
+              disabled={approving}
+              className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 text-white font-semibold px-6 py-3 rounded-lg transition-colors"
+            >
+              {approving ? 'Starting generation…' : '✓ Approve & Generate Video'}
+            </button>
+          )}
         </div>
 
         {panels.length === 0 ? (
@@ -187,23 +193,25 @@ export default function StoryboardView({ id }: { id: string }) {
                   <div className="flex items-center justify-between mt-2">
                     <button
                       onClick={() => movePanel(i, -1)}
-                      disabled={i === 0}
+                      disabled={i === 0 || !canApprove}
                       className="text-gray-500 hover:text-white disabled:opacity-20 text-sm px-1"
                       title="Move earlier"
                     >
                       ←
                     </button>
-                    <button
-                      onClick={() => regeneratePanel(panel)}
-                      disabled={!!regenerating[panel.id]}
-                      className="text-gray-500 hover:text-purple-300 disabled:opacity-30 text-xs px-2 py-0.5 rounded border border-gray-700 hover:border-purple-600 transition-colors"
-                      title="Regenerate this frame"
-                    >
-                      ↻ redo
-                    </button>
+                    {canApprove && (
+                      <button
+                        onClick={() => regeneratePanel(panel)}
+                        disabled={!!regenerating[panel.id]}
+                        className="text-gray-500 hover:text-purple-300 disabled:opacity-30 text-xs px-2 py-0.5 rounded border border-gray-700 hover:border-purple-600 transition-colors"
+                        title="Regenerate this frame"
+                      >
+                        ↻ redo
+                      </button>
+                    )}
                     <button
                       onClick={() => movePanel(i, 1)}
-                      disabled={i === panels.length - 1}
+                      disabled={i === panels.length - 1 || !canApprove}
                       className="text-gray-500 hover:text-white disabled:opacity-20 text-sm px-1"
                       title="Move later"
                     >

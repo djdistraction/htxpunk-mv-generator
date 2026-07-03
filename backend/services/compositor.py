@@ -3,9 +3,13 @@ Stage 6a: Compositor
 - Takes a background image and a list of (element_image, position, scale) tuples
 - Composites them into a single storyboard panel image
 """
-from PIL import Image
 import io
+import logging
+
+from PIL import Image, UnidentifiedImageError
 from utils.storage import url_to_local_path, upload_bytes
+
+logger = logging.getLogger(__name__)
 
 
 def _read_storage_url(url: str) -> bytes:
@@ -13,6 +17,10 @@ def _read_storage_url(url: str) -> bytes:
     local_path = url_to_local_path(url)
     with open(local_path, "rb") as f:
         return f.read()
+
+
+def _black_canvas(w: int, h: int) -> Image.Image:
+    return Image.new("RGBA", (w, h), (0, 0, 0, 255))
 
 
 def composite_panel(
@@ -31,9 +39,21 @@ def composite_panel(
         scale   : float - relative scale (1.0 = full canvas width)
         z_index : int   - layer order (higher = in front)
     """
-    bg_bytes = _read_storage_url(background_url)
-    canvas = Image.open(io.BytesIO(bg_bytes)).convert("RGBA")
-    W, H = canvas.size
+    W, H = 1920, 1080
+    canvas = _black_canvas(W, H)
+
+    if background_url:
+        try:
+            bg_bytes = _read_storage_url(background_url)
+            loaded = Image.open(io.BytesIO(bg_bytes)).convert("RGBA")
+            W, H = loaded.size
+            canvas = loaded
+        except (OSError, UnidentifiedImageError) as exc:
+            logger.warning(
+                "[compositor] Could not load background '%s': %s — using black canvas",
+                background_url, exc
+            )
+            canvas = _black_canvas(W, H)
 
     for elem in sorted(elements, key=lambda e: e.get("z_index", 0)):
         elem_bytes = _read_storage_url(elem["url"])
