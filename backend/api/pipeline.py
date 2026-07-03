@@ -144,9 +144,15 @@ async def upload_shot_image(
         from PIL import Image
         img = Image.open(io.BytesIO(raw))
         img.load()  # force-decode so downstream save can't fail silently
-        # Preserve transparency; fall back to RGB only for palette/grayscale modes
+        # Preserve transparency: convert to RGBA when the image has an alpha
+        # channel (RGBA, LA, PA) or a transparency palette entry ('P' with
+        # 'transparency' in img.info); otherwise normalise to RGB.
         if img.mode not in ("RGB", "RGBA"):
-            img = img.convert("RGBA" if img.mode in ("LA", "PA") else "RGB")
+            has_transparency = (
+                img.mode in ("LA", "PA")
+                or (img.mode == "P" and "transparency" in img.info)
+            )
+            img = img.convert("RGBA" if has_transparency else "RGB")
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         png_bytes = buf.getvalue()
