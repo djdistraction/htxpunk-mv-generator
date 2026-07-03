@@ -7,7 +7,6 @@ Transcription: faster-whisper (CPU, int8) — free, no API key needed.
 Analysis: Groq LLM — free tier.
 """
 import json
-import re
 from pathlib import Path
 from openai import OpenAI
 from config import settings
@@ -48,75 +47,6 @@ def _groq_client():
         api_key=settings.groq_api_key,
         base_url="https://api.groq.com/openai/v1"
     )
-
-
-def _has_groq_key() -> bool:
-    key = (settings.groq_api_key or "").strip()
-    return bool(key and not key.endswith("_HERE"))
-
-
-def _fallback_analysis(transcript: dict, creative_brief: str = "", reference_notes: str = "") -> dict:
-    """Offline analysis used when no Groq key is configured."""
-    segments = transcript.get("segments", [])
-    duration = max((float(seg.get("end", 0.0)) for seg in segments), default=180.0)
-    duration = max(duration, 30.0)
-
-    section_names = ["intro", "verse", "chorus", "outro"]
-    section_span = duration / len(section_names)
-    sections = []
-    for i, name in enumerate(section_names):
-        start = round(i * section_span, 2)
-        end = round(duration if i == len(section_names) - 1 else (i + 1) * section_span, 2)
-        sections.append({
-            "name": name,
-            "start_time": start,
-            "end_time": end,
-            "energy_level": min(10, 4 + i * 2),
-            "description": f"{name.title()} section for guided visual planning.",
-        })
-
-    if segments:
-        sample_step = max(1, len(segments) // 6)
-        sampled = segments[::sample_step][:6]
-        key_moments = [
-            {
-                "timestamp": round(float(seg.get("start", 0.0)), 2),
-                "lyric": (seg.get("text") or "").strip()[:140],
-                "visual_opportunity": "Anchor this moment with a distinct shot or camera move.",
-            }
-            for seg in sampled
-        ]
-    else:
-        key_moments = []
-
-    source_text = " ".join([transcript.get("text", ""), creative_brief, reference_notes]).lower()
-    words = re.findall(r"[a-z]{4,}", source_text)
-    seen = set()
-    keywords = []
-    for w in words:
-        if w not in seen:
-            seen.add(w)
-            keywords.append(w)
-        if len(keywords) >= 10:
-            break
-    if len(keywords) < 10:
-        keywords.extend([
-            "performance", "symbolic", "contrast", "rhythm", "movement",
-            "portrait", "atmosphere", "lighting", "texture", "silhouette",
-        ])
-    keywords = keywords[:10]
-
-    return {
-        "themes": ["performance", "emotion", "visual storytelling"],
-        "mood": "guided production mode",
-        "narrative_arc": "Build visual intensity over time, then resolve in the final section.",
-        "sections": sections,
-        "key_moments": key_moments,
-        "color_mood": ["neon purple", "midnight blue", "warm amber"],
-        "energy_level": 6,
-        "visual_keywords": keywords,
-        "song_duration": round(duration, 2),
-    }
 
 def transcribe_audio(audio_path: str) -> dict:
     """Transcribe audio file using faster-whisper. Returns segments + word timestamps."""
@@ -174,21 +104,17 @@ def analyze_song(transcript: dict, audio_path: str,
             f"mood boards, ideas):\n{reference_notes.strip()}"
         )
 
-    if not _has_groq_key():
-        return _fallback_analysis(transcript, creative_brief=creative_brief, reference_notes=reference_notes)
-
-    try:
-        client = _groq_client()
-        response = client.chat.completions.create(
-            model=settings.groq_model,
-            response_format={"type": "json_object"},
-            temperature=0.4,
-            messages=[
-                {"role": "system", "content": (
-                    "You are a music video director analyzing a song for visual storytelling. "
-                    "Return a JSON object only."
-                )},
-                {"role": "user", "content": f"""Analyze this song's lyrics and structure.
+    client = _groq_client()
+    response = client.chat.completions.create(
+        model=settings.groq_model,
+        response_format={"type": "json_object"},
+        temperature=0.4,
+        messages=[
+            {"role": "system", "content": (
+                "You are a music video director analyzing a song for visual storytelling. "
+                "Return a JSON object only."
+            )},
+            {"role": "user", "content": f"""Analyze this song's lyrics and structure.
 
 LYRICS WITH TIMESTAMPS:
 {lyrics_with_timestamps}{context_block}
@@ -203,11 +129,9 @@ Return JSON with these fields:
 - energy_level: overall 1-10
 - visual_keywords: list of 10 concrete visual concepts this song evokes
 - song_duration: estimate in seconds based on latest timestamp"""}
-            ]
-        )
-        return json.loads(response.choices[0].message.content)
-    except Exception:
-        return _fallback_analysis(transcript, creative_brief=creative_brief, reference_notes=reference_notes)
+        ]
+    )
+    return json.loads(response.choices[0].message.content)
 
 def run_full_analysis(audio_path: str, creative_brief: str = "",
                       reference_notes: str = "") -> dict:

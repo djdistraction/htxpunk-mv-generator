@@ -280,30 +280,30 @@
 
             <!-- Step 1: API Keys -->
             <div class="setup-step active" id="step1">
-                <div class="step-title">Configure AI Services (Optional)</div>
+                <div class="step-title">Configure AI Services</div>
                 <div class="step-description">
-                    Add keys now to automate analysis and image generation, or skip for guided/offline production mode.
+                    Choose your AI providers. All are free tier, and image generation is optional.
                 </div>
 
                 <div class="form-group">
-                    <label>Groq API Key (LLM)</label>
+                    <label>Groq API Key (LLM) *</label>
                     <div style="display: flex; gap: 8px;">
                         <input type="password" id="groqApiKey" placeholder="gsk_..." style="flex: 1;" />
                         <span id="groqValidation" style="padding: 12px; color: #888;">○</span>
                     </div>
                     <div class="help-text">
-                        Optional. Get free at <a href="https://console.groq.com" target="_blank">console.groq.com</a> to automate text analysis and planning.
+                        Get free at <a href="https://console.groq.com" target="_blank">console.groq.com</a> (required; powers text analysis)
                     </div>
                 </div>
 
                 <div class="form-group">
-                    <label>Gemini API Key (Image Generation)</label>
+                    <label>Gemini API Key (Image Generation) *</label>
                     <div style="display: flex; gap: 8px;">
                         <input type="password" id="geminiApiKey" placeholder="AIzaSy..." style="flex: 1;" />
                         <span id="geminiValidation" style="padding: 12px; color: #888;">○</span>
                     </div>
                     <div class="help-text">
-                        Optional. Get free at <a href="https://aistudio.google.com" target="_blank">aistudio.google.com</a>. Without this key, image generation uses offline placeholders.
+                        Get free at <a href="https://aistudio.google.com" target="_blank">aistudio.google.com</a> (takes 30 seconds, no credit card). Free tier: 500 images/day.
                     </div>
                 </div>
 
@@ -344,7 +344,7 @@
 
                 <div style="background: #f9f9f9; padding: 16px; border-radius: 6px; margin-bottom: 20px;">
                     <div style="font-size: 14px; line-height: 1.8; color: #555;">
-                        <div style="margin-bottom: 10px;">✓ Any keys you entered will be securely saved</div>
+                        <div style="margin-bottom: 10px;">✓ Groq + Gemini keys will be securely saved</div>
                         <div style="margin-bottom: 10px;">✓ Backend will start on port <span id="summaryPort">8000</span></div>
                         <div style="margin-bottom: 10px;">✓ Storage at: <span id="summaryPath" style="word-break: break-all;"></span></div>
                         <div>✓ You're ready to generate videos!</div>
@@ -461,40 +461,35 @@
                 const groqKey = document.getElementById('groqApiKey').value.trim();
                 const geminiKey = document.getElementById('geminiApiKey').value.trim();
 
-                const groqValidationEl = document.getElementById('groqValidation');
-                const geminiValidationEl = document.getElementById('geminiValidation');
-
-                if (groqValidationEl) {
-                    groqValidationEl.textContent = groqKey ? '⏳' : '○';
-                    groqValidationEl.style.color = '#888';
+                if (!groqKey) {
+                    showError('step1Error', 'Groq API key is required');
+                    return false;
                 }
-                if (geminiValidationEl) {
-                    geminiValidationEl.textContent = geminiKey ? '⏳' : '○';
-                    geminiValidationEl.style.color = '#888';
+                if (!geminiKey) {
+                    showError('step1Error', 'Gemini API key is required (get free at aistudio.google.com)');
+                    return false;
                 }
 
-                if (groqKey) {
-                    const groqValid = await testGroqKey(groqKey);
-                    if (groqValidationEl) {
-                        groqValidationEl.textContent = groqValid ? '✓' : '✗';
-                        groqValidationEl.style.color = groqValid ? '#3c3' : '#c33';
-                    }
-                    if (!groqValid) {
-                        showError('step1Error', 'Groq API key is invalid. Check it at https://console.groq.com/keys');
-                        return false;
-                    }
+                // Validate Groq key
+                document.getElementById('groqValidation').textContent = '⏳';
+                const groqValid = await testGroqKey(groqKey);
+                document.getElementById('groqValidation').textContent = groqValid ? '✓' : '✗';
+                document.getElementById('groqValidation').style.color = groqValid ? '#3c3' : '#c33';
+
+                if (!groqValid) {
+                    showError('step1Error', 'Groq API key is invalid. Check it at https://console.groq.com/keys');
+                    return false;
                 }
 
-                if (geminiKey) {
-                    const geminiValid = await testGeminiKey(geminiKey);
-                    if (geminiValidationEl) {
-                        geminiValidationEl.textContent = geminiValid ? '✓' : '✗';
-                        geminiValidationEl.style.color = geminiValid ? '#3c3' : '#c33';
-                    }
-                    if (!geminiValid) {
-                        showError('step1Error', 'Gemini API key is invalid. Get one at https://aistudio.google.com');
-                        return false;
-                    }
+                // Validate Gemini key
+                document.getElementById('geminiValidation').textContent = '⏳';
+                const geminiValid = await testGeminiKey(geminiKey);
+                document.getElementById('geminiValidation').textContent = geminiValid ? '✓' : '✗';
+                document.getElementById('geminiValidation').style.color = geminiValid ? '#3c3' : '#c33';
+
+                if (!geminiValid) {
+                    showError('step1Error', 'Gemini API key is invalid. Get one at https://aistudio.google.com');
+                    return false;
                 }
 
                 return true;
