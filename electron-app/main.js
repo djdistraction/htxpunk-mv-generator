@@ -1,7 +1,7 @@
 const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage } = require('electron');
 const path = require('path');
 const isDev = require('electron-is-dev');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const http = require('http');
 const fs = require('fs');
 const os = require('os');
@@ -76,7 +76,7 @@ function saveConfig(config) {
 function generateEnvFile(config) {
   const envContent = `GROQ_API_KEY=${config.groqApiKey}
 GEMINI_API_KEY=${config.geminiApiKey || ''}
-IMAGE_BACKEND=auto
+IMAGE_BACKEND=gemini
 STORAGE_BACKEND=local
 LOCAL_STORAGE_PATH=${config.storagePath}
 DATABASE_URL=sqlite+aiosqlite:///${path.join(config.storagePath, 'htxpunk.db')}
@@ -133,6 +133,24 @@ function waitForBackend(port, timeoutMs = 90000) {
   });
 }
 
+// Find a working Python launcher on this machine. Different Windows Python
+// installs put different things on PATH: the official python.org installer's
+// `py` launcher requires "Install launcher for all users" (often unchecked
+// on a per-user install), while `python` is what's on PATH whenever "Add
+// python.exe to PATH" was checked — which is the common case. Try both, and
+// `python3` for macOS/Linux, rather than hardcoding one and crashing with a
+// cryptic ENOENT when that one isn't present.
+function resolvePythonCommand() {
+  const candidates = process.platform === 'win32'
+    ? ['python', 'py', 'python3']
+    : ['python3', 'python'];
+  for (const cmd of candidates) {
+    const result = spawnSync(cmd, ['--version'], { stdio: 'ignore' });
+    if (!result.error) return cmd;
+  }
+  return null;
+}
+
 // Start backend
 function startBackend(config) {
   return new Promise((resolve, reject) => {
@@ -146,7 +164,7 @@ function startBackend(config) {
         PYTHONPATH: backendPath,
         GROQ_API_KEY: config.groqApiKey,
         GEMINI_API_KEY: config.geminiApiKey || '',
-        IMAGE_BACKEND: 'auto',
+        IMAGE_BACKEND: 'gemini',
         STORAGE_BACKEND: 'local',
         LOCAL_STORAGE_PATH: config.storagePath,
         DATABASE_URL: `sqlite+aiosqlite:///${path.join(config.storagePath, 'htxpunk.db')}`,
@@ -157,10 +175,20 @@ function startBackend(config) {
         fs.mkdirSync(config.storagePath, { recursive: true });
       }
 
+      const pythonCmd = resolvePythonCommand();
+      if (!pythonCmd) {
+        reject(new Error(
+          'Could not find Python on this system (tried python, py, python3). ' +
+          'Install Python 3.11+ from python.org — check "Add python.exe to PATH" ' +
+          'during setup — then restart this app.'
+        ));
+        return;
+      }
+
       // Spawn uvicorn process. We capture stdout/stderr purely for logging;
       // readiness is detected by polling /health, not by parsing this output.
       backendProcess = spawn(
-        'py',
+        pythonCmd,
         ['-m', 'uvicorn', 'main:app', '--port', String(config.backendPort), '--host', '127.0.0.1'],
         {
           cwd: backendPath,
