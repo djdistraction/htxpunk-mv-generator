@@ -11,7 +11,7 @@ Built by **HTXpunk Productions** · Runs locally with optional cloud backends ·
 ```
 Song Upload
 ↓
-① Audio Analysis      — faster-whisper transcript + word timestamps + Groq mood/structure analysis
+① Audio Analysis      — Faster-Whisper transcript + word timestamps + Groq mood/structure analysis
 ↓
 ② Visual Treatment    — Groq generates the creative direction
 ↓ [Human Approval]
@@ -52,7 +52,7 @@ Song Upload
 # 1) Configure environment
 cp .env.example .env
 
-# 2) Add required key
+# 2) Add required keys
 # GROQ_API_KEY=...
 
 # 3) Choose image backend in .env:
