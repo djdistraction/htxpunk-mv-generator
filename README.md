@@ -11,13 +11,13 @@ Built by **HTXpunk Productions** · Runs locally · Upgrade path via `.env` sett
 ```
 Song Upload
 ↓
-① Audio Analysis      — faster-whisper (local) + Groq mood/structure analysis
+① Audio Analysis      — faster-whisper transcript + word timestamps + Groq mood/structure analysis
 ↓
 ② Visual Treatment    — Groq generates the creative direction
 ↓ [Human Approval]
 ③ Element Extraction  — visual registry (characters, locations, props, states)
 ↓
-④ Image Generation    — Cloudflare / Gemini / placeholder backend
+④ Image Generation    — Cloudflare / Gemini 2.5 Flash Image / placeholder backend
 ↓
 ⑤ Storyboard Build    — Pillow compositing + panel ordering
 ↓ [Human Approval]
@@ -56,7 +56,7 @@ cp .env.example .env
 # GROQ_API_KEY=...
 
 # 3) Choose image backend in .env:
-# IMAGE_BACKEND=cloudflare  -> set CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN
+# IMAGE_BACKEND=cloudflare  -> set CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN (default in .env.example)
 # IMAGE_BACKEND=gemini      -> set GEMINI_API_KEY
 # IMAGE_BACKEND=placeholder -> offline development mode
 
