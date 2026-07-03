@@ -78,4 +78,4 @@ npm run dev
 
 ## License
 
-Proprietary — © HTXpunk Productions. All rights reserved.
+Proprietary — © HTXpunk LLC. All rights reserved.
