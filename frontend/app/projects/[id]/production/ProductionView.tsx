@@ -44,6 +44,23 @@ export default function ProductionView({ id }: { id: string }) {
   const clipList = clips.filter(c => c.asset_type === 'clip')
   const readyClips = clipList.filter(c => c.url)
 
+  const handleDownload = async () => {
+    if (!finalVideoUrl) return
+    try {
+      const res = await fetch(finalVideoUrl)
+      if (!res.ok) throw new Error(`Failed to fetch video (${res.status})`)
+      const blob = await res.blob()
+      const blobUrl = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = blobUrl
+      a.download = `${project.title ?? 'music-video'}.mp4`
+      a.click()
+      URL.revokeObjectURL(blobUrl)
+    } catch (err) {
+      alert(`Download failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-black text-white p-8">
       <div className="max-w-4xl mx-auto">
@@ -73,13 +90,12 @@ export default function ProductionView({ id }: { id: string }) {
           <div className="mb-10 bg-gray-900 rounded-xl overflow-hidden border border-purple-800">
             <div className="p-4 border-b border-gray-800 flex items-center justify-between">
               <h2 className="font-semibold text-green-400">✅ Final Music Video</h2>
-              <a
-                href={finalVideoUrl}
-                download
+              <button
+                onClick={handleDownload}
                 className="text-sm bg-purple-600 hover:bg-purple-700 px-4 py-1.5 rounded-lg transition-colors"
               >
                 Download MP4
-              </a>
+              </button>
             </div>
             <video
               src={finalVideoUrl}
