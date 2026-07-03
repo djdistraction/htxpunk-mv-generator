@@ -58,7 +58,8 @@ function loadConfig() {
   }
   return {
     groqApiKey: '',
-    geminiApiKey: '',
+    cloudflareAccountId: '',
+    cloudflareApiToken: '',
     storagePath: path.join(appDataPath, 'storage'),
     backendPort: 8000,
     frontendPort: 3000,
@@ -75,8 +76,9 @@ function saveConfig(config) {
 // Generate .env file
 function generateEnvFile(config) {
   const envContent = `GROQ_API_KEY=${config.groqApiKey}
-GEMINI_API_KEY=${config.geminiApiKey || ''}
-IMAGE_BACKEND=gemini
+CLOUDFLARE_ACCOUNT_ID=${config.cloudflareAccountId || ''}
+CLOUDFLARE_API_TOKEN=${config.cloudflareApiToken || ''}
+IMAGE_BACKEND=cloudflare
 STORAGE_BACKEND=local
 LOCAL_STORAGE_PATH=${config.storagePath}
 DATABASE_URL=sqlite+aiosqlite:///${path.join(config.storagePath, 'htxpunk.db')}
@@ -163,8 +165,9 @@ function startBackend(config) {
         PYTHONUNBUFFERED: '1',
         PYTHONPATH: backendPath,
         GROQ_API_KEY: config.groqApiKey,
-        GEMINI_API_KEY: config.geminiApiKey || '',
-        IMAGE_BACKEND: 'gemini',
+        CLOUDFLARE_ACCOUNT_ID: config.cloudflareAccountId || '',
+        CLOUDFLARE_API_TOKEN: config.cloudflareApiToken || '',
+        IMAGE_BACKEND: 'cloudflare',
         STORAGE_BACKEND: 'local',
         LOCAL_STORAGE_PATH: config.storagePath,
         DATABASE_URL: `sqlite+aiosqlite:///${path.join(config.storagePath, 'htxpunk.db')}`,

@@ -282,7 +282,7 @@
             <div class="setup-step active" id="step1">
                 <div class="step-title">Configure AI Services</div>
                 <div class="step-description">
-                    Choose your AI providers. All are free tier, and image generation is optional.
+                    Both are free tier — takes about a minute to get each key.
                 </div>
 
                 <div class="form-group">
@@ -297,13 +297,21 @@
                 </div>
 
                 <div class="form-group">
-                    <label>Gemini API Key (Image Generation) *</label>
+                    <label>Cloudflare Account ID (Image Generation) *</label>
                     <div style="display: flex; gap: 8px;">
-                        <input type="password" id="geminiApiKey" placeholder="AIzaSy..." style="flex: 1;" />
-                        <span id="geminiValidation" style="padding: 12px; color: #888;">○</span>
+                        <input type="text" id="cloudflareAccountId" placeholder="32-character hex string" style="flex: 1;" />
+                        <span id="cloudflareValidation" style="padding: 12px; color: #888;">○</span>
                     </div>
                     <div class="help-text">
-                        Get free at <a href="https://aistudio.google.com" target="_blank">aistudio.google.com</a> (takes 30 seconds, no credit card). Free tier: 500 images/day.
+                        Free at <a href="https://dash.cloudflare.com" target="_blank">dash.cloudflare.com</a> → Workers &amp; Pages (right sidebar).
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Cloudflare API Token *</label>
+                    <input type="password" id="cloudflareApiToken" placeholder="Workers AI token" />
+                    <div class="help-text">
+                        Same account → My Profile → API Tokens → Create Token → permission <strong>Account · Workers AI · Edit</strong>. Free daily image generation allowance, no credit card.
                     </div>
                 </div>
 
@@ -344,7 +352,7 @@
 
                 <div style="background: #f9f9f9; padding: 16px; border-radius: 6px; margin-bottom: 20px;">
                     <div style="font-size: 14px; line-height: 1.8; color: #555;">
-                        <div style="margin-bottom: 10px;">✓ Groq + Gemini keys will be securely saved</div>
+                        <div style="margin-bottom: 10px;">✓ Groq + Cloudflare credentials will be securely saved</div>
                         <div style="margin-bottom: 10px;">✓ Backend will start on port <span id="summaryPort">8000</span></div>
                         <div style="margin-bottom: 10px;">✓ Storage at: <span id="summaryPath" style="word-break: break-all;"></span></div>
                         <div>✓ You're ready to generate videos!</div>
@@ -439,15 +447,19 @@
             }
         }
 
-        async function testGeminiKey(apiKey) {
-            // Validate by listing models — cheap, fast, and doesn't burn image quota.
+        async function testCloudflareCreds(accountId, apiToken) {
+            // Cheap check: fetch the account itself with the token. Confirms the
+            // token is valid AND scoped to this account, without invoking (and
+            // paying for) an actual Workers AI inference call.
             try {
                 const response = await fetchWithTimeout(
-                    `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`,
-                    {},
+                    `https://api.cloudflare.com/client/v4/accounts/${accountId}`,
+                    { headers: { 'Authorization': `Bearer ${apiToken}` } },
                     5000
                 );
-                return response.ok;
+                if (!response.ok) return false;
+                const data = await response.json();
+                return data.success === true;
             } catch (err) {
                 return false;
             }
@@ -459,14 +471,15 @@
 
             if (step === 1) {
                 const groqKey = document.getElementById('groqApiKey').value.trim();
-                const geminiKey = document.getElementById('geminiApiKey').value.trim();
+                const cfAccountId = document.getElementById('cloudflareAccountId').value.trim();
+                const cfApiToken = document.getElementById('cloudflareApiToken').value.trim();
 
                 if (!groqKey) {
                     showError('step1Error', 'Groq API key is required');
                     return false;
                 }
-                if (!geminiKey) {
-                    showError('step1Error', 'Gemini API key is required (get free at aistudio.google.com)');
+                if (!cfAccountId || !cfApiToken) {
+                    showError('step1Error', 'Cloudflare Account ID and API Token are both required (get free at dash.cloudflare.com)');
                     return false;
                 }
 
@@ -481,14 +494,14 @@
                     return false;
                 }
 
-                // Validate Gemini key
-                document.getElementById('geminiValidation').textContent = '⏳';
-                const geminiValid = await testGeminiKey(geminiKey);
-                document.getElementById('geminiValidation').textContent = geminiValid ? '✓' : '✗';
-                document.getElementById('geminiValidation').style.color = geminiValid ? '#3c3' : '#c33';
+                // Validate Cloudflare credentials
+                document.getElementById('cloudflareValidation').textContent = '⏳';
+                const cfValid = await testCloudflareCreds(cfAccountId, cfApiToken);
+                document.getElementById('cloudflareValidation').textContent = cfValid ? '✓' : '✗';
+                document.getElementById('cloudflareValidation').style.color = cfValid ? '#3c3' : '#c33';
 
-                if (!geminiValid) {
-                    showError('step1Error', 'Gemini API key is invalid. Get one at https://aistudio.google.com');
+                if (!cfValid) {
+                    showError('step1Error', 'Cloudflare credentials are invalid. Check the Account ID and that the token has Workers AI permission.');
                     return false;
                 }
 
@@ -526,7 +539,8 @@
         function finishSetup() {
             const config = {
                 groqApiKey: document.getElementById('groqApiKey').value,
-                geminiApiKey: document.getElementById('geminiApiKey').value,
+                cloudflareAccountId: document.getElementById('cloudflareAccountId').value,
+                cloudflareApiToken: document.getElementById('cloudflareApiToken').value,
                 storagePath: document.getElementById('storagePath').value,
                 backendPort: parseInt(document.getElementById('backendPort').value),
                 frontendPort: 3000,
@@ -551,7 +565,8 @@
                 document.getElementById('storagePath').value = config.storagePath || '';
                 document.getElementById('backendPort').value = config.backendPort || 8000;
                 document.getElementById('groqApiKey').value = config.groqApiKey || '';
-                document.getElementById('geminiApiKey').value = config.geminiApiKey || '';
+                document.getElementById('cloudflareAccountId').value = config.cloudflareAccountId || '';
+                document.getElementById('cloudflareApiToken').value = config.cloudflareApiToken || '';
                 document.getElementById('summaryPath').textContent = config.storagePath;
                 document.getElementById('summaryPort').textContent = config.backendPort;
             });

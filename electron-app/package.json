@@ -34,6 +34,7 @@
       "!backend/__pycache__/**/*"
     ],
     "win": {
+      "icon": "assets/icon.ico",
       "target": [
         {
           "target": "nsis",
@@ -48,9 +49,11 @@
       "shortcutName": "HTXpunk MV Generator"
     },
     "mac": {
+      "icon": "assets/icon.png",
       "target": ["dmg", "zip"]
     },
     "linux": {
+      "icon": "assets/icon.png",
       "target": ["AppImage"]
     }
   }
