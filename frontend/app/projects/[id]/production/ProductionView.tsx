@@ -38,7 +38,9 @@ export default function ProductionView({ id }: { id: string }) {
   const finalVideo = clips.find(c => c.asset_type === 'final_video')
   // The ffmpeg backend stores the video URL on the project itself, not as an asset.
   // Support both: project.video_url (primary path) and a final_video asset (future path).
-  const finalVideoUrl = mediaUrl(project.video_url) || (finalVideo ? mediaUrl(finalVideo.url) : '')
+  const finalVideoUrl = project.video_url
+    ? mediaUrl(project.video_url)
+    : (finalVideo?.url ? mediaUrl(finalVideo.url) : '')
   const clipList = clips.filter(c => c.asset_type === 'clip')
   const readyClips = clipList.filter(c => c.url)
 
