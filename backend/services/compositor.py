@@ -31,9 +31,17 @@ def composite_panel(
         scale   : float - relative scale (1.0 = full canvas width)
         z_index : int   - layer order (higher = in front)
     """
-    bg_bytes = _read_storage_url(background_url)
-    canvas = Image.open(io.BytesIO(bg_bytes)).convert("RGBA")
-    W, H = canvas.size
+    W, H = 1920, 1080
+
+    if background_url:
+        try:
+            bg_bytes = _read_storage_url(background_url)
+            canvas = Image.open(io.BytesIO(bg_bytes)).convert("RGBA")
+            W, H = canvas.size
+        except Exception:
+            canvas = Image.new("RGBA", (W, H), (0, 0, 0, 255))
+    else:
+        canvas = Image.new("RGBA", (W, H), (0, 0, 0, 255))
 
     for elem in sorted(elements, key=lambda e: e.get("z_index", 0)):
         elem_bytes = _read_storage_url(elem["url"])

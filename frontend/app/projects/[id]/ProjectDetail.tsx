@@ -183,7 +183,7 @@ export default function ProjectDetail({ id }: { id: string }) {
               <p className="font-semibold">Troubleshooting:</p>
               <ul className="list-disc list-inside space-y-1">
                 <li>Check backend logs for detailed error messages</li>
-                <li>Verify API keys (GROQ_API_KEY, HF_TOKEN) in .env</li>
+                <li>Verify API keys (GROQ_API_KEY, GEMINI_API_KEY or CLOUDFLARE_API_TOKEN) in .env</li>
                 <li>Ensure stable internet connection</li>
                 <li>Try uploading a different audio file</li>
               </ul>
