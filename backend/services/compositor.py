@@ -48,7 +48,7 @@ def composite_panel(
             loaded = Image.open(io.BytesIO(bg_bytes)).convert("RGBA")
             W, H = loaded.size
             canvas = loaded
-        except (FileNotFoundError, UnidentifiedImageError, OSError) as exc:
+        except (OSError, UnidentifiedImageError) as exc:
             logger.warning(
                 "[compositor] Could not load background '%s': %s — using black canvas",
                 background_url, exc
