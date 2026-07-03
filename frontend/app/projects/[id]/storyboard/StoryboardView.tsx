@@ -64,6 +64,24 @@ export default function StoryboardView({ id }: { id: string }) {
     }
   }, [])
 
+  const [uploading, setUploading] = useState<Record<string, boolean>>({})
+
+  const uploadPanelImage = async (panel: any, file: File) => {
+    setUploading(u => ({ ...u, [panel.id]: true }))
+    try {
+      await api.pipeline.uploadShotImage(id, panel.id, file)
+      const assets = await api.assets.list(id)
+      const sb = assets
+        .filter((a: any) => a.asset_type === 'storyboard_panel' || a.asset_type === 'panel')
+        .sort((a: any, b: any) => (a.panel_index ?? 0) - (b.panel_index ?? 0))
+      setPanels(sb)
+    } catch {
+      alert('Failed to upload image.')
+    } finally {
+      setUploading(u => ({ ...u, [panel.id]: false }))
+    }
+  }
+
   const regeneratePanel = async (panel: any) => {
     setRegenerating(r => ({ ...r, [panel.id]: true }))
     try {
@@ -161,14 +179,19 @@ export default function StoryboardView({ id }: { id: string }) {
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-gray-600 text-xs">No image</div>
                   )}
-                  {regenerating[panel.id] && (
+                  {(regenerating[panel.id] || uploading[panel.id]) && (
                     <div className="absolute inset-0 bg-black/70 flex items-center justify-center">
-                      <span className="animate-spin text-2xl">🎨</span>
+                      <span className="animate-spin text-2xl">{uploading[panel.id] ? '⬆️' : '🎨'}</span>
                     </div>
                   )}
                   <div className="absolute top-1 left-1 bg-black/70 text-white text-xs px-1.5 py-0.5 rounded">
                     {i + 1}
                   </div>
+                  {panel.source === 'manual' && (
+                    <div className="absolute bottom-1 left-1 bg-green-900/80 text-green-300 text-xs px-1.5 py-0.5 rounded">
+                      manual
+                    </div>
+                  )}
                   {panel.panel_type && (
                     <div className={`absolute top-1 right-1 text-xs px-1.5 py-0.5 rounded ${
                       panel.panel_type === 'open' ? 'bg-blue-900 text-blue-300' : 'bg-orange-900 text-orange-300'
@@ -192,12 +215,29 @@ export default function StoryboardView({ id }: { id: string }) {
                     </button>
                     <button
                       onClick={() => regeneratePanel(panel)}
-                      disabled={!!regenerating[panel.id]}
+                      disabled={!!regenerating[panel.id] || !!uploading[panel.id]}
                       className="text-gray-500 hover:text-purple-300 disabled:opacity-30 text-xs px-2 py-0.5 rounded border border-gray-700 hover:border-purple-600 transition-colors"
-                      title="Regenerate this frame"
+                      title="Regenerate with AI"
                     >
                       ↻ redo
                     </button>
+                    <label
+                      className="text-gray-500 hover:text-green-300 disabled:opacity-30 text-xs px-2 py-0.5 rounded border border-gray-700 hover:border-green-600 transition-colors cursor-pointer"
+                      title="Upload your own image for this shot"
+                    >
+                      ⬆ upload
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        disabled={!!regenerating[panel.id] || !!uploading[panel.id]}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0]
+                          e.target.value = ''
+                          if (file) uploadPanelImage(panel, file)
+                        }}
+                      />
+                    </label>
                     <button
                       onClick={() => movePanel(i, 1)}
                       disabled={i === panels.length - 1}

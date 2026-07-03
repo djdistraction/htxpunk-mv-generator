@@ -1,9 +1,9 @@
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from database import (
     db_get_project, db_update_project,
     db_list_shot_manifests, db_update_shot_manifest,
-    db_get_series,
+    db_get_series, db_get_assets, db_update_asset,
 )
 
 router = APIRouter()
@@ -111,6 +111,61 @@ async def regenerate_image(project_id: str, body: ImageRegenRequest):
     )
     t.start()
     return {"message": "Regeneration started"}
+
+
+@router.post("/{project_id}/upload-shot-image")
+async def upload_shot_image(
+    project_id: str,
+    asset_id: str = Form(...),
+    file: UploadFile = File(...),
+):
+    """Manually supply an image for a shot, bypassing AI image generation
+    entirely. Fills the exact same slot generate_shot_frame/regenerate would
+    have — same asset, same approval gate — so manual and AI-generated shots
+    flow through the pipeline identically from here on.
+    """
+    project = db_get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    assets = db_get_assets(project_id)
+    asset = next((a for a in assets if a.get("id") == asset_id), None)
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    if asset.get("asset_type") not in ("storyboard_panel", "panel"):
+        raise HTTPException(
+            status_code=400,
+            detail="Only storyboard panel images can be manually uploaded",
+        )
+
+    raw = await file.read()
+    try:
+        import io
+        from PIL import Image
+        img = Image.open(io.BytesIO(raw)).convert("RGB")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        png_bytes = buf.getvalue()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Uploaded file is not a readable image")
+
+    import time
+    import json as _json
+    from utils.storage import upload_bytes
+    shot_no = asset.get("shot_number") or asset_id[:6]
+    # Unique key per upload (like AI re-rolls) so the URL always changes —
+    # otherwise the browser/UI has no signal that the image was replaced.
+    key = f"{project_id}/shots/shot_{shot_no}_manual_{int(time.time())}.png"
+    url = upload_bytes(png_bytes, key, "image/png")
+
+    # "source" isn't a real column — it lives in the metadata JSON blob
+    # alongside duration/panel_index/shot_manifest_id etc, so merge into the
+    # existing metadata rather than overwriting it via db_update_asset's
+    # column-only kwargs.
+    metadata = _json.loads(asset.get("metadata") or "{}")
+    metadata["source"] = "manual"
+    db_update_asset(asset_id, url=url, prompt="(manually uploaded)", metadata=metadata)
+    return {"message": "Image uploaded", "url": url}
 
 
 # ── Shot Manifest gate ───────────────────────────────────────────────────────

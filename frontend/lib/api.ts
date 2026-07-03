@@ -98,6 +98,15 @@ export const api = {
       const { data } = await client.post(`/api/pipeline/${id}/regenerate-image`, payload)
       return data
     },
+    uploadShotImage: async (id: string, assetId: string, file: File) => {
+      const formData = new FormData()
+      formData.append('asset_id', assetId)
+      formData.append('file', file)
+      const { data } = await client.post(`/api/pipeline/${id}/upload-shot-image`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      return data
+    },
   },
 
   assets: {
