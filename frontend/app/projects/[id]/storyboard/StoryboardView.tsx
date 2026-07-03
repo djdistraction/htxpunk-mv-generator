@@ -90,7 +90,10 @@ export default function StoryboardView({ id }: { id: string }) {
             setRegenerating(r => ({ ...r, [panel.id]: false }))
             return
           }
-          const timeoutId = setTimeout(pollOnce, 4000)
+          const timeoutId = setTimeout(() => {
+            pollTimeoutIdsRef.current.delete(timeoutId)
+            pollOnce()
+          }, 4000)
           pollTimeoutIdsRef.current.add(timeoutId)
         } catch {
           if (!isMountedRef.current) return
