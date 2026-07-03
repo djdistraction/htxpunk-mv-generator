@@ -84,22 +84,13 @@ export default function SettingsPage() {
   }
 
   async function save() {
-    if (!groqKey) {
-      setMessage('Groq API key is required');
-      return;
-    }
-    if (!geminiKey) {
-      setMessage('Gemini API key is required');
+    if (groqKey && groqStatus !== 'valid') {
+      setMessage('Please validate the Groq API key first (or clear it to run without AI text automation).');
       return;
     }
 
-    if (groqStatus !== 'valid') {
-      setMessage('Please validate the Groq API key first');
-      return;
-    }
-
-    if (geminiStatus !== 'valid') {
-      setMessage('Please validate the Gemini API key first');
+    if (geminiKey && geminiStatus !== 'valid') {
+      setMessage('Please validate the Gemini API key first (or clear it to use offline placeholder images).');
       return;
     }
 
@@ -143,7 +134,7 @@ export default function SettingsPage() {
           {/* Groq Key */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <label className="font-semibold text-lg">Groq API Key *</label>
+              <label className="font-semibold text-lg">Groq API Key</label>
               <button
                 onClick={validateGroq}
                 className={`px-4 py-2 rounded-lg font-medium transition flex items-center gap-2 ${
@@ -155,7 +146,7 @@ export default function SettingsPage() {
                         ? 'bg-red-500/30 text-red-200'
                         : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                 }`}
-                disabled={groqStatus === 'validating'}
+                disabled={groqStatus === 'validating' || !groqKey}
               >
                 {groqStatus === 'validating' && <RotateCcw className="w-4 h-4 animate-spin" />}
                 {groqStatus === 'valid' && <Check className="w-4 h-4" />}
@@ -178,14 +169,14 @@ export default function SettingsPage() {
               <a href="https://console.groq.com" target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:underline">
                 console.groq.com
               </a>
-              . Required for text analysis.
+              . Optional. Leave blank to use guided/offline planning defaults.
             </p>
           </div>
 
           {/* Gemini Key */}
           <div className="space-y-3 pt-4 border-t border-gray-700">
             <div className="flex items-center justify-between">
-              <label className="font-semibold text-lg">Gemini API Key *</label>
+              <label className="font-semibold text-lg">Gemini API Key</label>
               <button
                 onClick={validateGemini}
                 className={`px-4 py-2 rounded-lg font-medium transition flex items-center gap-2 ${
@@ -220,7 +211,7 @@ export default function SettingsPage() {
               <a href="https://aistudio.google.com" target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:underline">
                 aistudio.google.com
               </a>
-              . Free: 500 images/day, no credit card.
+              . Optional. Leave blank to generate offline placeholder frames.
             </p>
           </div>
 
@@ -228,9 +219,9 @@ export default function SettingsPage() {
           <div className="pt-4 border-t border-gray-700">
             <button
               onClick={save}
-              disabled={groqStatus !== 'valid'}
+              disabled={groqStatus === 'validating' || geminiStatus === 'validating'}
               className={`w-full py-3 rounded-lg font-semibold transition ${
-                groqStatus !== 'valid'
+                groqStatus === 'validating' || geminiStatus === 'validating'
                   ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
                   : 'bg-gradient-to-r from-purple-600 to-pink-600 text-white hover:from-purple-700 hover:to-pink-700'
               }`}

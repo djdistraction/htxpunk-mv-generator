@@ -68,8 +68,9 @@ function loadConfig() {
 
 // Save config
 function saveConfig(config) {
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-  generateEnvFile(config);
+  const merged = { ...loadConfig(), ...(config || {}) };
+  fs.writeFileSync(configPath, JSON.stringify(merged, null, 2));
+  generateEnvFile(merged);
 }
 
 // Generate .env file

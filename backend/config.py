@@ -14,10 +14,11 @@ class Settings(BaseSettings):
     cloudflare_account_id: str = ""       # Workers AI (free daily allocation)
     cloudflare_api_token: str = ""        # token scoped to "Workers AI"
     # Image backend:
+    #   "auto"        — pick the best available backend from configured keys
     #   "cloudflare"  — Workers AI FLUX.1-schnell (free tier)
     #   "gemini"      — Gemini/Imagen (requires a billing-enabled Google project)
     #   "placeholder" — offline render, dev/testing only (no API, $0)
-    image_backend: str = "cloudflare"
+    image_backend: str = "auto"
 
     # Audio — local Whisper model size: tiny / base / small / medium
     whisper_model: str = "base"
@@ -62,17 +63,12 @@ settings = Settings()
 
 # Validation on startup
 def validate_settings():
-    backend = (settings.image_backend or "cloudflare").lower()
+    backend = (settings.image_backend or "auto").lower()
     errors = []
-    valid_backends = {"cloudflare", "gemini", "placeholder"}
+    valid_backends = {"auto", "cloudflare", "gemini", "placeholder"}
 
     if backend not in valid_backends:
-        errors.append("❌ IMAGE_BACKEND must be one of: cloudflare, gemini, placeholder")
-
-    if backend in {"cloudflare", "gemini"} and (
-        not settings.groq_api_key or settings.groq_api_key == "gsk_YOUR_API_KEY_HERE"
-    ):
-        errors.append("❌ GROQ_API_KEY not set")
+        errors.append("❌ IMAGE_BACKEND must be one of: auto, cloudflare, gemini, placeholder")
 
     if backend == "cloudflare":
         if not settings.cloudflare_account_id or not settings.cloudflare_api_token:
@@ -83,7 +79,7 @@ def validate_settings():
     elif backend == "gemini":
         if not settings.gemini_api_key or settings.gemini_api_key == "AIzaSy_YOUR_API_KEY_HERE":
             errors.append("❌ GEMINI_API_KEY required for IMAGE_BACKEND=gemini")
-    # backend == "placeholder": no image credentials needed (dev/offline only)
+    # backend == "auto"/"placeholder": image credentials optional; runtime picks fallback.
 
     if errors:
         logger.error("Configuration errors:")
@@ -91,5 +87,5 @@ def validate_settings():
             logger.error(e)
         raise RuntimeError(
             "Missing required configuration: " + "; ".join(errors) + ". "
-            "Set the keys in .env, or use IMAGE_BACKEND=placeholder for offline dev mode."
+            "Set the required keys for the selected backend, or use IMAGE_BACKEND=auto/placeholder."
         )

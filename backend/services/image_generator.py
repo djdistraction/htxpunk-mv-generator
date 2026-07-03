@@ -21,10 +21,34 @@ from utils.storage import upload_bytes
 
 # ── Backend selection ─────────────────────────────────────────────────────────
 
+def _has_gemini_key() -> bool:
+    key = (settings.gemini_api_key or "").strip()
+    return bool(key and key != "AIzaSy_YOUR_API_KEY_HERE")
+
+
+def _has_cloudflare_creds() -> bool:
+    return bool((settings.cloudflare_account_id or "").strip() and (settings.cloudflare_api_token or "").strip())
+
+
+def _effective_backend() -> str:
+    """Resolve image backend, safely falling back when creds are missing."""
+    backend = (settings.image_backend or "auto").lower()
+    if backend == "auto":
+        if _has_gemini_key():
+            return "gemini"
+        if _has_cloudflare_creds():
+            return "cloudflare"
+        return "placeholder"
+    if backend == "gemini" and not _has_gemini_key():
+        return "placeholder"
+    if backend == "cloudflare" and not _has_cloudflare_creds():
+        return "placeholder"
+    return backend
+
+
 def _use_placeholder() -> bool:
     """Check if running in placeholder mode (dev-only, offline)."""
-    backend = (settings.image_backend or "cloudflare").lower()
-    return backend == "placeholder"
+    return _effective_backend() == "placeholder"
 
 
 # ── Placeholder renderer (offline, no API) ────────────────────────────────────
@@ -172,7 +196,7 @@ def generate_image(prompt: str, style_suffix: str = "", width: int = 1024, heigh
     """
     full_prompt = f"{prompt}. {style_suffix}".strip(" .")
 
-    backend = (settings.image_backend or "cloudflare").lower()
+    backend = _effective_backend()
     if backend == "placeholder":
         return render_placeholder(full_prompt, width, height, label=label, subtitle=subtitle)
     if backend == "gemini":
