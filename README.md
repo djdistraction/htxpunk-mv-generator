@@ -11,7 +11,7 @@ Built by **HTXpunk Productions** · Runs locally with optional cloud backends ·
 ```
 Song Upload
 ↓
-① Audio Analysis      — Faster-Whisper transcript + word timestamps + Groq mood/structure analysis
+① Audio Analysis      — faster-whisper transcript + word timestamps + Groq mood/structure analysis
 ↓
 ② Visual Treatment    — Groq generates the creative direction
 ↓ [Human Approval]
