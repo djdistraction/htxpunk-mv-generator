@@ -142,20 +142,24 @@ async def upload_shot_image(
     try:
         import io
         from PIL import Image
-        img = Image.open(io.BytesIO(raw)).convert("RGB")
+        img = Image.open(io.BytesIO(raw))
+        img.load()  # force-decode so downstream save can't fail silently
+        # Preserve transparency; fall back to RGB only for palette/grayscale modes
+        if img.mode not in ("RGB", "RGBA"):
+            img = img.convert("RGBA" if img.mode in ("LA", "PA") else "RGB")
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         png_bytes = buf.getvalue()
     except Exception:
         raise HTTPException(status_code=400, detail="Uploaded file is not a readable image")
 
-    import time
+    import uuid
     import json as _json
     from utils.storage import upload_bytes
     shot_no = asset.get("shot_number") or asset_id[:6]
     # Unique key per upload (like AI re-rolls) so the URL always changes —
     # otherwise the browser/UI has no signal that the image was replaced.
-    key = f"{project_id}/shots/shot_{shot_no}_manual_{int(time.time())}.png"
+    key = f"{project_id}/shots/shot_{shot_no}_manual_{uuid.uuid4().hex}.png"
     url = upload_bytes(png_bytes, key, "image/png")
 
     # "source" isn't a real column — it lives in the metadata JSON blob

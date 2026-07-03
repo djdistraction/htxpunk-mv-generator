@@ -70,15 +70,20 @@ export default function StoryboardView({ id }: { id: string }) {
     setUploading(u => ({ ...u, [panel.id]: true }))
     try {
       await api.pipeline.uploadShotImage(id, panel.id, file)
+      if (!isMountedRef.current) return
       const assets = await api.assets.list(id)
+      if (!isMountedRef.current) return
       const sb = assets
         .filter((a: any) => a.asset_type === 'storyboard_panel' || a.asset_type === 'panel')
         .sort((a: any, b: any) => (a.panel_index ?? 0) - (b.panel_index ?? 0))
       setPanels(sb)
     } catch {
+      if (!isMountedRef.current) return
       alert('Failed to upload image.')
     } finally {
-      setUploading(u => ({ ...u, [panel.id]: false }))
+      if (isMountedRef.current) {
+        setUploading(u => ({ ...u, [panel.id]: false }))
+      }
     }
   }
 
