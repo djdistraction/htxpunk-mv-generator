@@ -1,8 +1,8 @@
 # 🎬 HTXpunk Productions — Music Video Generator
 
-An AI-powered pipeline that turns a song upload into a full-length animated music video — complete with ken burns motion, lyric overlays, crossfades, and particle effects — with visual continuity maintained throughout.
+An AI-powered pipeline that turns song uploads into complete animated music videos with human approval gates for treatment, manifest, and storyboard stages.
 
-Built by **HTXpunk Productions** · Runs **100% free locally** · Upgrade path to GPU/cloud via env vars only.
+Built by **HTXpunk Productions** · Runs locally with optional cloud backends · Upgrade path via `.env` settings.
 
 ---
 
@@ -11,25 +11,19 @@ Built by **HTXpunk Productions** · Runs **100% free locally** · Upgrade path t
 ```
 Song Upload
 ↓
-① Audio Analysis    — Whisper (local, free) → transcript + word timestamps
-                      Groq / Llama 3.3 70B  → mood, structure, narrative arc
+① Audio Analysis      — faster-whisper transcript + word timestamps + Groq mood/structure analysis
 ↓
-② Visual Treatment  — Groq generates a full creative direction proposal
+② Visual Treatment    — Groq generates the creative direction
 ↓ [Human Approval]
-③ Element Extraction — AI creates the registry: characters, locations, props, states
+③ Element Extraction  — visual registry (characters, locations, props, states)
 ↓
-④ Background Gen    — FLUX.1-schnell (HuggingFace free tier) → 1920×1080 backgrounds
+④ Image Generation    — Cloudflare Workers AI / Gemini 2.5 Flash Image / placeholder backend
 ↓
-⑤ Element Gen       — FLUX.1-schnell → elements on transparent bg (rembg removes bg)
-↓
-⑥ Storyboard Build  — Pillow composites elements onto backgrounds; panels reviewed
-↓ [Human Review]
-⑦ Remotion Assembly — React/Remotion renders the full video in one pass:
-                       • Ken Burns motion (zoom-in/out, pan-left/right)
-                       • Crossfades between panels
-                       • Whisper-synced lyric overlays
-                       • Energy-level-driven particle effects
-                       • Audio track sync
+⑤ Storyboard Build    — Pillow compositing + panel ordering
+↓ [Human Approval]
+⑥ Manifest Generation — production-guide/shot-manifest driven frame generation
+↓ [Human Approval]
+⑦ Video Assembly      — FFmpeg timed render (default), optional Remotion/Modal backends
 ```
 
 ---
@@ -38,69 +32,47 @@ Song Upload
 
 | Layer | Technology | Purpose |
 |---|---|---|
-| Frontend | Next.js 15 + Tailwind | Dashboard + approval UI |
-| Backend | FastAPI + Celery | Pipeline orchestration |
-| Queue | Celery memory:// broker | Async jobs — no Redis needed |
-| Database | SQLite + SQLAlchemy | Project state — no DB server needed |
-| Storage | Local filesystem | Audio, images, video — no cloud needed |
-| Transcription | OpenAI Whisper (local) | Free, runs on CPU, ~140MB model |
-| LLM | Groq free tier (Llama 3.3 70B) | Analysis, treatment, extraction |
-| Image Gen | HuggingFace FLUX.1-schnell | Free tier, 2s delay between calls |
-| Background Removal | rembg + onnxruntime | Free, runs locally |
-| Video Composition | Remotion (React) | Free, renders via Node.js |
-
-**Cost per video: $0.00** (free tiers only)
-
----
-
-## Upgrade Path
-
-Everything upgrades via `.env` only — zero code changes:
-
-| Now (free) | Later (upgrade) |
-|---|---|
-| Groq / Llama 3.3 | Ollama (local GPU) or GPT-4o |
-| HuggingFace FLUX.1-schnell | Local FLUX (GPU) or Replicate |
-| Local storage | Cloudflare R2 |
-| SQLite | Supabase / PostgreSQL |
-| Remotion | Wan2.1 local GPU (`VIDEO_BACKEND=wan2`) |
+| Frontend | Next.js + Tailwind | Dashboard + approval UI |
+| Backend | FastAPI + Chimera Tower orchestrator | In-process pipeline orchestration (no Celery/Redis) |
+| Database | SQLite + SQLAlchemy | Project and asset state |
+| Storage | Local filesystem | Audio, images, and video output |
+| Transcription | faster-whisper | Local CPU transcription |
+| LLM | Groq (Llama 3.3) | Analysis, treatment, extraction |
+| Image Generation | Cloudflare Workers AI / Gemini / placeholder | Render backgrounds and elements |
+| Background Removal | rembg + onnxruntime | Element cutouts |
+| Video Assembly | FFmpeg (default) | Timed video render with audio sync |
 
 ---
 
 ## Quick Start
 
-**👉 See [SETUP.md](SETUP.md) for a complete 5-10 minute walkthrough.**
+**👉 See [SETUP.md](SETUP.md) for the complete setup flow.**
 
-### TL;DR
 ```bash
-# 1. Get API keys (free, no credit card)
-#    Groq: https://console.groq.com
-#    HuggingFace: https://huggingface.co/settings/tokens
-
-# 2. Configure
+# 1) Configure environment
 cp .env.example .env
-# Edit .env: add GROQ_API_KEY and HF_TOKEN
 
-# 3. Backend (terminal 1)
+# 2) Add required keys
+# GROQ_API_KEY=...
+
+# 3) Choose image backend in .env:
+# IMAGE_BACKEND=cloudflare  -> set CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN
+# IMAGE_BACKEND=gemini      -> set GEMINI_API_KEY
+# IMAGE_BACKEND=placeholder -> offline development mode
+
+# 4) Start backend
 cd backend && pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 
-# 4. Frontend (terminal 2)
-cd frontend && npm install
+# 5) Start frontend
+cd ../frontend && npm install
 npm run dev
-# Opens http://localhost:3000
 ```
 
-**Full setup guide & troubleshooting:** [SETUP.md](SETUP.md)  
-**Architecture & development info:** [CLAUDE.md](CLAUDE.md)
+- Frontend: http://localhost:3000  
+- Backend health: http://localhost:8000/health
 
----
-
-## Continuity Bible
-
-Every project generates a `BIBLE.md` tracking all named elements, approved appearances, asset paths, storyboard order, and color palette — ensuring visual consistency across sessions.
-
-See [`bible_template/BIBLE.md`](bible_template/BIBLE.md) for the full structure.
+**More docs:** [SETUP.md](SETUP.md) · [CLAUDE.md](CLAUDE.md) · [DESKTOP_APP.md](DESKTOP_APP.md)
 
 ---
 
