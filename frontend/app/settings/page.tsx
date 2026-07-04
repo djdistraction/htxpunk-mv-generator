@@ -6,9 +6,10 @@ import { ArrowLeft, Check, X, RotateCcw } from 'lucide-react';
 
 export default function SettingsPage() {
   const [groqKey, setGroqKey] = useState('');
-  const [geminiKey, setGeminiKey] = useState('');
+  const [cloudflareAccountId, setCloudflareAccountId] = useState('');
+  const [cloudflareApiToken, setCloudflareApiToken] = useState('');
   const [groqStatus, setGroqStatus] = useState<'idle' | 'validating' | 'valid' | 'invalid'>('idle');
-  const [geminiStatus, setGeminiStatus] = useState<'idle' | 'validating' | 'valid' | 'invalid'>('idle');
+  const [cloudflareStatus, setCloudflareStatus] = useState<'idle' | 'validating' | 'valid' | 'invalid'>('idle');
   const [message, setMessage] = useState('');
   const [isElectron] = useState(() => typeof window !== 'undefined' && !!(window as any).electron);
 
@@ -21,7 +22,8 @@ export default function SettingsPage() {
     try {
       const config = await (window as any).electron.getConfig();
       if (config.groqApiKey) setGroqKey(config.groqApiKey);
-      if (config.geminiApiKey) setGeminiKey(config.geminiApiKey);
+      if (config.cloudflareAccountId) setCloudflareAccountId(config.cloudflareAccountId);
+      if (config.cloudflareApiToken) setCloudflareApiToken(config.cloudflareApiToken);
     } catch (err) {
       console.error('Failed to load config:', err);
     }
@@ -49,15 +51,20 @@ export default function SettingsPage() {
     }
   }
 
-  async function testGeminiKey(key: string) {
-    if (!key) return false;
-    // Validate by listing models — cheap, fast, and doesn't burn image quota.
+  async function testCloudflareCreds(accountId: string, apiToken: string) {
+    if (!accountId || !apiToken) return false;
+    // Cheap check: fetch the account itself with the token. Confirms the
+    // token is valid AND scoped to this account, without invoking (and
+    // paying for) an actual Workers AI inference call.
     try {
       const response = await fetchWithTimeout(
-        `https://generativelanguage.googleapis.com/v1beta/models?key=${key}`,
-        {}, 5000
+        `https://api.cloudflare.com/client/v4/accounts/${accountId}`,
+        { headers: { Authorization: `Bearer ${apiToken}` } },
+        5000
       );
-      return response.ok;
+      if (!response.ok) return false;
+      const data = await response.json();
+      return data.success === true;
     } catch {
       return false;
     }
@@ -73,14 +80,14 @@ export default function SettingsPage() {
     setGroqStatus(valid ? 'valid' : 'invalid');
   }
 
-  async function validateGemini() {
-    if (!geminiKey) {
-      setGeminiStatus('idle');
+  async function validateCloudflare() {
+    if (!cloudflareAccountId || !cloudflareApiToken) {
+      setCloudflareStatus('idle');
       return;
     }
-    setGeminiStatus('validating');
-    const valid = await testGeminiKey(geminiKey);
-    setGeminiStatus(valid ? 'valid' : 'invalid');
+    setCloudflareStatus('validating');
+    const valid = await testCloudflareCreds(cloudflareAccountId, cloudflareApiToken);
+    setCloudflareStatus(valid ? 'valid' : 'invalid');
   }
 
   async function save() {
@@ -88,8 +95,8 @@ export default function SettingsPage() {
       setMessage('Groq API key is required');
       return;
     }
-    if (!geminiKey) {
-      setMessage('Gemini API key is required');
+    if (!cloudflareAccountId || !cloudflareApiToken) {
+      setMessage('Cloudflare Account ID and API Token are required');
       return;
     }
 
@@ -98,8 +105,8 @@ export default function SettingsPage() {
       return;
     }
 
-    if (geminiStatus !== 'valid') {
-      setMessage('Please validate the Gemini API key first');
+    if (cloudflareStatus !== 'valid') {
+      setMessage('Please validate the Cloudflare credentials first');
       return;
     }
 
@@ -111,7 +118,8 @@ export default function SettingsPage() {
     try {
       const config = {
         groqApiKey: groqKey,
-        geminiApiKey: geminiKey,
+        cloudflareAccountId,
+        cloudflareApiToken,
       };
       await (window as any).electron.saveConfig(config);
       setMessage('Settings saved! Restart the app for changes to take effect.');
@@ -182,45 +190,55 @@ export default function SettingsPage() {
             </p>
           </div>
 
-          {/* Gemini Key */}
+          {/* Cloudflare Credentials */}
           <div className="space-y-3 pt-4 border-t border-gray-700">
             <div className="flex items-center justify-between">
-              <label className="font-semibold text-lg">Gemini API Key *</label>
+              <label className="font-semibold text-lg">Cloudflare Credentials *</label>
               <button
-                onClick={validateGemini}
+                onClick={validateCloudflare}
                 className={`px-4 py-2 rounded-lg font-medium transition flex items-center gap-2 ${
-                  geminiStatus === 'validating'
+                  cloudflareStatus === 'validating'
                     ? 'bg-yellow-500/30 text-yellow-200 cursor-wait'
-                    : geminiStatus === 'valid'
+                    : cloudflareStatus === 'valid'
                       ? 'bg-green-500/30 text-green-200'
-                      : geminiStatus === 'invalid'
+                      : cloudflareStatus === 'invalid'
                         ? 'bg-red-500/30 text-red-200'
                         : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                 }`}
-                disabled={geminiStatus === 'validating' || !geminiKey}
+                disabled={cloudflareStatus === 'validating' || !cloudflareAccountId || !cloudflareApiToken}
               >
-                {geminiStatus === 'validating' && <RotateCcw className="w-4 h-4 animate-spin" />}
-                {geminiStatus === 'valid' && <Check className="w-4 h-4" />}
-                {geminiStatus === 'invalid' && <X className="w-4 h-4" />}
-                {geminiStatus === 'idle' || geminiStatus === 'validating' ? 'Validate' : geminiStatus === 'valid' ? 'Valid' : 'Invalid'}
+                {cloudflareStatus === 'validating' && <RotateCcw className="w-4 h-4 animate-spin" />}
+                {cloudflareStatus === 'valid' && <Check className="w-4 h-4" />}
+                {cloudflareStatus === 'invalid' && <X className="w-4 h-4" />}
+                {cloudflareStatus === 'idle' || cloudflareStatus === 'validating' ? 'Validate' : cloudflareStatus === 'valid' ? 'Valid' : 'Invalid'}
               </button>
             </div>
             <input
-              type="password"
-              placeholder="AIzaSy_..."
-              value={geminiKey}
+              type="text"
+              placeholder="Account ID (32-character hex string)"
+              value={cloudflareAccountId}
               onChange={(e) => {
-                setGeminiKey(e.target.value);
-                setGeminiStatus('idle');
+                setCloudflareAccountId(e.target.value);
+                setCloudflareStatus('idle');
+              }}
+              className="w-full px-4 py-3 rounded-lg bg-gray-700/50 border border-gray-600 focus:border-purple-500 focus:outline-none transition text-white placeholder-gray-400"
+            />
+            <input
+              type="password"
+              placeholder="Workers AI API Token"
+              value={cloudflareApiToken}
+              onChange={(e) => {
+                setCloudflareApiToken(e.target.value);
+                setCloudflareStatus('idle');
               }}
               className="w-full px-4 py-3 rounded-lg bg-gray-700/50 border border-gray-600 focus:border-purple-500 focus:outline-none transition text-white placeholder-gray-400"
             />
             <p className="text-sm text-gray-400">
-              Get your key at{' '}
-              <a href="https://aistudio.google.com" target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:underline">
-                aistudio.google.com
+              Get both at{' '}
+              <a href="https://dash.cloudflare.com" target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:underline">
+                dash.cloudflare.com
               </a>
-              . Free: 500 images/day, no credit card.
+              . Account ID is in the Workers &amp; Pages sidebar; create the token under My Profile → API Tokens with <strong>Account · Workers AI · Edit</strong> permission. Free daily image generation allowance, no credit card.
             </p>
           </div>
 
