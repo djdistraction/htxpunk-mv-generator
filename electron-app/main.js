@@ -619,8 +619,14 @@ app.on('ready', async () => {
       await ensureBackendDependencies(pythonCmd, setSplashStatus);
       setSplashStatus('Starting backend…');
       await startBackend(config, pythonCmd);
-      setSplashStatus('Starting frontend…');
-      await startFrontend(config);
+      // Dev mode (`npm start`/`npm run dev`) expects a hand-run `next dev`
+      // server on :3000 (see createWindow's isDev branch below) — it doesn't
+      // need, and usually won't have, the bundled standalone build this
+      // spawns. Only start it for the real packaged/production path.
+      if (!isDev) {
+        setSplashStatus('Starting frontend…');
+        await startFrontend(config);
+      }
     }
 
     // Create main window
