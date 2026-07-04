@@ -53,12 +53,14 @@ export default function SettingsPage() {
 
   async function testCloudflareCreds(accountId: string, apiToken: string) {
     if (!accountId || !apiToken) return false;
-    // Cheap check: fetch the account itself with the token. Confirms the
-    // token is valid AND scoped to this account, without invoking (and
-    // paying for) an actual Workers AI inference call.
+    // Hit a Workers AI endpoint, not the general account-details endpoint — a
+    // token scoped only to "Workers AI: Edit" (exactly what we tell users to
+    // create) can't read general account details and would fail that check
+    // even though it's perfectly valid for image generation. Listing models
+    // is a read, so it's free and doesn't burn the daily allocation.
     try {
       const response = await fetchWithTimeout(
-        `https://api.cloudflare.com/client/v4/accounts/${accountId}`,
+        `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/models/search`,
         { headers: { Authorization: `Bearer ${apiToken}` } },
         5000
       );
