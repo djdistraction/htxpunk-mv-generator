@@ -38,3 +38,8 @@ openpyxl==3.1.5
 
 # Video assembly — bundled ffmpeg binary fallback when ffmpeg isn't on PATH
 imageio-ffmpeg==0.5.1
+
+# Video assembly (modal backend) — calls the deployed Modal app by name;
+# requires `modal deploy backend/services/modal_video_worker.py` to have
+# been run at least once, plus MODAL_TOKEN_ID/MODAL_TOKEN_SECRET in .env
+modal>=0.65.0

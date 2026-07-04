@@ -1,10 +1,14 @@
 """
 video_assembler.py  —  music video assembly
 
-Two backends, selected by settings.video_backend:
+Backends, selected by settings.video_backend:
   "ffmpeg"   (default) — Ken Burns slideshow rendered with ffmpeg. Works with
                          no external services. Audio is optional (silent video
-                         if none attached). This is the path that actually runs.
+                         if none attached). The $0, no-GPU fallback.
+  "modal"              — the real pipeline: per-panel image-to-video on
+                         Modal's GPUs (LTX-Video), stitched with ffmpeg,
+                         synced to audio, then a Wav2Lip lip-sync pass — see
+                         services/modal_pipeline.py + modal_video_worker.py.
   "remotion"           — React/Remotion render (needs Node + remotion-composer).
   "runway"             — reserved for the experimental Gen-4 backend.
 
@@ -295,6 +299,12 @@ def assemble_music_video(
                     timeline["durationInFrames"], timeline["fps"],
                     timeline["durationInFrames"] / timeline["fps"])
         return render_with_remotion(project_id, timeline)
+
+    if backend == "modal":
+        from services.modal_pipeline import assemble_with_modal
+        return assemble_with_modal(
+            project_id=project_id, audio_path=audio_path, panels=panels,
+        )
 
     # default: ffmpeg (also used for "runway" until that backend lands)
     return assemble_with_ffmpeg(

@@ -386,6 +386,7 @@ def run_video_assembly(project_id: str):
             "energy_level": p.get("energy_level", 0.5),
             "duration": p.get("duration"),   # per-shot seconds (manifest path)
             "lyric": p.get("lyric") or "",
+            "prompt": p.get("prompt") or "",  # used by the modal backend for motion prompts
         }
         for i, p in enumerate(panels)
     ]
