@@ -223,8 +223,7 @@ function ensureBackendDependencies(pythonCmd, onProgress) {
       { stdio: ['ignore', 'pipe', 'pipe'] }
     );
 
-    pipProcess.stdout.on('data', (data) => console.log('[pip]', data.toString()));
-    pipProcess.stderr.on('data', (data) => console.log('[pip]', data.toString()));
+    const getTail = pipeProcessOutput(pipProcess, 'pip-install');
 
     pipProcess.on('error', (err) => {
       reject(new Error(`Failed to run pip: ${err.message}`));
@@ -235,13 +234,42 @@ function ensureBackendDependencies(pythonCmd, onProgress) {
         fs.writeFileSync(markerPath, currentHash);
         resolve();
       } else {
+        const tail = getTail();
         reject(new Error(
-          `Installing Python dependencies failed (exit code ${code}). ` +
-            'Check your internet connection, then restart the app to retry.'
+          `Installing Python dependencies failed (exit code ${code}).\n\n` +
+            (tail ? `Last output:\n${tail}` : '') +
+            '\n\nCheck your internet connection, then restart the app to retry.'
         ));
       }
     });
   });
+}
+
+// Pipe a child process's stdout/stderr to the console, to a per-process log
+// file under appDataPath/logs/ (truncated fresh each launch — matches the
+// tray's "View Logs" menu item), and into a small in-memory tail so a
+// startup failure's error dialog can show the actual underlying error
+// instead of just an exit code. Packaged GUI apps have no visible console,
+// so without this a failure like "exited with code 3" is undiagnosable.
+function pipeProcessOutput(proc, label) {
+  const logsDir = path.join(appDataPath, 'logs');
+  if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
+  const logStream = fs.createWriteStream(path.join(logsDir, `${label}.log`), { flags: 'w' });
+
+  let tail = '';
+  const MAX_TAIL = 4000;
+  const onData = (data) => {
+    const text = data.toString();
+    console.log(`[${label}]`, text);
+    logStream.write(text);
+    tail = (tail + text).slice(-MAX_TAIL);
+  };
+
+  proc.stdout.on('data', onData);
+  proc.stderr.on('data', onData);
+  proc.on('exit', () => logStream.end());
+
+  return () => tail.trim();
 }
 
 // Start backend
@@ -282,16 +310,7 @@ function startBackend(config, pythonCmd) {
       );
 
       let exitedEarly = false;
-
-      backendProcess.stdout.on('data', (data) => {
-        console.log('[Backend]', data.toString());
-      });
-
-      backendProcess.stderr.on('data', (data) => {
-        // uvicorn logs (including the "Application startup complete" line)
-        // are written to stderr — this is normal, not an error.
-        console.log('[Backend]', data.toString());
-      });
+      const getTail = pipeProcessOutput(backendProcess, 'backend');
 
       backendProcess.on('error', (err) => {
         exitedEarly = true;
@@ -301,11 +320,12 @@ function startBackend(config, pythonCmd) {
       backendProcess.on('exit', (code) => {
         if (code !== null && code !== 0) {
           exitedEarly = true;
+          const tail = getTail();
           reject(
             new Error(
-              `Backend process exited with code ${code} before becoming ready. ` +
-                'Check that port ' + config.backendPort + ' is free and that ' +
-                'the Python dependencies are installed.'
+              `Backend process exited with code ${code} before becoming ready.\n\n` +
+                (tail ? `Last output:\n${tail}` : 'No output was captured — check ' +
+                  path.join(appDataPath, 'logs', 'backend.log'))
             )
           );
         }
@@ -363,9 +383,7 @@ function startFrontend(config) {
       });
 
       let exitedEarly = false;
-
-      frontendProcess.stdout.on('data', (data) => console.log('[Frontend]', data.toString()));
-      frontendProcess.stderr.on('data', (data) => console.log('[Frontend]', data.toString()));
+      const getTail = pipeProcessOutput(frontendProcess, 'frontend');
 
       frontendProcess.on('error', (err) => {
         exitedEarly = true;
@@ -375,9 +393,11 @@ function startFrontend(config) {
       frontendProcess.on('exit', (code) => {
         if (code !== null && code !== 0) {
           exitedEarly = true;
+          const tail = getTail();
           reject(new Error(
-            `Frontend process exited with code ${code} before becoming ready. ` +
-              'Check that port ' + config.frontendPort + ' is free.'
+            `Frontend process exited with code ${code} before becoming ready.\n\n` +
+              (tail ? `Last output:\n${tail}` : 'No output was captured — check ' +
+                path.join(appDataPath, 'logs', 'frontend.log'))
           ));
         }
       });
@@ -562,7 +582,17 @@ app.on('ready', async () => {
 
   let config = loadConfig();
 
-  if (!externalBackend && !config.setupComplete) {
+  // setupComplete alone isn't enough to trust: a config.json saved by an
+  // older version of the wizard (e.g. before Cloudflare replaced Gemini)
+  // can have it set to true with the now-required fields simply absent.
+  // Re-run the wizard whenever anything required is actually missing,
+  // rather than silently spawning a backend that will fail validate_settings()
+  // and exit before ever printing a comprehensible error to the user.
+  const hasRequiredConfig = Boolean(
+    config.groqApiKey && config.cloudflareAccountId && config.cloudflareApiToken
+  );
+
+  if (!externalBackend && (!config.setupComplete || !hasRequiredConfig)) {
     config = await showSetupWizard();
   }
 
