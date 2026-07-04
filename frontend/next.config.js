@@ -1,10 +1,21 @@
 /** @type {import("next").NextConfig} */
 const path = require("path")
 const nextConfig = {
+  // Produces a minimal, self-contained server (.next/standalone/server.js)
+  // with only the node_modules actually needed at runtime traced in — this
+  // is what the Electron app bundles so packaged installs don't require a
+  // separate Node.js/npm install on the user's machine.
+  output: "standalone",
+  // Pin the output-tracing root to this package itself (not an ancestor
+  // directory), so `.next/standalone/server.js` always lands at a
+  // predictable, flat path regardless of what lockfiles exist above this
+  // repo on whatever machine runs the build — electron-app's build script
+  // and main.js both assume that exact path.
+  outputFileTracingRoot: path.resolve(__dirname),
   turbopack: {
-    // Tell Turbopack the actual project root so it doesn't traverse up to
-    // C:\Users\booki and get confused by a package-lock.json there.
-    root: path.resolve(__dirname, ".."),
+    // Must match outputFileTracingRoot above (Next.js requires it) — also
+    // avoids Turbopack traversing up to a stray lockfile above this repo.
+    root: path.resolve(__dirname),
   },
   images: {
     remotePatterns: [

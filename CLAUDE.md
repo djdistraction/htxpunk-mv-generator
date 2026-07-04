@@ -4,7 +4,7 @@
 This is a full-stack AI music video generator that transforms song uploads into complete animated music videos with:
 - Automatic transcription & mood analysis
 - AI-generated visual treatments (Groq/Llama 3.3)
-- Background & character element generation (Gemini 2.5 Flash Image)
+- Background & character element generation (Cloudflare Workers AI — FLUX.1-schnell)
 - Storyboard composition & video assembly (FFmpeg with Ken Burns)
 - Human approval gates at treatment & storyboard stages
 
@@ -43,8 +43,9 @@ This is a full-stack AI music video generator that transforms song uploads into 
   - `audio_analyzer.py` — Whisper transcription + Groq analysis
   - `treatment_generator.py` — Groq visual treatment from analysis
   - `element_extractor.py` — Groq visual registry
-  - `image_generator.py` — Gemini image generation + offline Pillow fallback
-  - `gemini_image_generator.py` — Gemini 2.5 Flash Image client (free tier)
+  - `image_generator.py` — dispatches to the configured image backend (cloudflare | gemini | placeholder)
+  - `cloudflare_image_generator.py` — Cloudflare Workers AI (FLUX.1-schnell) client (free tier, the default backend)
+  - `gemini_image_generator.py` — Gemini 2.5 Flash Image client (kept as an alternate backend; requires a billing-enabled Google Cloud project — not actually free)
   - `storyboard_builder.py` — Scene planning
   - `compositor.py` — Pillow compositing panels
   - `video_assembler.py` — FFmpeg video & audio sync
@@ -60,7 +61,7 @@ This is a full-stack AI music video generator that transforms song uploads into 
 | Database | SQLite + SQLAlchemy (async) | No server needed |
 | LLM | Groq (Llama 3.3 70B) free tier | OpenAI-compatible API |
 | Audio | Faster-Whisper (CPU int8 quantized) | ~140MB model |
-| Image Gen | Gemini 2.5 Flash Image free tier | 500 images/day, no credit card |
+| Image Gen | Cloudflare Workers AI (FLUX.1-schnell) | Free daily allowance, no credit card |
 | Background Removal | rembg + onnxruntime | Local, no API needed |
 | Video Assembly | FFmpeg (default) | Ken Burns motion, audio sync, per-shot timing |
 | Video Assembly (opt-in) | Remotion (React) | Node-based; set VIDEO_BACKEND=remotion |
@@ -78,31 +79,67 @@ npm run start
 ```
 This launches the **setup wizard** on first run:
 1. Enter Groq API key (required, 30 seconds to get from console.groq.com)
-2. Enter Gemini API key (required, 30 seconds to get from aistudio.google.com)
+2. Enter Cloudflare Account ID + API Token (required, from dash.cloudflare.com — powers image generation via Workers AI)
    - Both validated with real API calls before accepting
    - Visual feedback: ✓ (valid) or ✗ (invalid)
 3. Choose storage folder
-4. Backend + frontend start automatically
-5. App opens at http://127.0.0.1:8000
+4. On first run only, Python dependencies install automatically (a splash screen shows progress); backend + bundled frontend then start automatically
+5. App opens showing the frontend UI (served on 127.0.0.1:3000 internally; the backend on :8000 serves only the API and generated media)
 
 **Updating API keys later:**
 - Click ⚙️ Settings in the app (or /settings in web)
 - Add/update keys with live validation
 - Restart the app to apply changes
 
+### Building the Installer
+
+The packaged app bundles both the Python backend and a self-contained Next.js
+frontend server, so an installed user needs Python 3.11+ on their machine but
+**not** Node.js/npm — Electron's own bundled Node runs the frontend.
+
+```bash
+cd electron-app
+npm run dist:win   # or dist:mac / dist:linux
+```
+
+This automatically runs `predist:*` first, which builds the frontend
+(`scripts/build-frontend.js`): `npm install` + `npm run build` in `frontend/`
+(producing `.next/standalone/server.js` via `output: "standalone"` in
+`next.config.js`), then copies `.next/static` and `public/` into the
+standalone folder since Next intentionally omits them from that output.
+electron-builder's `extraResources` config then copies the backend source
+(`../backend`, minus `storage/`, `__pycache__/`, and `.db` files) and the
+frontend's standalone build (`../frontend/.next/standalone`) into the
+packaged app's `resources/backend` and `resources/frontend`.
+
+At runtime (`main.js`), `getBackendPath()`/`getFrontendServerPath()` resolve
+to those bundled locations when `app.isPackaged` (vs. the repo checkout in
+dev). On first launch, `ensureBackendDependencies()` runs
+`pip install --user -r requirements.txt` once (hashed against
+requirements.txt, skipped on later launches unless it changes) before
+spawning uvicorn — this is why a one-click install can take a few minutes
+the first time. A splash screen (`splash.html`) shows progress throughout
+this sequence so it doesn't look like the app hung.
+
+The frontend is served on `127.0.0.1:3000` and the backend on `:8000`
+(matching the backend's hardcoded CORS `allow_origins`); the main window
+loads the frontend, not the backend, since the backend only serves `/health`
+and `/storage`.
+
 ### Manual Setup (Web/CLI mode)
 
 **1. Get Free API Keys** (both required)
 - **Groq** (text/audio analysis): https://console.groq.com (no credit card, takes 30s)
-- **Gemini** (image generation): https://aistudio.google.com (500 free images/day, no credit card, takes 30s)
+- **Cloudflare** (image generation): https://dash.cloudflare.com (Account ID from the Workers & Pages sidebar; API Token from My Profile → API Tokens, with Account · Workers AI · Edit permission — free daily allowance, no credit card)
 
 **2. Create `.env`**
 ```bash
 cp .env.example .env
 # Edit .env:
 GROQ_API_KEY=gsk_...
-GEMINI_API_KEY=AIzaSy_...
-IMAGE_BACKEND=gemini  # Production mode. Use "placeholder" for dev-only offline mode.
+CLOUDFLARE_ACCOUNT_ID=...
+CLOUDFLARE_API_TOKEN=...
+IMAGE_BACKEND=cloudflare  # Production mode (default). Use "placeholder" for dev-only offline mode.
 ```
 
 **3. Backend**
@@ -138,9 +175,9 @@ When the Electron app starts for the first time, it shows a **3-step setup wizar
 - **Groq API Key** (required): Takes 30 seconds to get from console.groq.com
   - Validator checks the key with a real API call
   - Gives instant visual feedback: ✓ (green) or ✗ (red)
-- **Gemini API Key** (required): Takes 30 seconds to get from aistudio.google.com
-  - Validator checks the key with a real API call
-  - 500 free images/day, no credit card needed
+- **Cloudflare Account ID + API Token** (required): from dash.cloudflare.com
+  - Validator checks the credentials with a real API call
+  - Free daily image generation allowance, no credit card needed
   - Gives instant visual feedback: ✓ (green) or ✗ (red)
 
 ### Step 2: Storage Configuration
@@ -149,7 +186,7 @@ When the Electron app starts for the first time, it shows a **3-step setup wizar
 
 ### Step 3: Confirmation
 - Review settings and click Finish
-- Backend auto-starts, database initializes, frontend opens
+- A splash screen shows progress while Python dependencies install (first run only), then the backend and bundled frontend start automatically
 
 ### Settings After Install
 
@@ -224,10 +261,10 @@ print(result)
 
 **Required:**
 - `GROQ_API_KEY` — from https://console.groq.com (takes 30 seconds, no credit card)
-- `GEMINI_API_KEY` — from https://aistudio.google.com (takes 30 seconds, 500 free images/day)
+- `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_TOKEN` — from https://dash.cloudflare.com (free daily image generation allowance, no credit card)
 
 **Optional (development only):**
-- `IMAGE_BACKEND` — "gemini" (production, default) | "placeholder" (dev-only offline, no API)
+- `IMAGE_BACKEND` — "cloudflare" (production, default) | "gemini" (requires a billing-enabled Google Cloud project) | "placeholder" (dev-only offline, no API)
 
 **Other Optional:**
 - `WHISPER_MODEL` — tiny | base (default) | small | medium
@@ -240,8 +277,8 @@ print(result)
 | Now (Free) | Later (Faster/Better) |
 |---|---|
 | Groq / Llama 3.3 | Ollama (local GPU) or OpenAI GPT-4o |
-| Gemini 2.5 Flash Image (free tier) | OpenAI DALL-E 3, Replicate, local FLUX (GPU) |
-| Offline placeholder frames | Real images from Gemini or other providers |
+| Cloudflare Workers AI (FLUX.1-schnell, free) | OpenAI DALL-E 3, Replicate, local FLUX (GPU) |
+| Offline placeholder frames | Real images from Cloudflare, Gemini, or other providers |
 | Local storage | Cloudflare R2, S3 |
 | SQLite | Supabase / PostgreSQL |
 | FFmpeg Ken Burns | Wan2.1 or Remotion (GPU render, faster) |
@@ -407,19 +444,19 @@ per-shot timecodes. See `services/shot_prompt.py`.
 
 ### Image generation fails
 **Error:** `RuntimeError: Missing required API keys` or backend won't start
-- **Fix:** Ensure both keys are set in `.env`:
+- **Fix:** Ensure both are set in `.env`:
   - `GROQ_API_KEY=gsk_...` from https://console.groq.com
-  - `GEMINI_API_KEY=AIzaSy_...` from https://aistudio.google.com
+  - `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_TOKEN` from https://dash.cloudflare.com
 - **Dev mode only:** Set `IMAGE_BACKEND=placeholder` to run offline (no API keys needed, images are non-functional placeholders)
 
-**Error:** `401 Unauthorized` from Gemini
-- **Fix:** Check that `GEMINI_API_KEY` is correct at https://aistudio.google.com
-- Verify the key hasn't been revoked or disabled
+**Error:** `401 Unauthorized` / `403 Forbidden` from Cloudflare
+- **Fix:** Check that `CLOUDFLARE_ACCOUNT_ID` is correct and the API token has **Account · Workers AI · Edit** permission
+- Verify the token hasn't been revoked or expired
 - Update via Settings (/settings) in the app
 
-**Error:** Rate limited (500 images/day quota exceeded)
+**Error:** Rate limited (daily Workers AI allowance exceeded)
 - **Immediate:** Generation fails with clear error (system does not degrade gracefully)
-- **Fix:** Wait until quota resets (midnight UTC) or upgrade to paid Gemini tier or Replicate
+- **Fix:** Wait until the daily allowance resets, or upgrade to a paid Workers AI plan
 
 ### Video assembly hangs
 **Error:** Progress stuck at "Assembling…" for >30 min
@@ -440,9 +477,8 @@ per-shot timecodes. See `services/shot_prompt.py`.
 - Default is `base` (15-25s on CPU, good accuracy)
 
 ### Image Generation
-- Gemini free tier: ~3-5 min for typical shot (includes API latency + retry waits)
-- Quota: 500 images/day, resets daily
-- Upgrade to paid Gemini or Replicate for faster/unlimited: <1 min with GPU
+- Cloudflare Workers AI (FLUX.1-schnell): a few seconds per shot, well within the free daily allowance for typical use
+- Upgrade to Replicate or local FLUX (GPU) for higher volume: <1 min with GPU
 
 ### Video Assembly
 - FFmpeg Ken Burns: 15-25 min for typical 4-min song (CPU bound)
