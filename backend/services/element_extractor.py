@@ -7,6 +7,7 @@ Uses Groq free tier (same as treatment generator).
 import json
 from openai import OpenAI
 from config import settings
+from utils.groq_json import call_groq_json
 
 
 def _groq_client():
@@ -21,23 +22,13 @@ def extract_elements(treatment: dict, analysis: dict) -> dict:
     client = _groq_client()
     style_suffix = treatment.get("image_gen_style_prompt", "")
 
-    response = client.chat.completions.create(
-        model=settings.groq_model,
-        response_format={"type": "json_object"},
-        temperature=0.5,
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a music video production designer. "
-                    "Given an approved treatment and song structure, produce a complete "
-                    "asset registry — every image that needs to be generated. "
-                    "Be specific and production-ready. Return JSON only."
-                ),
-            },
-            {
-                "role": "user",
-                "content": f"""Create a complete visual asset registry for this music video.
+    system_prompt = (
+        "You are a music video production designer. "
+        "Given an approved treatment and song structure, produce a complete "
+        "asset registry — every image that needs to be generated. "
+        "Be specific and production-ready. Return JSON only."
+    )
+    user_prompt = f"""Create a complete visual asset registry for this music video.
 
 APPROVED TREATMENT:
 {json.dumps(treatment, indent=2)}
@@ -94,12 +85,13 @@ Rules:
 - All characters from the treatment with 2-4 states each (neutral, emotional peaks, action moments)
 - Props only if central to the treatment narrative
 - Every image_prompt is complete and standalone — no "as above" references
-- State IDs must be globally unique across the entire registry""",
-            },
-        ],
-    )
+- State IDs must be globally unique across the entire registry"""
 
-    result = json.loads(response.choices[0].message.content)
+    content = call_groq_json(
+        client, model=settings.groq_model, system=system_prompt,
+        user=user_prompt, temperature=0.5,
+    )
+    result = json.loads(content)
     result.setdefault("backgrounds", [])
     result.setdefault("characters", [])
     result.setdefault("props", [])

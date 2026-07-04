@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 from openai import OpenAI
 from config import settings
+from utils.groq_json import call_groq_json
 
 # Lazy-load model to avoid slow import at startup
 _whisper_model = None
@@ -105,16 +106,13 @@ def analyze_song(transcript: dict, audio_path: str,
         )
 
     client = _groq_client()
-    response = client.chat.completions.create(
-        model=settings.groq_model,
-        response_format={"type": "json_object"},
-        temperature=0.4,
-        messages=[
-            {"role": "system", "content": (
-                "You are a music video director analyzing a song for visual storytelling. "
-                "Return a JSON object only."
-            )},
-            {"role": "user", "content": f"""Analyze this song's lyrics and structure.
+    system_prompt = (
+        "You are a music video director analyzing a song for visual storytelling. "
+        "Return a JSON object only. All numeric fields (start_time, end_time, "
+        "timestamp, energy_level, song_duration) must be plain numbers in seconds, "
+        "e.g. 87 or 87.5 — never expressions or formulas like 1.45 * 60."
+    )
+    user_prompt = f"""Analyze this song's lyrics and structure.
 
 LYRICS WITH TIMESTAMPS:
 {lyrics_with_timestamps}{context_block}
@@ -123,15 +121,18 @@ Return JSON with these fields:
 - themes: list of 3-5 main themes
 - mood: overall emotional tone (string)
 - narrative_arc: how the story/emotion develops (string)
-- sections: list of {{name, start_time, end_time, energy_level 1-10, description}}
-- key_moments: list of {{timestamp, lyric, visual_opportunity}} for the 5-8 most visually compelling moments
+- sections: list of {{name, start_time, end_time, energy_level 1-10, description}} — start_time/end_time are plain numbers in seconds
+- key_moments: list of {{timestamp, lyric, visual_opportunity}} for the 5-8 most visually compelling moments — timestamp is a plain number in seconds
 - color_mood: 3 color words that match the song's feeling
 - energy_level: overall 1-10
 - visual_keywords: list of 10 concrete visual concepts this song evokes
-- song_duration: estimate in seconds based on latest timestamp"""}
-        ]
+- song_duration: estimate in seconds based on latest timestamp (plain number)"""
+
+    content = call_groq_json(
+        client, model=settings.groq_model, system=system_prompt,
+        user=user_prompt, temperature=0.4,
     )
-    return json.loads(response.choices[0].message.content)
+    return json.loads(content)
 
 def run_full_analysis(audio_path: str, creative_brief: str = "",
                       reference_notes: str = "") -> dict:
