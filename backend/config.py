@@ -5,6 +5,18 @@ import logging
 logger = logging.getLogger(__name__)
 
 class Settings(BaseSettings):
+    # Basic Auth gate for hosted deployments (e.g. htxpunk.com/mvgen) — unset
+    # (both empty) means no auth is enforced, which is correct for local/
+    # desktop use where the machine itself is the security boundary. Set
+    # both to require a login before any route (including /storage) responds.
+    auth_username: str = ""
+    auth_password: str = ""
+
+    # Comma-separated list of additional CORS origins for hosted deployments,
+    # e.g. "https://htxpunk.com" — the localhost dev origins are always
+    # allowed in addition to whatever's set here. Empty by default.
+    cors_extra_origins: str = ""
+
     # LLM — Groq free tier (swap to OLLAMA_BASE_URL when you have a GPU)
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
@@ -57,6 +69,11 @@ class Settings(BaseSettings):
         # uvicorn is launched from.
         env_file = str(Path(__file__).parent.parent / ".env")
         extra = "ignore"
+
+    @property
+    def cors_allow_origins(self) -> list[str]:
+        extra = [o.strip() for o in self.cors_extra_origins.split(",") if o.strip()]
+        return ["http://localhost:3000", "http://127.0.0.1:3000"] + extra
 
 settings = Settings()
 

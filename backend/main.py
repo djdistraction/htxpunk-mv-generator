@@ -1,7 +1,10 @@
+import base64
+import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 import logging
 
@@ -26,12 +29,41 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="HTXpunk Productions MV Generator", lifespan=lifespan)
 
+# HTTP Basic Auth gate for hosted deployments. Only active when both
+# AUTH_USERNAME/AUTH_PASSWORD are set — local/desktop use (where the
+# machine itself is the security boundary) is unaffected. Applied as
+# middleware (not a per-route dependency) so it also covers /storage,
+# which is mounted as static files with no dependency injection point.
+@app.middleware("http")
+async def basic_auth_gate(request: Request, call_next):
+    if not (settings.auth_username and settings.auth_password):
+        return await call_next(request)
+
+    if request.method == "OPTIONS":
+        # Let CORS preflight through unauthenticated — it carries no
+        # credentials and browsers don't attach an Authorization header to it.
+        return await call_next(request)
+
+    header = request.headers.get("authorization", "")
+    if header.startswith("Basic "):
+        try:
+            decoded = base64.b64decode(header[6:]).decode("utf-8")
+            user, _, password = decoded.partition(":")
+        except Exception:
+            user, password = "", ""
+        if secrets.compare_digest(user, settings.auth_username) and secrets.compare_digest(
+            password, settings.auth_password
+        ):
+            return await call_next(request)
+
+    return Response(
+        status_code=401,
+        headers={"WWW-Authenticate": 'Basic realm="HTXpunk MV Generator"'},
+    )
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=settings.cors_allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
