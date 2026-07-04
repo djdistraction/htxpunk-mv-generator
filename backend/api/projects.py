@@ -81,12 +81,12 @@ async def _store_references(project_id: str, references, reference_meta: str, so
     return stored
 
 
-@router.get("/")
+@router.get("")
 async def list_projects():
     return db_list_projects()
 
 
-@router.post("/")
+@router.post("")
 async def create_project(data: ProjectCreate):
     project_id = str(uuid.uuid4())
     return db_create_project(project_id, data.title, data.artist)

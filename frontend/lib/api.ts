@@ -1,19 +1,29 @@
 import axios, { AxiosError } from 'axios'
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+// Empty by default: API calls use relative paths ("/api/...", "/storage/...")
+// that Next's own server proxies to the backend (see next.config.js's
+// rewrites, which read BACKEND_INTERNAL_URL — a plain server-side env var,
+// not NEXT_PUBLIC_*, so it's resolved at request time, not baked into the
+// client bundle at build time). This matters for hosted deployments: the
+// browser (e.g. a phone loading htxpunk.com/mvgen) has no way to reach
+// "localhost:8000" on the server, but it can always reach the same origin
+// it loaded the page from. Set NEXT_PUBLIC_API_URL only if the backend is
+// genuinely on a different, browser-reachable origin (no shared proxy).
+const API_URL = process.env.NEXT_PUBLIC_API_URL || ''
 
 export const apiBaseUrl = API_URL
 
 /**
  * Resolve an asset URL for use in <img src>. Backend returns relative
- * "/storage/..." paths served by FastAPI on the API origin (:8000), but the
- * frontend runs on a different origin (:3000), so relative URLs would 404.
- * Prefix them with the API base. Absolute URLs (http/https, e.g. R2) pass through.
+ * "/storage/..." paths. If API_URL is set (cross-origin backend), prefix
+ * with it; otherwise leave relative so the browser resolves it against the
+ * current page's own origin, which next.config.js's rewrites forward to
+ * the backend. Absolute URLs (http/https, e.g. R2) always pass through.
  */
 export function mediaUrl(url?: string | null): string {
   if (!url) return ''
   if (/^(https?:\/\/|data:|blob:)/i.test(url)) return url
-  return new URL(url, API_URL).toString()
+  return API_URL ? new URL(url, API_URL).toString() : url
 }
 
 const client = axios.create({
@@ -27,7 +37,11 @@ client.interceptors.response.use(
   error => {
     if (!error.response) {
       console.error('Network error:', error.message)
-      console.error(`Make sure the backend is running at ${API_URL}`)
+      console.error(
+        API_URL
+          ? `Make sure the backend is running at ${API_URL}`
+          : 'Make sure the backend is running and reachable via the /api rewrite (see next.config.js)'
+      )
     }
     return Promise.reject(error)
   }

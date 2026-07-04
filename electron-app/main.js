@@ -362,18 +362,23 @@ function startFrontend(config) {
         return;
       }
 
-      // NEXT_PUBLIC_API_URL is only a fallback for completeness — the client
-      // bundle already has it inlined at build time (frontend/lib/api.ts
-      // defaults to http://localhost:8000, matching the default backendPort).
-      // Changing backendPort in settings without rebuilding the frontend
-      // will not repoint the UI; that's a known limitation, not a bug here.
+      // The browser (renderer) calls relative paths ("/api/...") that
+      // next.config.js's rewrites forward to the backend — but that
+      // destination is baked into the build at `npm run build:frontend`
+      // time (Next resolves rewrites() once, at build/config-load time,
+      // not per request), which happens before any end user has run the
+      // setup wizard and chosen a backendPort. So this — like the old
+      // NEXT_PUBLIC_API_URL approach it replaced — only works correctly
+      // for the default backendPort (8000), which is what gets baked in
+      // since build-frontend.js doesn't set BACKEND_INTERNAL_URL. Changing
+      // backendPort in settings without rebuilding the frontend remains a
+      // known limitation, not something either approach actually solves.
       const env = {
         ...process.env,
         ELECTRON_RUN_AS_NODE: '1',
         NODE_ENV: 'production',
         PORT: String(config.frontendPort),
         HOSTNAME: '127.0.0.1',
-        NEXT_PUBLIC_API_URL: `http://127.0.0.1:${config.backendPort}`,
       };
 
       frontendProcess = spawn(process.execPath, [serverPath], {

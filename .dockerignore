@@ -1,0 +1,11 @@
+.git
+node_modules
+**/node_modules
+frontend/.next
+backend/__pycache__
+**/__pycache__
+backend/storage
+backend/*.db
+electron-app
+remotion-composer
+*.md
