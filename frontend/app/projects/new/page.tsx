@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { api } from '@/lib/api'
 import ReferenceUploader, { ReferenceItem, appendReferences } from '@/components/ReferenceUploader'
+import { analyzeAudioFile, AudioAnalysisResult } from '@/lib/audioAnalysis'
 
 export default function NewProjectPage() {
   const router = useRouter()
@@ -12,6 +13,9 @@ export default function NewProjectPage() {
   const [artist, setArtist] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [brief, setBrief] = useState('')
+  const [analyzingAudio, setAnalyzingAudio] = useState(false)
+  const [audioAnalysis, setAudioAnalysis] = useState<AudioAnalysisResult | null>(null)
+  const analysisPromiseRef = useRef<Promise<AudioAnalysisResult | null> | null>(null)
   const [references, setReferences] = useState<ReferenceItem[]>([])
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
@@ -37,18 +41,41 @@ export default function NewProjectPage() {
     }
   }
 
+  const handleFileSelect = (selected: File | null) => {
+    setFile(selected)
+    setAudioAnalysis(null)
+    analysisPromiseRef.current = null
+    if (!selected) return
+    // Kick off BPM/key detection immediately — it runs client-side (essentia.js,
+    // WASM, in a Worker) so it overlaps with the rest of the form instead of
+    // adding to the upload's critical path.
+    setAnalyzingAudio(true)
+    const promise = analyzeAudioFile(selected).finally(() => setAnalyzingAudio(false))
+    analysisPromiseRef.current = promise
+    promise.then(setAudioAnalysis)
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!file || !title) return
     setUploading(true)
     setError('')
     try {
+      // BPM/key detection may still be running if the user submits quickly —
+      // wait for it so the values land in the same request as the file.
+      const analysis = analysisPromiseRef.current ? await analysisPromiseRef.current : audioAnalysis
+
       const formData = new FormData()
       formData.append('title', title)
       formData.append('artist', artist)
       formData.append('file', file)
       if (seriesId) formData.append('series_id', seriesId)
       if (brief.trim()) formData.append('brief', brief.trim())
+      if (analysis) {
+        formData.append('bpm', analysis.bpm)
+        formData.append('musical_key', analysis.musicalKey)
+        formData.append('beat_grid', JSON.stringify(analysis.beatGrid))
+      }
       if (references.length > 0) appendReferences(formData, references)
       const project = await api.projects.uploadAudio(formData)
       router.push(`/projects/${project.id}`)
@@ -160,17 +187,28 @@ export default function NewProjectPage() {
                 <div>
                   <div className="text-gray-500 text-4xl mb-2">↑</div>
                   <div className="text-gray-400">Click to select audio file</div>
-                  <div className="text-gray-600 text-sm mt-1">MP3, WAV, FLAC, M4A supported</div>
+                  <div className="text-gray-600 text-sm mt-1">MP3, WAV, or MP4 supported</div>
                 </div>
               )}
             </div>
             <input
               ref={fileInputRef}
               type="file"
-              accept="audio/*"
+              accept=".wav,.mp3,.mp4,audio/wav,audio/mpeg,video/mp4"
               className="hidden"
-              onChange={e => setFile(e.target.files?.[0] || null)}
+              onChange={e => handleFileSelect(e.target.files?.[0] || null)}
             />
+            {file && (
+              <div className="mt-2 text-xs">
+                {analyzingAudio ? (
+                  <span className="text-gray-500">🎚️ Detecting BPM & key…</span>
+                ) : audioAnalysis ? (
+                  <span className="text-gray-500">🎚️ {audioAnalysis.bpm} BPM · {audioAnalysis.musicalKey}</span>
+                ) : (
+                  <span className="text-gray-600">BPM/key detection unavailable in this browser — not required to continue.</span>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Creative vision */}
@@ -216,8 +254,9 @@ export default function NewProjectPage() {
           <div className="p-4 bg-gray-900 rounded-lg border border-gray-800">
             <h3 className="text-sm font-semibold text-gray-300 mb-2">Pipeline Timeline</h3>
             <ol className="text-gray-500 text-sm space-y-1 list-decimal list-inside">
-              <li>Audio is transcribed and analyzed — folding in your vision & references (~1 min)</li>
-              <li>AI generates a visual treatment — you review, attach more, and approve</li>
+              <li>Audio is converted, tagged, and vocals are isolated for transcription</li>
+              <li>You review the extracted song info and lyrics, then save</li>
+              <li>AI interprets the song, then generates a visual treatment — you review, attach more, and approve</li>
               <li>Backgrounds and character elements are generated (~5–10 min)</li>
               <li>Storyboard is built — you review and approve panel order</li>
               <li>Final video is assembled with your audio (~15–25 min)</li>

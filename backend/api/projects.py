@@ -117,6 +117,9 @@ async def create_and_upload(
     series_id: str = Form(""),
     brief: str = Form(""),
     reference_meta: str = Form("[]"),
+    bpm: str = Form(""),
+    musical_key: str = Form(""),
+    beat_grid: str = Form("[]"),
     file: UploadFile = File(...),
     references: list[UploadFile] = File(default=[]),
 ):
@@ -125,6 +128,12 @@ async def create_and_upload(
     a free-text creative brief and supporting reference files (images, docs).
     Audio is the only requirement; everything else is optional context the AI
     folds into its analysis and treatment.
+
+    bpm/musical_key/beat_grid are measured client-side (essentia.js, WASM, in
+    the browser — never server-side, per design) and arrive already computed;
+    this endpoint only persists them. They're locked/read-only from here on,
+    surfaced on the project-info review gate alongside the server-measured
+    song_length.
 
     The orchestrator picks up stage='uploaded' and starts analysis — so we store
     the brief and references BEFORE flipping the stage, ensuring they're included.
@@ -147,6 +156,17 @@ async def create_and_upload(
     updates: dict = {"audio_url": audio_url, "stage": "uploaded"}
     if series_id:
         updates["series_id"] = series_id
+    if bpm.strip():
+        updates["bpm"] = bpm.strip()
+    if musical_key.strip():
+        updates["musical_key"] = musical_key.strip()
+    if beat_grid.strip():
+        try:
+            parsed_grid = json.loads(beat_grid)
+            if isinstance(parsed_grid, list):
+                updates["beat_grid"] = parsed_grid
+        except json.JSONDecodeError:
+            pass
 
     db_update_project(project_id, **updates)
     # No .delay() — orchestrator sees stage="uploaded" and dispatches automatically
