@@ -18,6 +18,8 @@ def generate_treatment(
     series: dict | None = None,
     creative_brief: str = "",
     reference_notes: str = "",
+    title: str = "",
+    artist: str = "",
 ) -> dict:
     """
     Generate a full visual treatment from song analysis.
@@ -25,8 +27,14 @@ def generate_treatment(
     - series: if set, inherit series style/characters for continuity
     - creative_brief: the artist's free-text vision for the video
     - reference_notes: descriptions of reference files the artist uploaded
+    - title/artist: hard anchors, not hints — grounds the treatment in the
+      actual song rather than only whatever the derived analysis captured
     """
     client = _groq_client()
+
+    song_block = ""
+    if title.strip() or artist.strip():
+        song_block = f"\n\nSONG: \"{title.strip()}\" by {artist.strip() or 'an unspecified artist'}"
 
     brief_block = ""
     if creative_brief.strip():
@@ -69,6 +77,7 @@ def generate_treatment(
     user_prompt = (
         "Create a complete music video visual treatment.\n\n"
         f"SONG ANALYSIS:\n{json.dumps(analysis, indent=2)}"
+        f"{song_block}"
         f"{brief_block}"
         f"{series_block}"
         f"{revision_block}\n\n"

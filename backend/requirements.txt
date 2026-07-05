@@ -12,6 +12,14 @@ groq==0.11.0
 # Audio transcription — faster-whisper: Python 3.13 compatible, faster than openai-whisper
 faster-whisper==1.1.1
 
+# Vocal isolation before transcription — gives Whisper a clean vocal stem
+# instead of the full instrumental mix (confirmed root cause of a real
+# empty-transcript failure). Pulls in torch; accepted cost for quality-first.
+audio-separator[cpu]>=0.24.0
+
+# Audio file tag reading/writing (title/artist/composer/album, ID3 tags)
+mutagen==1.48.1
+
 # Image generation — Gemini 2.5 Flash Image (free tier, 500 images/day)
 requests>=2.31.0
 Pillow>=12.1.0

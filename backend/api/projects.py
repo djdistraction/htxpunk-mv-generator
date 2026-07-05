@@ -1,15 +1,31 @@
 import json
+import tempfile
 import uuid
+from pathlib import Path
+import httpx
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
-from models.project import ProjectCreate
+from models.project import ProjectCreate, ProjectInfoConfirm
 from database import (
     db_list_projects, db_create_project, db_get_project, db_update_project,
     db_create_asset, db_get_assets,
     db_list_series, db_create_series, db_get_series,
 )
-from utils.storage import upload_bytes
+from utils.storage import upload_bytes, url_to_local_path
 
 router = APIRouter()
+
+# Server-side enforcement — the frontend's accept="audio/*" file-picker hint
+# doesn't stop anyone selecting "All Files" or hitting the API directly.
+ALLOWED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".mp4"}
+
+
+def _validate_audio_file(filename: str | None):
+    ext = ("." + filename.rsplit(".", 1)[-1].lower()) if filename and "." in filename else ""
+    if ext not in ALLOWED_AUDIO_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '{ext or '(none)'}' — only .wav, .mp3, and .mp4 are accepted.",
+        )
 
 
 # ── Reference files (user's supporting material) ──────────────────────────────
@@ -113,6 +129,8 @@ async def create_and_upload(
     The orchestrator picks up stage='uploaded' and starts analysis — so we store
     the brief and references BEFORE flipping the stage, ensuring they're included.
     """
+    _validate_audio_file(file.filename)
+
     project_id = str(uuid.uuid4())
     db_create_project(project_id, title, artist)
 
@@ -172,11 +190,74 @@ async def upload_audio(project_id: str, file: UploadFile = File(...)):
     project = db_get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    _validate_audio_file(file.filename)
     contents = await file.read()
     key = f"projects/{project_id}/audio/{file.filename}"
     audio_url = upload_bytes(contents, key, file.content_type or "audio/mpeg")
     db_update_project(project_id, audio_url=audio_url, stage="uploaded")
     return {"audio_url": audio_url, "message": "Audio uploaded — analysis starting"}
+
+
+@router.post("/{project_id}/confirm-info")
+async def confirm_project_info(project_id: str, payload: ProjectInfoConfirm):
+    """
+    "Create Project & Save": the human reviews/edits the facts extracted by
+    preprocessing (title, artist, composer, album, transcript — all editable;
+    bpm/musical_key arrive here from the client-side essentia.js measurement).
+    We apply the edits, write the human-readable project folder, then hand off
+    to song interpretation (the first LLM call in the pipeline) — grounded in
+    whatever the human just confirmed.
+    """
+    project = db_get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project["stage"] != "awaiting_project_info_review":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Project is not awaiting info review (stage={project['stage']})",
+        )
+
+    updates = payload.model_dump(exclude_unset=True)
+    if updates:
+        db_update_project(project_id, **updates)
+        project = db_get_project(project_id)
+
+    from services.project_folder import create_human_readable_folder
+
+    def _local_audio_path(url: str | None, suffix: str) -> str:
+        if not url:
+            return ""
+        local_path = url_to_local_path(url)
+        if Path(local_path).exists():
+            return local_path
+        try:
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+                f.write(httpx.get(url, timeout=120).content)
+                return f.name
+        except Exception:
+            return ""
+
+    original_path = _local_audio_path(project.get("audio_url"), ".audio")
+    converted_path = _local_audio_path(project.get("converted_audio_url"), ".mp3")
+
+    folder = create_human_readable_folder(
+        project_id,
+        title=project.get("title", ""),
+        artist=project.get("artist", ""),
+        original_audio_path=original_path,
+        converted_audio_path=converted_path,
+        transcript=project.get("transcript") or {},
+        metadata={
+            "composer": project.get("composer"),
+            "album": project.get("album"),
+            "song_length": project.get("song_length"),
+            "bpm": project.get("bpm"),
+            "musical_key": project.get("musical_key"),
+        },
+    )
+    db_update_project(project_id, project_folder=folder, stage="info_confirmed")
+    # No .delay() — orchestrator sees stage="info_confirmed" and dispatches automatically
+    return db_get_project(project_id)
 
 
 # ── Series endpoints ──────────────────────────────────────────────────────────

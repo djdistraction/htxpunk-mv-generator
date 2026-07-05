@@ -73,6 +73,14 @@ export const api = {
       })
       return data
     },
+    confirmInfo: async (id: string, payload: {
+      title?: string; artist?: string; composer?: string; album?: string
+      bpm?: string; musical_key?: string; beat_grid?: number[]
+      transcript?: object
+    }) => {
+      const { data } = await client.post(`/api/projects/${id}/confirm-info`, payload)
+      return data
+    },
   },
 
   pipeline: {

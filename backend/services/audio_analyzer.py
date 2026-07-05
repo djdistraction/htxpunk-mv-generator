@@ -50,7 +50,15 @@ def _groq_client():
     )
 
 def transcribe_audio(audio_path: str) -> dict:
-    """Transcribe audio file using faster-whisper. Returns segments + word timestamps."""
+    """Transcribe audio using faster-whisper. Returns segments + word timestamps.
+
+    Expects an already vocal-isolated file (see services.audio_preprocessor.
+    separate_vocals), not the full mix — VAD misjudging sung vocals as
+    non-speech against a full instrumental bed was the confirmed cause of a
+    real empty-transcript failure. With clean vocals, VAD has an easier,
+    more reliable job; left enabled since there's no evidence yet it needs
+    to change now that the input is what it should have been all along.
+    """
     model = _get_whisper()
     segments_iter, info = model.transcribe(
         audio_path,
@@ -83,17 +91,25 @@ def transcribe_audio(audio_path: str) -> dict:
     }
 
 def analyze_song(transcript: dict, audio_path: str,
-                 creative_brief: str = "", reference_notes: str = "") -> dict:
+                 creative_brief: str = "", reference_notes: str = "",
+                 title: str = "", artist: str = "") -> dict:
     """Use Groq LLM to interpret the song's meaning and generate visual keywords.
 
     If the user supplied a creative brief or reference material, weave it in so
     the analysis reflects their vision rather than starting from a blank slate.
+
+    title/artist are hard anchors, not hints — previously this ran on the
+    transcript alone with nothing else grounding it, and a sparse/wrong
+    transcript (a real one came back as a single throwaway phrase) produced
+    a confidently invented analysis with no real connection to the song.
     """
     lyrics_with_timestamps = "\n".join(
         f"[{seg['start']:.1f}s] {seg['text']}" for seg in transcript["segments"]
     )
 
     context_block = ""
+    if title.strip() or artist.strip():
+        context_block += f"\n\nSONG: \"{title.strip()}\" by {artist.strip() or 'an unspecified artist'}"
     if creative_brief.strip():
         context_block += (
             f"\n\nARTIST'S CREATIVE VISION (prioritize this — it is what they want):\n"
@@ -134,14 +150,3 @@ Return JSON with these fields:
     )
     return json.loads(content)
 
-def run_full_analysis(audio_path: str, creative_brief: str = "",
-                      reference_notes: str = "") -> dict:
-    """Run transcription + analysis. Called by pipeline worker."""
-    print(f"Transcribing {audio_path}...")
-    transcript = transcribe_audio(audio_path)
-    print("Analyzing song meaning...")
-    analysis = analyze_song(transcript, audio_path,
-                            creative_brief=creative_brief,
-                            reference_notes=reference_notes)
-    analysis["transcript"] = transcript
-    return analysis

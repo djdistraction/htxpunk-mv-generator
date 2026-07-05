@@ -72,35 +72,89 @@ def _collect_creative_context(project_id: str, project: dict) -> tuple[str, str]
     return creative_brief, reference_notes
 
 
-# ── Stage 1: Audio Analysis ───────────────────────────────────────────────────
+# ── Stage 1a: Audio Preprocessing ────────────────────────────────────────────
 
-def run_audio_analysis(project_id: str):
-    """Transcribe audio + LLM song analysis → sets stage='analyzed'."""
-    from services.audio_analyzer import run_full_analysis
-    _set_stage(project_id, "analyzing")
+def _resolve_local_audio(audio_url: str, suffix: str = ".audio") -> str:
+    """Return a local filesystem path for a stored audio URL, downloading it
+    to a temp file first if it isn't already on local disk (e.g. R2 storage)."""
+    local_path = url_to_local_path(audio_url)
+    if Path(local_path).exists():
+        return local_path
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+        f.write(httpx.get(audio_url, timeout=120).content)
+        return f.name
+
+
+def run_audio_preprocessing(project_id: str):
+    """Convert → read tags → isolate vocals → transcribe.
+
+    Sets stage='awaiting_project_info_review' (human gate) — nothing here
+    calls an LLM. The human reviews/edits the extracted facts before
+    'Create Project & Save' hands off to song interpretation.
+    """
+    from services.audio_preprocessor import convert_to_mp3, extract_metadata_tags, separate_vocals
+    from services.audio_analyzer import transcribe_audio
+    from utils.storage import upload_file_path
+    _set_stage(project_id, "preprocessing_audio")
     project = _get_project(project_id)
 
-    audio_url = project["audio_url"]
-    audio_path = url_to_local_path(audio_url)
+    original_path = _resolve_local_audio(project["audio_url"])
 
-    # If not in local storage, download to a temp file
-    if not Path(audio_path).exists():
-        logger.info("[Worker] Downloading audio for project %s", project_id[:8])
-        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
-            f.write(httpx.get(audio_url, timeout=120).content)
-            audio_path = f.name
+    with tempfile.TemporaryDirectory(prefix="htxpunk_preprocess_") as tmp:
+        converted_path = str(Path(tmp) / "converted.mp3")
+        convert_to_mp3(original_path, converted_path)
 
+        tags = extract_metadata_tags(converted_path)
+
+        logger.info("[Worker] Separating vocals for %s", project_id[:8])
+        vocals_path = separate_vocals(converted_path, tmp)
+
+        logger.info("[Worker] Transcribing vocal stem for %s", project_id[:8])
+        transcript = transcribe_audio(vocals_path)
+
+        converted_url = upload_file_path(
+            converted_path, f"projects/{project_id}/audio/converted.mp3", "audio/mpeg"
+        )
+
+    db_update_project(
+        project_id,
+        converted_audio_url=converted_url,
+        title=project.get("title") or tags.get("title") or "",
+        artist=project.get("artist") or tags.get("artist") or "",
+        composer=tags.get("composer") or "",
+        album=tags.get("album") or "",
+        song_length=str(tags["length"]) if tags.get("length") else "",
+        transcript=transcript,
+        stage="awaiting_project_info_review",
+    )
+    logger.info("[Worker] Preprocessing complete for %s — awaiting info review", project_id[:8])
+    # ⏸ Orchestrator pauses here until human calls /confirm-info
+
+
+# ── Stage 1b: Song Interpretation ────────────────────────────────────────────
+
+def run_song_interpretation(project_id: str):
+    """LLM song analysis, grounded in the human-confirmed transcript + title/
+    artist → sets stage='analyzed'. Runs only after 'Create Project & Save'."""
+    from services.audio_analyzer import analyze_song
+    _set_stage(project_id, "interpreting_song")
+    project = _get_project(project_id)
+
+    transcript = project.get("transcript") or {}
     creative_brief, reference_notes = _collect_creative_context(project_id, project)
     if creative_brief or reference_notes:
         logger.info("[Worker] Incorporating user brief/references for %s", project_id[:8])
 
-    result = run_full_analysis(
-        audio_path,
+    result = analyze_song(
+        transcript,
+        audio_path="",
         creative_brief=creative_brief,
         reference_notes=reference_notes,
+        title=project.get("title") or "",
+        artist=project.get("artist") or "",
     )
     db_update_project(project_id, stage="analyzed", analysis=result)
-    logger.info("[Worker] Audio analysis complete for %s", project_id[:8])
+    logger.info("[Worker] Song interpretation complete for %s", project_id[:8])
 
 
 # ── Stage 2: Treatment Generation ────────────────────────────────────────────
@@ -129,6 +183,8 @@ def run_treatment_generation(project_id: str):
         series=series,
         creative_brief=creative_brief,
         reference_notes=reference_notes,
+        title=project.get("title") or "",
+        artist=project.get("artist") or "",
     )
 
     # Clear revision notes after use
@@ -392,8 +448,10 @@ def run_video_assembly(project_id: str):
     ]
 
     # Audio is optional: a manifest-only demo project may have no song attached,
-    # in which case we render a silent video from the panel durations.
-    audio_url = project.get("audio_url")
+    # in which case we render a silent video from the panel durations. Prefer
+    # the converted canonical mp3 (guaranteed valid mp3) over the raw upload,
+    # which may be wav/mp4.
+    audio_url = project.get("converted_audio_url") or project.get("audio_url")
     audio_path = url_to_local_path(audio_url) if audio_url else ""
     video_url = assemble_music_video(
         project_id=project_id,
