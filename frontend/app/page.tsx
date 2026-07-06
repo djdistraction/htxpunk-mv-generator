@@ -1,8 +1,9 @@
 "use client"
 import { useEffect, useState } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { api } from "../lib/api"
-import { RefreshCw } from "lucide-react"
+import { RefreshCw, Trash2, RotateCcw } from "lucide-react"
 
 const STAGE_LABELS: Record<string, string> = {
   uploaded: "⬆️ Uploaded",
@@ -24,10 +25,12 @@ const STAGE_LABELS: Record<string, string> = {
 }
 
 export default function Home() {
+  const router = useRouter()
   const [projectList, setProjectList] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [refreshing, setRefreshing] = useState(false)
+  const [busyId, setBusyId] = useState<string | null>(null)
 
   const loadProjects = async () => {
     setRefreshing(true)
@@ -48,6 +51,36 @@ export default function Home() {
     const interval = setInterval(loadProjects, 10000)
     return () => clearInterval(interval)
   }, [])
+
+  const handleDelete = async (e: React.MouseEvent, id: string, title: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!confirm(`Delete "${title}"? This can't be undone — the project, its assets, and generated video will be permanently removed. (Your exported "HTXpunk Projects" folder, if you saved one, is untouched.)`)) {
+      return
+    }
+    setBusyId(id)
+    try {
+      await api.projects.delete(id)
+      setProjectList(prev => prev.filter(p => p.id !== id))
+    } catch {
+      alert('Could not delete project — is the backend running?')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const handleRetry = async (e: React.MouseEvent, id: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setBusyId(id)
+    try {
+      await api.projects.retry(id)
+      router.push(`/projects/${id}`)
+    } catch {
+      alert('Could not retry project — is the backend running?')
+      setBusyId(null)
+    }
+  }
 
   return (
     <main className="max-w-5xl mx-auto p-8">
@@ -109,20 +142,40 @@ export default function Home() {
             <Link
               key={p.id}
               href={`/projects/${p.id}`}
-              className="bg-gray-900 border border-gray-800 rounded-xl p-5 hover:border-purple-600 transition flex items-center justify-between"
+              className="bg-gray-900 border border-gray-800 rounded-xl p-5 hover:border-purple-600 transition flex items-center justify-between gap-4"
             >
-              <div>
-                <h2 className="text-xl font-semibold">{p.title}</h2>
+              <div className="min-w-0">
+                <h2 className="text-xl font-semibold truncate">{p.title}</h2>
                 <p className="text-gray-400 text-sm">{p.artist || "Unknown Artist"}</p>
               </div>
-              <span className={`text-sm ${
-                p.stage === 'complete' ? 'text-green-400' :
-                p.stage === 'error' ? 'text-red-400' :
-                p.stage?.includes('awaiting') ? 'text-yellow-400' :
-                'text-gray-400'
-              }`}>
-                {STAGE_LABELS[p.stage] ?? p.stage}
-              </span>
+              <div className="flex items-center gap-3 flex-shrink-0">
+                <span className={`text-sm whitespace-nowrap ${
+                  p.stage === 'complete' ? 'text-green-400' :
+                  p.stage === 'error' ? 'text-red-400' :
+                  p.stage?.includes('awaiting') ? 'text-yellow-400' :
+                  'text-gray-400'
+                }`}>
+                  {STAGE_LABELS[p.stage] ?? p.stage}
+                </span>
+                {p.stage === 'error' && (
+                  <button
+                    onClick={(e) => handleRetry(e, p.id)}
+                    disabled={busyId === p.id}
+                    title="Retry from where it failed"
+                    className="p-2 rounded-lg border border-gray-700 text-gray-400 hover:text-yellow-400 hover:border-yellow-600 transition disabled:opacity-50"
+                  >
+                    <RotateCcw size={16} />
+                  </button>
+                )}
+                <button
+                  onClick={(e) => handleDelete(e, p.id, p.title)}
+                  disabled={busyId === p.id}
+                  title="Delete project"
+                  className="p-2 rounded-lg border border-gray-700 text-gray-400 hover:text-red-400 hover:border-red-600 transition disabled:opacity-50"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
             </Link>
           ))}
         </div>

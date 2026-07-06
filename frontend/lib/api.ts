@@ -68,6 +68,14 @@ export const api = {
       const { data } = await client.get(`/api/projects/${id}`)
       return data
     },
+    delete: async (id: string) => {
+      const { data } = await client.delete(`/api/projects/${id}`)
+      return data
+    },
+    retry: async (id: string) => {
+      const { data } = await client.post(`/api/projects/${id}/retry`)
+      return data
+    },
     uploadAudio: async (formData: FormData) => {
       const { data } = await client.post('/api/projects/upload-audio', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },

@@ -7,10 +7,10 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from models.project import ProjectCreate, ProjectInfoConfirm
 from database import (
     db_list_projects, db_create_project, db_get_project, db_update_project,
-    db_create_asset, db_get_assets,
+    db_create_asset, db_get_assets, db_delete_project, db_get_last_task,
     db_list_series, db_create_series, db_get_series,
 )
-from utils.storage import upload_bytes, url_to_local_path
+from utils.storage import upload_bytes, url_to_local_path, delete_project_files
 
 router = APIRouter()
 
@@ -180,6 +180,52 @@ async def get_project(project_id: str):
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return project
+
+
+@router.delete("/{project_id}")
+async def delete_project(project_id: str):
+    """Delete a project and everything scoped to it. Does not touch the
+    human-readable export folder (HTXpunk Projects/{Artist} - {Title}/) —
+    that's a deliberate permanent artifact, not internal state."""
+    if not db_get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    delete_project_files(project_id)
+    db_delete_project(project_id)
+    return {"deleted": True}
+
+
+@router.post("/{project_id}/retry")
+async def retry_project(project_id: str):
+    """Resume a project stuck in stage='error'. Looks up which pipeline
+    stage's worker most recently failed (via the tasks log) and resets the
+    project back to that stage's dispatch point — the orchestrator picks it
+    up on its next poll, exactly like a fresh arrival at that stage."""
+    project = db_get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project["stage"] != "error":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Project is not in an error state (stage={project['stage']})",
+        )
+
+    last_task = db_get_last_task(project_id)
+    if not last_task:
+        raise HTTPException(
+            status_code=400,
+            detail="No task history found for this project — can't determine where to resume.",
+        )
+
+    from orchestrator import TASK_TYPE_TO_STAGE
+    resume_stage = TASK_TYPE_TO_STAGE.get(last_task["task_type"])
+    if not resume_stage:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unrecognized task type '{last_task['task_type']}' — can't determine where to resume.",
+        )
+
+    db_update_project(project_id, stage=resume_stage, error_message="")
+    return db_get_project(project_id)
 
 
 @router.get("/{project_id}/references")

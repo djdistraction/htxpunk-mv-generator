@@ -199,6 +199,19 @@ def db_update_project(project_id: str, **kwargs):
     conn.commit()
     conn.close()
 
+def db_delete_project(project_id: str):
+    """Delete a project and everything scoped to it (assets, tasks, shot
+    manifests). Does NOT touch the human-readable project folder — that's a
+    deliberate permanent export, not internal state (see project_folder.py).
+    Series rows are shared across projects and are never touched here."""
+    conn = _sync_db()
+    conn.execute("DELETE FROM assets WHERE project_id=?", (project_id,))
+    conn.execute("DELETE FROM tasks WHERE project_id=?", (project_id,))
+    conn.execute("DELETE FROM shot_manifests WHERE project_id=?", (project_id,))
+    conn.execute("DELETE FROM projects WHERE id=?", (project_id,))
+    conn.commit()
+    conn.close()
+
 def db_create_asset(project_id: str, asset_type: str, label: str,
                     url: str = "", prompt: str = "", **meta) -> str:
     asset_id = str(uuid.uuid4())
@@ -281,6 +294,20 @@ def db_get_running_task(project_id: str) -> dict | None:
     conn.row_factory = sqlite3.Row
     row = conn.execute(
         "SELECT * FROM tasks WHERE project_id=? AND status='running' LIMIT 1",
+        (project_id,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def db_get_last_task(project_id: str) -> dict | None:
+    """Returns the most recently created task for this project, or None.
+    Used to figure out which stage to resume from after an error — the
+    orchestrator marks the failing task as the last one written before it
+    sets stage='error' and stops dispatching."""
+    conn = _sync_db()
+    conn.row_factory = sqlite3.Row
+    row = conn.execute(
+        "SELECT * FROM tasks WHERE project_id=? ORDER BY created_at DESC LIMIT 1",
         (project_id,)
     ).fetchone()
     conn.close()
