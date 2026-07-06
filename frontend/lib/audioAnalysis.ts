@@ -14,9 +14,14 @@ export type AudioAnalysisResult = {
   beatGrid: number[]
 }
 
+export type AudioAnalysisStep = 'bpm' | 'beatgrid' | 'key'
+
 const ESSENTIA_SAMPLE_RATE = 44100 // RhythmExtractor2013/KeyExtractor assume this; no sampleRate param to override it
 
-export async function analyzeAudioFile(file: File): Promise<AudioAnalysisResult | null> {
+export async function analyzeAudioFile(
+  file: File,
+  onProgress?: (step: AudioAnalysisStep) => void
+): Promise<AudioAnalysisResult | null> {
   if (typeof window === 'undefined' || typeof Worker === 'undefined') return null
 
   const AudioCtx = window.OfflineAudioContext || (window as any).webkitOfflineAudioContext
@@ -31,7 +36,7 @@ export async function analyzeAudioFile(file: File): Promise<AudioAnalysisResult 
     const audioBuffer: AudioBuffer = await offlineCtx.decodeAudioData(arrayBuffer)
 
     const mono = downmixToMono(audioBuffer)
-    const result = await runEssentiaWorker(mono)
+    const result = await runEssentiaWorker(mono, onProgress)
 
     if (!result.ok) {
       console.error('[audioAnalysis] essentia worker failed:', result.error)
@@ -59,7 +64,10 @@ function downmixToMono(buffer: AudioBuffer): Float32Array {
   return mono
 }
 
-function runEssentiaWorker(signal: Float32Array): Promise<any> {
+function runEssentiaWorker(
+  signal: Float32Array,
+  onProgress?: (step: AudioAnalysisStep) => void
+): Promise<any> {
   return new Promise((resolve, reject) => {
     const worker = new Worker('/vendor/essentia/essentia-worker.js')
     const timeout = setTimeout(() => {
@@ -68,6 +76,12 @@ function runEssentiaWorker(signal: Float32Array): Promise<any> {
     }, 180000)
 
     worker.onmessage = (e: MessageEvent) => {
+      // Intermediate progress messages ({progress: 'bpm'|'beatgrid'|'key'})
+      // arrive before the final {ok, ...} result — keep listening until then.
+      if (e.data && e.data.progress) {
+        onProgress?.(e.data.progress)
+        return
+      }
       clearTimeout(timeout)
       worker.terminate()
       resolve(e.data)

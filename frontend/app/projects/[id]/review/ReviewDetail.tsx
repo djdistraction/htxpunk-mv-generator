@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { api } from '@/lib/api'
+import ReferenceUploader, { ReferenceItem, appendReferences } from '@/components/ReferenceUploader'
 
 type Segment = { start: number; end?: number; text: string }
 
@@ -11,12 +12,24 @@ export default function ReviewDetail({ id }: { id: string }) {
   const [project, setProject] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [working, setWorking] = useState(false)
+  const [seeded, setSeeded] = useState(false)
 
   const [title, setTitle] = useState('')
   const [artist, setArtist] = useState('')
   const [composer, setComposer] = useState('')
   const [album, setAlbum] = useState('')
   const [segments, setSegments] = useState<Segment[]>([])
+
+  const [seriesList, setSeriesList] = useState<any[]>([])
+  const [seriesId, setSeriesId] = useState('')
+  const [showNewSeries, setShowNewSeries] = useState(false)
+  const [newSeriesName, setNewSeriesName] = useState('')
+  const [brief, setBrief] = useState('')
+  const [references, setReferences] = useState<ReferenceItem[]>([])
+
+  useEffect(() => {
+    api.series.list().then(setSeriesList).catch(() => {})
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -27,12 +40,15 @@ export default function ReviewDetail({ id }: { id: string }) {
         setProject(data)
         // Only seed the editable fields once, the first time the gate's data
         // arrives — otherwise the 3s poll would clobber in-progress edits.
-        if (data.stage === 'awaiting_project_info_review' && title === '' && artist === '') {
+        if (data.stage === 'awaiting_project_info_review' && !seeded) {
+          setSeeded(true)
           setTitle(data.title || '')
           setArtist(data.artist || '')
           setComposer(data.composer || '')
           setAlbum(data.album || '')
           setSegments(data.transcript?.segments || [])
+          setSeriesId(data.series_id || '')
+          setBrief(data.user_brief || '')
         }
       } catch {
         if (!cancelled) setProject(null)
@@ -44,17 +60,38 @@ export default function ReviewDetail({ id }: { id: string }) {
     const interval = setInterval(load, 3000)
     return () => { cancelled = true; clearInterval(interval) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id])
+  }, [id, seeded])
+
+  const handleCreateSeries = async () => {
+    if (!newSeriesName.trim()) return
+    try {
+      const s = await api.series.create(newSeriesName.trim(), artist)
+      setSeriesList(prev => [s, ...prev])
+      setSeriesId(s.id)
+      setShowNewSeries(false)
+      setNewSeriesName('')
+    } catch {
+      alert('Could not create series.')
+    }
+  }
 
   const handleSave = async () => {
     setWorking(true)
     try {
+      if (references.length > 0) {
+        const form = new FormData()
+        appendReferences(form, references)
+        form.append('source', 'initial')
+        await api.projects.addReferences(id, form)
+      }
       await api.projects.confirmInfo(id, {
         title: title.trim(),
         artist: artist.trim(),
         composer: composer.trim(),
         album: album.trim(),
         transcript: { ...(project.transcript || {}), segments },
+        series_id: seriesId || undefined,
+        brief: brief.trim(),
       })
       router.push(`/projects/${id}`)
     } catch {
@@ -143,6 +180,74 @@ export default function ReviewDetail({ id }: { id: string }) {
                 ))}
               </div>
             )}
+          </div>
+
+          <div className="bg-gray-900 rounded-xl p-5 border border-gray-800">
+            <h2 className="text-xs text-gray-500 uppercase tracking-widest mb-2">
+              Part of a Series?
+              <span className="text-gray-500 font-normal normal-case tracking-normal ml-2">— links this video to recurring characters & style</span>
+            </h2>
+            <div className="flex gap-2">
+              <select
+                value={seriesId}
+                onChange={e => setSeriesId(e.target.value)}
+                className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-purple-500"
+              >
+                <option value="">— Standalone video —</option>
+                {seriesList.map(s => (
+                  <option key={s.id} value={s.id}>{s.name}{s.artist ? ` (${s.artist})` : ''}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => setShowNewSeries(v => !v)}
+                className="px-3 border border-gray-700 rounded-lg text-gray-400 hover:border-purple-500 hover:text-purple-400 transition text-sm"
+              >
+                + New
+              </button>
+            </div>
+            {showNewSeries && (
+              <div className="mt-2 flex gap-2">
+                <input
+                  type="text"
+                  value={newSeriesName}
+                  onChange={e => setNewSeriesName(e.target.value)}
+                  placeholder="Series name…"
+                  className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-600 text-sm focus:outline-none focus:border-purple-500"
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  onClick={handleCreateSeries}
+                  disabled={!newSeriesName.trim()}
+                  className="px-3 bg-purple-700 hover:bg-purple-600 disabled:bg-gray-700 rounded-lg text-sm text-white transition"
+                >
+                  Create
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-gray-900 rounded-xl p-5 border border-gray-800">
+            <h2 className="text-xs text-gray-500 uppercase tracking-widest mb-2">
+              Your Vision
+              <span className="text-gray-500 font-normal normal-case tracking-normal ml-2">— optional, but it helps a lot</span>
+            </h2>
+            <textarea
+              value={brief}
+              onChange={e => setBrief(e.target.value)}
+              rows={4}
+              placeholder="Describe what you picture for this video — the story, mood, characters, settings, references, anything. Leave it blank and the AI will create a vision from the song alone."
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-600 text-sm focus:outline-none focus:border-purple-500 resize-none"
+            />
+          </div>
+
+          <div className="bg-gray-900 rounded-xl p-5 border border-gray-800">
+            <h2 className="text-xs text-gray-500 uppercase tracking-widest mb-2">
+              Reference Files
+              <span className="text-gray-500 font-normal normal-case tracking-normal ml-2">— images, mood boards, lyrics, scripts, notes</span>
+            </h2>
+            <ReferenceUploader items={references} onChange={setReferences} />
           </div>
 
           <button

@@ -112,17 +112,20 @@ async def create_project(data: ProjectCreate):
 # !! Must be defined BEFORE /{project_id} to avoid routing ambiguity !!
 @router.post("/upload-audio")
 async def create_and_upload(
+    title: str = Form(...),
     bpm: str = Form(""),
     musical_key: str = Form(""),
     beat_grid: str = Form("[]"),
     file: UploadFile = File(...),
 ):
     """
-    Create a new project from audio alone — this is the entire upload form now.
-    Title, artist, series, creative brief, and reference files are no longer
-    collected here: preprocessing (conversion, tag reading, vocal isolation,
-    transcription) runs first, and everything else is filled in on the
-    project-info review screen once there's real data to react to, not before.
+    Create a new project: a name for it, plus the audio file — that's the
+    entire upload form. Artist, series, creative brief, and reference files
+    are still deferred to the project-info review screen, filled in once
+    there's real data (transcript, tags) to react to; only the project's own
+    name is needed up front; so it exists as something findable in the
+    project list, and so the human has confirmed the anchor everything else
+    grounds against before preprocessing ever starts.
 
     bpm/musical_key/beat_grid are measured client-side (essentia.js, WASM, in
     the browser — never server-side, per design) and arrive already computed;
@@ -133,7 +136,7 @@ async def create_and_upload(
     _validate_audio_file(file.filename)
 
     project_id = str(uuid.uuid4())
-    db_create_project(project_id, "", "")
+    db_create_project(project_id, title, "")
 
     contents = await file.read()
     key = f"projects/{project_id}/audio/{file.filename}"

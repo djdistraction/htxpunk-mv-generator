@@ -117,13 +117,13 @@ def run_audio_preprocessing(project_id: str):
         converted_path = str(Path(tmp) / "converted.mp3")
         convert_to_mp3(original_path, converted_path)
 
-        _set_processing_step(project_id, "Extracting meta tags")
+        _set_processing_step(project_id, "Extracting Meta Tags")
         tags = extract_metadata_tags(converted_path)
 
-        _set_processing_step(project_id, "Isolating vocal stems")
+        _set_processing_step(project_id, "Isolating Vocal Stems")
         vocals_path = separate_vocals(converted_path, tmp)
 
-        _set_processing_step(project_id, "Transcribing lyrics")
+        _set_processing_step(project_id, "Transcribing Lyrics")
         transcript = transcribe_audio(vocals_path)
 
         converted_url = upload_file_path(
@@ -143,7 +143,7 @@ def run_audio_preprocessing(project_id: str):
         album=tags.get("album") or "",
         song_length=str(tags["length"]) if tags.get("length") else "",
         transcript=transcript,
-        processing_step="Loading results",
+        processing_step="Loading Results",
         stage="awaiting_project_info_review",
     )
     logger.info("[Worker] Preprocessing complete for %s — awaiting info review", project_id[:8])

@@ -22,10 +22,14 @@ self.onmessage = function (ev) {
     var signal = ev.data.signal; // mono Float32Array, already resampled to 44100Hz by the caller
     var vec = essentia.arrayToVector(signal);
 
+    self.postMessage({ progress: 'bpm' });
     var rhythm = essentia.RhythmExtractor2013(vec);
-    var beatGrid = Array.from(essentia.vectorToArray(rhythm.ticks));
     var bpm = rhythm.bpm;
 
+    self.postMessage({ progress: 'beatgrid' });
+    var beatGrid = Array.from(essentia.vectorToArray(rhythm.ticks));
+
+    self.postMessage({ progress: 'key' });
     var key = essentia.KeyExtractor(vec);
     var musicalKey = key.scale ? (key.key + ' ' + key.scale) : key.key;
 
