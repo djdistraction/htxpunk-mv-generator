@@ -28,7 +28,18 @@ export function mediaUrl(url?: string | null): string {
 
 const client = axios.create({
   baseURL: API_URL,
-  timeout: 120000, // 2 minute timeout for long uploads
+  // Generous, not because any single request is slow to process (uploads
+  // and DB writes are fast), but because the backend runs CPU-heavy
+  // preprocessing (vocal separation, transcription) in the same process as
+  // the API server. That work is dispatched to a background thread and the
+  // request itself already returned before it starts — but Python's GIL
+  // means a long-running native compute call in that thread can still delay
+  // how promptly an already-finished response actually gets flushed back to
+  // the browser. A real fix would move that work to a separate process; this
+  // timeout is the pragmatic mitigation until that's done — confirmed via a
+  // real failure that a fast, already-completed upload took ~2 minutes to
+  // report back, right at the old timeout's edge.
+  timeout: 600000, // 10 minutes
 })
 
 // Log errors for debugging
