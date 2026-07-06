@@ -34,11 +34,12 @@ class ProjectCreate(BaseModel):
 
 
 class ProjectInfoConfirm(BaseModel):
-    """Human-editable facts shown on the project-info review gate. song_length/
-    bpm/musical_key are machine-measured and displayed read-only by the
-    frontend, but accepted here too (e.g. bpm/musical_key/beat_grid arrive
-    from the client-side essentia.js measurement, which has nowhere else to
-    land them)."""
+    """Human-editable facts shown on the project-info review gate — the only
+    form in the pipeline before the AI takes over, now that upload itself is
+    audio-only. song_length/bpm/musical_key are machine-measured and displayed
+    read-only by the frontend, but accepted here too (e.g. bpm/musical_key/
+    beat_grid arrive from the client-side essentia.js measurement, which has
+    nowhere else to land them)."""
     title: Optional[str] = None
     artist: Optional[str] = None
     composer: Optional[str] = None
@@ -47,3 +48,5 @@ class ProjectInfoConfirm(BaseModel):
     musical_key: Optional[str] = None
     beat_grid: Optional[list[float]] = None
     transcript: Optional[dict] = None
+    series_id: Optional[str] = None
+    brief: Optional[str] = None

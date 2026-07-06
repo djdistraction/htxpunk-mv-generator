@@ -112,50 +112,34 @@ async def create_project(data: ProjectCreate):
 # !! Must be defined BEFORE /{project_id} to avoid routing ambiguity !!
 @router.post("/upload-audio")
 async def create_and_upload(
-    title: str = Form(...),
-    artist: str = Form(""),
-    series_id: str = Form(""),
-    brief: str = Form(""),
-    reference_meta: str = Form("[]"),
     bpm: str = Form(""),
     musical_key: str = Form(""),
     beat_grid: str = Form("[]"),
     file: UploadFile = File(...),
-    references: list[UploadFile] = File(default=[]),
 ):
     """
-    Create a new project and upload audio in one step. The user may also include
-    a free-text creative brief and supporting reference files (images, docs).
-    Audio is the only requirement; everything else is optional context the AI
-    folds into its analysis and treatment.
+    Create a new project from audio alone — this is the entire upload form now.
+    Title, artist, series, creative brief, and reference files are no longer
+    collected here: preprocessing (conversion, tag reading, vocal isolation,
+    transcription) runs first, and everything else is filled in on the
+    project-info review screen once there's real data to react to, not before.
 
     bpm/musical_key/beat_grid are measured client-side (essentia.js, WASM, in
     the browser — never server-side, per design) and arrive already computed;
     this endpoint only persists them. They're locked/read-only from here on,
     surfaced on the project-info review gate alongside the server-measured
     song_length.
-
-    The orchestrator picks up stage='uploaded' and starts analysis — so we store
-    the brief and references BEFORE flipping the stage, ensuring they're included.
     """
     _validate_audio_file(file.filename)
 
     project_id = str(uuid.uuid4())
-    db_create_project(project_id, title, artist)
+    db_create_project(project_id, "", "")
 
     contents = await file.read()
     key = f"projects/{project_id}/audio/{file.filename}"
     audio_url = upload_bytes(contents, key, file.content_type or "audio/mpeg")
 
-    # Store brief + references first so analysis includes them.
-    if brief.strip():
-        db_update_project(project_id, user_brief=brief.strip())
-    if references:
-        await _store_references(project_id, references, reference_meta, source="initial")
-
     updates: dict = {"audio_url": audio_url, "stage": "uploaded"}
-    if series_id:
-        updates["series_id"] = series_id
     if bpm.strip():
         updates["bpm"] = bpm.strip()
     if musical_key.strip():
@@ -193,14 +177,17 @@ async def list_references(project_id: str):
 async def add_references(
     project_id: str,
     reference_meta: str = Form("[]"),
+    source: str = Form("revision"),
     references: list[UploadFile] = File(default=[]),
 ):
-    """Attach more reference files to an existing project (e.g. while requesting
-    treatment changes). The treatment generator reads all reference assets, so
-    anything added here is folded into the next regeneration."""
+    """Attach more reference files to an existing project — used both from the
+    project-info review screen (source="initial", first time the artist can
+    attach anything) and later while requesting treatment changes
+    (source="revision", the original use). The treatment generator reads all
+    reference assets regardless of source; it's audit metadata only."""
     if not db_get_project(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
-    stored = await _store_references(project_id, references, reference_meta, source="revision")
+    stored = await _store_references(project_id, references, reference_meta, source=source)
     return {"added": stored}
 
 
@@ -221,12 +208,14 @@ async def upload_audio(project_id: str, file: UploadFile = File(...)):
 @router.post("/{project_id}/confirm-info")
 async def confirm_project_info(project_id: str, payload: ProjectInfoConfirm):
     """
-    "Create Project & Save": the human reviews/edits the facts extracted by
-    preprocessing (title, artist, composer, album, transcript — all editable;
-    bpm/musical_key arrive here from the client-side essentia.js measurement).
-    We apply the edits, write the human-readable project folder, then hand off
-    to song interpretation (the first LLM call in the pipeline) — grounded in
-    whatever the human just confirmed.
+    "Create Project & Save": the human fills in title, artist, series, and
+    creative vision for the first time here (none of it was collected at
+    upload, which is audio-only now), and edits whatever preprocessing
+    extracted (composer, album, transcript — bpm/musical_key arrive here from
+    the client-side essentia.js measurement). We apply the edits, write the
+    human-readable project folder, then hand off to song interpretation (the
+    first LLM call in the pipeline) — grounded in whatever the human just
+    confirmed.
     """
     project = db_get_project(project_id)
     if not project:
@@ -238,6 +227,8 @@ async def confirm_project_info(project_id: str, payload: ProjectInfoConfirm):
         )
 
     updates = payload.model_dump(exclude_unset=True)
+    if "brief" in updates:
+        updates["user_brief"] = updates.pop("brief")
     if updates:
         db_update_project(project_id, **updates)
         project = db_get_project(project_id)

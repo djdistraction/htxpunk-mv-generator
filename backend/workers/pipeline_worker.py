@@ -85,12 +85,24 @@ def _resolve_local_audio(audio_url: str, suffix: str = ".audio") -> str:
         return f.name
 
 
+def _set_processing_step(project_id: str, step: str):
+    """Update the human-readable sub-step label the loading screen polls —
+    distinct from `stage`, which only changes at pipeline-visible boundaries."""
+    db_update_project(project_id, processing_step=step)
+    logger.info("[Worker] %s → %s", project_id[:8], step)
+
+
 def run_audio_preprocessing(project_id: str):
     """Convert → read tags → isolate vocals → transcribe.
 
     Sets stage='awaiting_project_info_review' (human gate) — nothing here
     calls an LLM. The human reviews/edits the extracted facts before
     'Create Project & Save' hands off to song interpretation.
+
+    Reports progress via processing_step so the upload flow's loading screen
+    (audio-only upload now — title/artist/etc. are collected later, on the
+    review screen) can show what's actually happening instead of a single
+    opaque "processing" state for what can be a multi-minute step.
     """
     from services.audio_preprocessor import convert_to_mp3, extract_metadata_tags, separate_vocals
     from services.audio_analyzer import transcribe_audio
@@ -101,30 +113,37 @@ def run_audio_preprocessing(project_id: str):
     original_path = _resolve_local_audio(project["audio_url"])
 
     with tempfile.TemporaryDirectory(prefix="htxpunk_preprocess_") as tmp:
+        _set_processing_step(project_id, "Converting to .mp3")
         converted_path = str(Path(tmp) / "converted.mp3")
         convert_to_mp3(original_path, converted_path)
 
+        _set_processing_step(project_id, "Extracting meta tags")
         tags = extract_metadata_tags(converted_path)
 
-        logger.info("[Worker] Separating vocals for %s", project_id[:8])
+        _set_processing_step(project_id, "Isolating vocal stems")
         vocals_path = separate_vocals(converted_path, tmp)
 
-        logger.info("[Worker] Transcribing vocal stem for %s", project_id[:8])
+        _set_processing_step(project_id, "Transcribing lyrics")
         transcript = transcribe_audio(vocals_path)
 
         converted_url = upload_file_path(
             converted_path, f"projects/{project_id}/audio/converted.mp3", "audio/mpeg"
         )
 
+    # No title was collected at upload time (audio-only form) — fall back to
+    # the file's own tag, then the original filename, so the review screen
+    # never opens on a blank required-feeling field.
+    fallback_title = Path(project["audio_url"]).stem
     db_update_project(
         project_id,
         converted_audio_url=converted_url,
-        title=project.get("title") or tags.get("title") or "",
+        title=project.get("title") or tags.get("title") or fallback_title,
         artist=project.get("artist") or tags.get("artist") or "",
         composer=tags.get("composer") or "",
         album=tags.get("album") or "",
         song_length=str(tags["length"]) if tags.get("length") else "",
         transcript=transcript,
+        processing_step="Loading results",
         stage="awaiting_project_info_review",
     )
     logger.info("[Worker] Preprocessing complete for %s — awaiting info review", project_id[:8])

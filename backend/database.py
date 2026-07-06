@@ -39,6 +39,7 @@ class ProjectRow(Base):
     beat_grid = Column(Text)             # JSON list of per-beat second offsets, from essentia.js
     transcript = Column(Text)            # JSON — raw Whisper output, shown for review before any LLM sees it
     project_folder = Column(String)      # path to the human-readable project folder (set on Create Project & Save)
+    processing_step = Column(String)     # human-readable label for the current preprocessing sub-step (loading screen)
     revision_notes = Column(Text)        # feedback for treatment/storyboard revision
     error_message = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -123,6 +124,7 @@ def _migrate_db():
     _add_column_if_missing(conn, "projects", "transcript", "TEXT")
     _add_column_if_missing(conn, "projects", "project_folder", "TEXT")
     _add_column_if_missing(conn, "projects", "converted_audio_url", "TEXT")
+    _add_column_if_missing(conn, "projects", "processing_step", "TEXT")
     _add_column_if_missing(conn, "series", "continuity_bible", "TEXT")
     conn.commit()
     conn.close()
