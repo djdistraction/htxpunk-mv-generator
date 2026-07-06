@@ -25,6 +25,7 @@ class ProjectRow(Base):
     stage = Column(String, default="uploaded")
     audio_url = Column(String)
     converted_audio_url = Column(String)  # canonical mp3, produced by audio_preprocessor.convert_to_mp3
+    user_vocals_url = Column(String)      # user-supplied pre-isolated vocal stem — skips separate_vocals() when set
     user_brief = Column(Text)            # user's free-text creative vision (optional)
     analysis = Column(Text)              # JSON
     treatment = Column(Text)             # JSON
@@ -125,6 +126,7 @@ def _migrate_db():
     _add_column_if_missing(conn, "projects", "project_folder", "TEXT")
     _add_column_if_missing(conn, "projects", "converted_audio_url", "TEXT")
     _add_column_if_missing(conn, "projects", "processing_step", "TEXT")
+    _add_column_if_missing(conn, "projects", "user_vocals_url", "TEXT")
     _add_column_if_missing(conn, "series", "continuity_bible", "TEXT")
     conn.commit()
     conn.close()

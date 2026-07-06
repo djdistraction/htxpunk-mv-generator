@@ -103,6 +103,11 @@ def run_audio_preprocessing(project_id: str):
     (audio-only upload now — title/artist/etc. are collected later, on the
     review screen) can show what's actually happening instead of a single
     opaque "processing" state for what can be a multi-minute step.
+
+    If the artist already uploaded their own isolated vocal stem
+    (project.user_vocals_url), separate_vocals() is skipped entirely —
+    it's the slowest step in preprocessing, and their stem is presumably
+    cleaner than anything separation would produce anyway.
     """
     from services.audio_preprocessor import convert_to_mp3, extract_metadata_tags, separate_vocals
     from services.audio_analyzer import transcribe_audio
@@ -111,6 +116,7 @@ def run_audio_preprocessing(project_id: str):
     project = _get_project(project_id)
 
     original_path = _resolve_local_audio(project["audio_url"])
+    user_vocals_url = project.get("user_vocals_url")
 
     with tempfile.TemporaryDirectory(prefix="htxpunk_preprocess_") as tmp:
         _set_processing_step(project_id, "Converting to .mp3")
@@ -120,8 +126,13 @@ def run_audio_preprocessing(project_id: str):
         _set_processing_step(project_id, "Extracting Meta Tags")
         tags = extract_metadata_tags(converted_path)
 
-        _set_processing_step(project_id, "Isolating Vocal Stems")
-        vocals_path = separate_vocals(converted_path, tmp)
+        if user_vocals_url:
+            logger.info("[Worker] Using user-provided vocal stem for %s", project_id[:8])
+            vocals_suffix = Path(user_vocals_url).suffix or ".audio"
+            vocals_path = _resolve_local_audio(user_vocals_url, suffix=vocals_suffix)
+        else:
+            _set_processing_step(project_id, "Isolating Vocal Stems")
+            vocals_path = separate_vocals(converted_path, tmp)
 
         _set_processing_step(project_id, "Transcribing Lyrics")
         transcript = transcribe_audio(vocals_path)

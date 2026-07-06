@@ -117,6 +117,7 @@ async def create_and_upload(
     musical_key: str = Form(""),
     beat_grid: str = Form("[]"),
     file: UploadFile = File(...),
+    vocals_file: UploadFile | None = File(None),
 ):
     """
     Create a new project: a name for it, plus the audio file — that's the
@@ -132,8 +133,15 @@ async def create_and_upload(
     this endpoint only persists them. They're locked/read-only from here on,
     surfaced on the project-info review gate alongside the server-measured
     song_length.
+
+    vocals_file is optional: if the artist already has an isolated vocal
+    stem (e.g. from their own DAW session), uploading it here skips
+    run_audio_preprocessing's separate_vocals() step entirely — real time
+    and CPU saved, since separation is the slowest part of preprocessing.
     """
     _validate_audio_file(file.filename)
+    if vocals_file is not None and vocals_file.filename:
+        _validate_audio_file(vocals_file.filename)
 
     project_id = str(uuid.uuid4())
     db_create_project(project_id, title, "")
@@ -154,6 +162,12 @@ async def create_and_upload(
                 updates["beat_grid"] = parsed_grid
         except json.JSONDecodeError:
             pass
+    if vocals_file is not None and vocals_file.filename:
+        vocals_contents = await vocals_file.read()
+        vocals_key = f"projects/{project_id}/audio/vocals_{vocals_file.filename}"
+        updates["user_vocals_url"] = upload_bytes(
+            vocals_contents, vocals_key, vocals_file.content_type or "audio/mpeg"
+        )
 
     db_update_project(project_id, **updates)
     # No .delay() — orchestrator sees stage="uploaded" and dispatches automatically

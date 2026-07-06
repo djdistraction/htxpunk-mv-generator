@@ -15,16 +15,21 @@ const CLIENT_STEP_INDEX: Record<AudioAnalysisStep, number> = {
 export default function NewProjectPage() {
   const router = useRouter()
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const vocalsInputRef = useRef<HTMLInputElement>(null)
   const [title, setTitle] = useState('')
   const [file, setFile] = useState<File | null>(null)
+  const [hasVocalStems, setHasVocalStems] = useState(false)
+  const [vocalsFile, setVocalsFile] = useState<File | null>(null)
   const [error, setError] = useState('')
 
   const [processing, setProcessing] = useState(false)
   const [stepIndex, setStepIndex] = useState(0)
 
+  const canSubmit = Boolean(file && title.trim() && (!hasVocalStems || vocalsFile))
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!file || !title.trim()) return
+    if (!canSubmit || !file) return
     setError('')
     setProcessing(true)
     setStepIndex(0)
@@ -45,6 +50,9 @@ export default function NewProjectPage() {
         formData.append('bpm', analysis.bpm)
         formData.append('musical_key', analysis.musicalKey)
         formData.append('beat_grid', JSON.stringify(analysis.beatGrid))
+      }
+      if (hasVocalStems && vocalsFile) {
+        formData.append('vocals_file', vocalsFile)
       }
       const project = await api.projects.uploadAudio(formData)
       router.push(`/projects/${project.id}/processing`)
@@ -135,6 +143,55 @@ export default function NewProjectPage() {
             />
           </div>
 
+          {/* Pre-isolated vocal stems (optional) */}
+          <div>
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={hasVocalStems}
+                onChange={e => { setHasVocalStems(e.target.checked); if (!e.target.checked) setVocalsFile(null) }}
+                className="mt-1"
+              />
+              <span className="text-sm text-gray-300">
+                I already have an isolated vocal stems file
+                <span className="text-gray-500 font-normal block text-xs mt-0.5">
+                  Skips vocal separation entirely — saves significant time and processing, since that's the slowest step.
+                </span>
+              </span>
+            </label>
+
+            {hasVocalStems && (
+              <div className="mt-3">
+                <label className="block text-sm font-medium text-gray-300 mb-1">Vocal Stems File *</label>
+                <div
+                  onClick={() => vocalsInputRef.current?.click()}
+                  className="w-full bg-gray-900 border-2 border-dashed border-gray-700 rounded-lg p-6 text-center cursor-pointer hover:border-purple-500 transition-colors"
+                >
+                  {vocalsFile ? (
+                    <div>
+                      <div className="text-purple-400 text-xl mb-1">🎤</div>
+                      <div className="text-white font-medium">{vocalsFile.name}</div>
+                      <div className="text-gray-500 text-sm">{(vocalsFile.size / 1024 / 1024).toFixed(1)} MB</div>
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="text-gray-500 text-2xl mb-1">↑</div>
+                      <div className="text-gray-400 text-sm">Click to select vocal stems file</div>
+                      <div className="text-gray-600 text-xs mt-1">MP3, WAV, or MP4 supported</div>
+                    </div>
+                  )}
+                </div>
+                <input
+                  ref={vocalsInputRef}
+                  type="file"
+                  accept=".wav,.mp3,.mp4,audio/wav,audio/mpeg,video/mp4"
+                  className="hidden"
+                  onChange={e => setVocalsFile(e.target.files?.[0] || null)}
+                />
+              </div>
+            )}
+          </div>
+
           {error && (
             <div className="bg-red-900/30 border border-red-700 rounded-lg p-3 text-red-300 text-sm">
               {error}
@@ -143,7 +200,7 @@ export default function NewProjectPage() {
 
           <button
             type="submit"
-            disabled={!file || !title.trim()}
+            disabled={!canSubmit}
             className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold py-3 rounded-lg transition-colors"
           >
             Upload & Analyze
@@ -154,7 +211,7 @@ export default function NewProjectPage() {
           <div className="p-4 bg-gray-900 rounded-lg border border-gray-800">
             <h3 className="text-sm font-semibold text-gray-300 mb-2">Pipeline Timeline</h3>
             <ol className="text-gray-500 text-sm space-y-1 list-decimal list-inside">
-              <li>Audio is converted, tagged, and vocals are isolated for transcription</li>
+              <li>Audio is converted and tagged, then vocals are isolated (skipped if you supplied your own stem) for transcription</li>
               <li>You review the extracted song info and lyrics — add artist, series, your creative vision, and reference files here — then save</li>
               <li>AI interprets the song, then generates a visual treatment — you review, attach more, and approve</li>
               <li>Backgrounds and character elements are generated (~5–10 min)</li>
