@@ -97,9 +97,30 @@ async def _store_references(project_id: str, references, reference_meta: str, so
     return stored
 
 
+# Preference order for picking one representative image per project for the
+# list view — storyboard panels are the most "finished" look at a project;
+# backgrounds/elements are the best available earlier in the pipeline.
+_THUMBNAIL_ASSET_PRIORITY = ("storyboard_panel", "background", "element")
+
+
+def _thumbnail_for_project(project_id: str) -> str | None:
+    assets = db_get_assets(project_id)
+    for asset_type in _THUMBNAIL_ASSET_PRIORITY:
+        candidates = [a for a in assets if a.get("asset_type") == asset_type and a.get("url")]
+        if not candidates:
+            continue
+        if asset_type == "storyboard_panel":
+            candidates.sort(key=lambda a: a.get("panel_index", 0))
+        return candidates[0]["url"]
+    return None
+
+
 @router.get("")
 async def list_projects():
-    return db_list_projects()
+    projects = db_list_projects()
+    for p in projects:
+        p["thumbnail_url"] = _thumbnail_for_project(p["id"])
+    return projects
 
 
 @router.post("")
