@@ -1,4 +1,5 @@
 import json
+import re
 import tempfile
 import uuid
 from pathlib import Path
@@ -17,6 +18,23 @@ router = APIRouter()
 # Server-side enforcement — the frontend's accept="audio/*" file-picker hint
 # doesn't stop anyone selecting "All Files" or hitting the API directly.
 ALLOWED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".mp4"}
+
+_WINDOWS_ILLEGAL_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def _sanitize_filename(filename: str | None) -> str:
+    """Storage keys embed the uploaded filename directly in a filesystem
+    path. Linux tolerates almost any character there; Windows doesn't
+    (`: " < > | ? *` are all illegal in a Windows path, and trailing dots/
+    spaces are stripped or rejected) — an unsanitized filename containing
+    any of those crashes the write with an unhelpful 500 on Windows only,
+    which is exactly the failure mode that motivated this function. Confirmed
+    real filenames validate fine elsewhere (extension check) but were never
+    checked for path-safety before being written to disk.
+    """
+    name = (filename or "file").strip().rstrip(". ")
+    name = _WINDOWS_ILLEGAL_CHARS.sub("_", name)
+    return name or "file"
 
 
 def _validate_audio_file(filename: str | None):
@@ -84,7 +102,7 @@ async def _store_references(project_id: str, references, reference_meta: str, so
         description = (meta.get("description") or "").strip()
         role = (meta.get("role") or "").strip()
         kind = _reference_kind(ref.filename, ref.content_type)
-        key = f"projects/{project_id}/references/{uuid.uuid4().hex}_{ref.filename}"
+        key = f"projects/{project_id}/references/{uuid.uuid4().hex}_{_sanitize_filename(ref.filename)}"
         url = upload_bytes(contents, key, ref.content_type or "application/octet-stream")
         extracted_text = _extract_reference_text(ref.filename, contents, ref.content_type)
         asset_id = db_create_asset(
@@ -168,7 +186,7 @@ async def create_and_upload(
     db_create_project(project_id, title, "")
 
     contents = await file.read()
-    key = f"projects/{project_id}/audio/{file.filename}"
+    key = f"projects/{project_id}/audio/{_sanitize_filename(file.filename)}"
     audio_url = upload_bytes(contents, key, file.content_type or "audio/mpeg")
 
     updates: dict = {"audio_url": audio_url, "stage": "uploaded"}
@@ -185,7 +203,7 @@ async def create_and_upload(
             pass
     if vocals_file is not None and vocals_file.filename:
         vocals_contents = await vocals_file.read()
-        vocals_key = f"projects/{project_id}/audio/vocals_{vocals_file.filename}"
+        vocals_key = f"projects/{project_id}/audio/vocals_{_sanitize_filename(vocals_file.filename)}"
         updates["user_vocals_url"] = upload_bytes(
             vocals_contents, vocals_key, vocals_file.content_type or "audio/mpeg"
         )
@@ -283,7 +301,7 @@ async def upload_audio(project_id: str, file: UploadFile = File(...)):
         raise HTTPException(status_code=404, detail="Project not found")
     _validate_audio_file(file.filename)
     contents = await file.read()
-    key = f"projects/{project_id}/audio/{file.filename}"
+    key = f"projects/{project_id}/audio/{_sanitize_filename(file.filename)}"
     audio_url = upload_bytes(contents, key, file.content_type or "audio/mpeg")
     db_update_project(project_id, audio_url=audio_url, stage="uploaded")
     return {"audio_url": audio_url, "message": "Audio uploaded — analysis starting"}

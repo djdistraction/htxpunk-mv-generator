@@ -59,7 +59,16 @@ def convert_to_mp3(input_path: str, output_path: str) -> str:
     """Convert any accepted upload format to a canonical mp3. Everything
     downstream — metadata tags, vocal separation, transcription, the
     Create Project & Save copy — works off this one file, not whatever
-    format the user originally uploaded."""
+    format the user originally uploaded.
+
+    Already-mp3 uploads are copied verbatim rather than re-encoded: real
+    time saved (no ffmpeg pass), and avoids a pointless lossy re-compression
+    of a file that's already in the target format.
+    """
+    if Path(input_path).suffix.lower() == ".mp3":
+        shutil.copy2(input_path, output_path)
+        return output_path
+
     import subprocess
 
     ffmpeg = find_ffmpeg()
