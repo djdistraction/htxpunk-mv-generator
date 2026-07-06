@@ -8,6 +8,11 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
+    "build:frontend": "node scripts/build-frontend.js",
+    "predist": "npm run build:frontend",
+    "predist:win": "npm run build:frontend",
+    "predist:mac": "npm run build:frontend",
+    "predist:linux": "npm run build:frontend",
     "dist": "electron-builder",
     "dist:win": "electron-builder --win",
     "dist:mac": "electron-builder --mac",
@@ -27,11 +32,20 @@
       "main.js",
       "preload.js",
       "setup.html",
+      "splash.html",
       "public/**/*",
-      "assets/**/*",
-      "backend/**/*",
-      "!backend/storage/**/*",
-      "!backend/__pycache__/**/*"
+      "assets/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../backend",
+        "to": "backend",
+        "filter": ["**/*", "!storage/**/*", "!**/__pycache__/**/*", "!**/*.pyc", "!*.db"]
+      },
+      {
+        "from": "../frontend/.next/standalone",
+        "to": "frontend"
+      }
     ],
     "win": {
       "icon": "assets/icon.ico",

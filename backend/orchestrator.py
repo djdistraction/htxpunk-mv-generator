@@ -36,7 +36,8 @@ POLL_INTERVAL = 3  # seconds between polls
 
 # Stages the orchestrator automatically dispatches workers for
 STAGE_WORKERS: dict[str, str] = {
-    "uploaded":            "run_audio_analysis",
+    "uploaded":            "run_audio_preprocessing",
+    "info_confirmed":      "run_song_interpretation",
     "analyzed":            "run_treatment_generation",
     "treatment_approved":  "run_element_extraction",
     "elements_ready":      "run_image_generation",
@@ -47,6 +48,7 @@ STAGE_WORKERS: dict[str, str] = {
 
 # Stages where a human must act — orchestrator skips them
 HUMAN_GATES = {
+    "awaiting_project_info_review",
     "awaiting_treatment_approval",
     "awaiting_manifest_approval",
     "awaiting_storyboard_approval",
@@ -59,7 +61,8 @@ TERMINAL_STAGES = {"complete", "error"}
 # If the server restarts mid-flight, reset these back to their dispatch stage
 # so the orchestrator can re-pick them up.
 TRANSITIONAL_RESET: dict[str, str] = {
-    "analyzing":                  "uploaded",
+    "preprocessing_audio":        "uploaded",
+    "interpreting_song":          "info_confirmed",
     "treatment_pending":          "analyzed",
     "extracting_elements":        "treatment_approved",
     "generating_images":          "elements_ready",

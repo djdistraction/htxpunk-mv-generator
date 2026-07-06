@@ -5,6 +5,7 @@ Maps lyrics + timestamps to visual scenes using Groq (free tier).
 import json
 from openai import OpenAI
 from config import settings
+from utils.groq_json import call_groq_json
 
 
 def _groq_client():
@@ -64,18 +65,16 @@ def build_scene_plan(treatment: dict, elements: dict, analysis: dict) -> list[di
         "- Use background_id values from AVAILABLE BACKGROUNDS",
         "- Use state_id values from CHARACTER/PROP STATES",
         "- Vary character positions and states to tell the visual story",
+        "- timestamp_start/timestamp_end must be plain numbers in seconds "
+        "(e.g. 8.0) — never expressions or formulas",
     ]
 
-    response = client.chat.completions.create(
-        model=settings.groq_model,
-        response_format={"type": "json_object"},
-        temperature=0.6,
-        messages=[
-            {"role": "system", "content": "You are a music video storyboard director. Return JSON only."},
-            {"role": "user", "content": "\n".join(prompt_lines)},
-        ],
+    content = call_groq_json(
+        client, model=settings.groq_model,
+        system="You are a music video storyboard director. Return JSON only.",
+        user="\n".join(prompt_lines), temperature=0.6,
     )
 
-    result = json.loads(response.choices[0].message.content)
+    result = json.loads(content)
     panels = result.get("panels", result) if isinstance(result, dict) else result
     return panels if isinstance(panels, list) else []

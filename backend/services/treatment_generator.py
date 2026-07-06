@@ -5,6 +5,7 @@ Uses Groq free tier (Llama 3.3 70B).
 import json
 from openai import OpenAI
 from config import settings
+from utils.groq_json import call_groq_json
 
 
 def _groq_client():
@@ -17,6 +18,8 @@ def generate_treatment(
     series: dict | None = None,
     creative_brief: str = "",
     reference_notes: str = "",
+    title: str = "",
+    artist: str = "",
 ) -> dict:
     """
     Generate a full visual treatment from song analysis.
@@ -24,8 +27,14 @@ def generate_treatment(
     - series: if set, inherit series style/characters for continuity
     - creative_brief: the artist's free-text vision for the video
     - reference_notes: descriptions of reference files the artist uploaded
+    - title/artist: hard anchors, not hints — grounds the treatment in the
+      actual song rather than only whatever the derived analysis captured
     """
     client = _groq_client()
+
+    song_block = ""
+    if title.strip() or artist.strip():
+        song_block = f"\n\nSONG: \"{title.strip()}\" by {artist.strip() or 'an unspecified artist'}"
 
     brief_block = ""
     if creative_brief.strip():
@@ -61,39 +70,31 @@ def generate_treatment(
             f"You may introduce new characters but must include the series characters above."
         )
 
-    response = client.chat.completions.create(
-        model=settings.groq_model,
-        response_format={"type": "json_object"},
-        temperature=0.85,
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a visionary music video director. Create bold, specific, "
-                    "cinematic visual treatments. Avoid clichés. Return JSON only."
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    "Create a complete music video visual treatment.\n\n"
-                    f"SONG ANALYSIS:\n{json.dumps(analysis, indent=2)}"
-                    f"{brief_block}"
-                    f"{series_block}"
-                    f"{revision_block}\n\n"
-                    "Return JSON with:\n"
-                    "- logline: one-sentence visual pitch (compelling, specific)\n"
-                    "- visual_style: art style and aesthetic (specific — not just 'cinematic')\n"
-                    "- color_palette: list of 4-6 specific colors with hex codes\n"
-                    "- world_description: the world this video lives in (2-3 sentences)\n"
-                    "- characters: list of {name, description, role, states_needed: [visual states/poses needed]}\n"
-                    "- locations: list of {name, description, mood} — 2-4 distinct environments\n"
-                    "- recurring_motifs: list of 3-5 visual symbols that recur throughout\n"
-                    "- narrative_structure: how the visuals arc across the song (3-4 sentences)\n"
-                    "- image_gen_style_prompt: a FLUX style suffix (15-25 words) appended to ALL "
-                    "image prompts to ensure visual consistency. Be specific about art style, rendering, lighting."
-                ),
-            },
-        ],
+    system_prompt = (
+        "You are a visionary music video director. Create bold, specific, "
+        "cinematic visual treatments. Avoid clichés. Return JSON only."
     )
-    return json.loads(response.choices[0].message.content)
+    user_prompt = (
+        "Create a complete music video visual treatment.\n\n"
+        f"SONG ANALYSIS:\n{json.dumps(analysis, indent=2)}"
+        f"{song_block}"
+        f"{brief_block}"
+        f"{series_block}"
+        f"{revision_block}\n\n"
+        "Return JSON with:\n"
+        "- logline: one-sentence visual pitch (compelling, specific)\n"
+        "- visual_style: art style and aesthetic (specific — not just 'cinematic')\n"
+        "- color_palette: list of 4-6 specific colors with hex codes\n"
+        "- world_description: the world this video lives in (2-3 sentences)\n"
+        "- characters: list of {name, description, role, states_needed: [visual states/poses needed]}\n"
+        "- locations: list of {name, description, mood} — 2-4 distinct environments\n"
+        "- recurring_motifs: list of 3-5 visual symbols that recur throughout\n"
+        "- narrative_structure: how the visuals arc across the song (3-4 sentences)\n"
+        "- image_gen_style_prompt: a FLUX style suffix (15-25 words) appended to ALL "
+        "image prompts to ensure visual consistency. Be specific about art style, rendering, lighting."
+    )
+    content = call_groq_json(
+        client, model=settings.groq_model, system=system_prompt,
+        user=user_prompt, temperature=0.85,
+    )
+    return json.loads(content)

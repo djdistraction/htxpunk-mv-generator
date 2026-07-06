@@ -8,4 +8,5 @@ contextBridge.exposeInMainWorld('electron', {
   appVersion: () => ipcRenderer.invoke('app-version'),
   onOpenSettings: (callback) => ipcRenderer.on('open-settings', callback),
   setupComplete: (config) => ipcRenderer.send('setup-complete', config),
+  onSplashStatus: (callback) => ipcRenderer.on('splash-status', (event, msg) => callback(msg)),
 });

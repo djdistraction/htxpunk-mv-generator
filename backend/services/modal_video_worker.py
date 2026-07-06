@@ -28,8 +28,34 @@ LAYER 2 (this update) — image-to-video with LTX-Video:
   GPU: A10G (24GB). If you hit an out-of-memory error, tell Cloud Claude —
   the fix is bumping to gpu="A100", not a code rewrite.
 
-LAYER 3 (next): lip-sync (Wav2Lip/LivePortrait) → `apply_lipsync_remote`
-LAYER 4 (next): wire into the orchestrator (run_video_generation) + assembly
+LAYER 3 (this update) — lip-sync with Wav2Lip:
+
+    modal run backend/services/modal_video_worker.py::test_lipsync \\
+        --video-path path/to/a/generated/clip.mp4 --audio-path path/to/song.mp3
+
+  Lip-syncs an existing video to an audio track, saved locally as
+  layer3_test_output.mp4 — watch it before trusting it in the pipeline.
+
+  This is the highest-risk piece of the Modal pipeline: it clones the real
+  Rudrabha/Wav2Lip repo and runs its actual inference.py (not a
+  reimplementation), but the repo's own pinned dependency versions are
+  ancient (torch 1.1, numpy 1.17) and almost certainly won't install
+  cleanly against a modern CUDA image — we install modern-but-compatible
+  versions instead (librosa==0.9.1, numpy<2) and hope Wav2Lip's own code
+  doesn't hit a removed API. If inference.py errors on an unfamiliar
+  AttributeError, that's the likely cause — tell Cloud Claude the exact
+  error and we patch the specific call site, not the whole approach.
+  Checkpoint comes from the well-established camenduru/Wav2Lip Hugging
+  Face mirror (73 likes, used by a dozen+ downstream lip-sync Spaces) —
+  the original repo's own Google Drive hosting is unreliable to
+  script against.
+
+LAYER 4 (built in services/modal_pipeline.py, not this file): wires Layers
+2+3 into the actual pipeline — generates every panel's clip in parallel via
+Function.map(), concatenates with ffmpeg, muxes audio, then runs this
+lip-sync pass. Requires `modal deploy backend/services/modal_video_worker.py`
+(not just `modal run`) so those functions are resolvable by name from the
+FastAPI backend process.
 
 We build one layer at a time and verify each on your machine before the next,
 so we never stack unverified GPU code.
@@ -273,3 +299,111 @@ def test_shot_clip(project_id: str, shot_number: str = ""):
     print(f"✅ Wrote real clip: {clip_local} ({len(video_bytes)} bytes)")
     print(f"   Registered as asset {asset_id} (asset_type=video_clip) for project {project_id}.")
     print("   Watch it — if the motion looks right, this shot is DONE, not a test to redo.")
+
+
+# ── Layer 3 image: Wav2Lip lip-sync ────────────────────────────────────────
+# Clones the real Rudrabha/Wav2Lip repo and runs its actual inference.py
+# rather than reimplementing the model/preprocessing from memory — that repo
+# pins ancient dependency versions (torch 1.1, numpy 1.17) that won't install
+# on a modern CUDA image, so we install compatible-but-modern versions
+# instead and rely on Wav2Lip's own code not having hit a removed API in the
+# gap. This is the least-tested part of the whole pipeline.
+wav2lip_image = (
+    modal.Image.debian_slim(python_version="3.10")
+    .apt_install("ffmpeg", "libgl1", "libglib2.0-0", "git")
+    .pip_install(
+        "torch",
+        "opencv-python-headless",
+        "numpy<2",
+        "librosa==0.9.1",
+        "numba",
+        "tqdm",
+        "huggingface_hub",
+    )
+    .run_commands("git clone https://github.com/Rudrabha/Wav2Lip /root/Wav2Lip")
+)
+
+
+@app.function(
+    gpu="A10G",
+    image=wav2lip_image,
+    volumes={"/cache": model_cache},
+    timeout=1200,
+)
+def apply_lipsync_remote(video_bytes: bytes, audio_bytes: bytes) -> bytes:
+    """Lip-sync an existing video to an audio track using Wav2Lip.
+
+    Raises on failure rather than silently returning the input — a video
+    with no lip-sync should never be mistaken for a finished one.
+    """
+    import os
+    import shutil as _shutil
+    import subprocess
+    import sys
+
+    from huggingface_hub import hf_hub_download
+
+    os.environ["HF_HOME"] = "/cache/huggingface"
+    sys.path.insert(0, "/root/Wav2Lip")
+
+    ckpt_dir = "/root/Wav2Lip/checkpoints"
+    os.makedirs(ckpt_dir, exist_ok=True)
+    ckpt_path = os.path.join(ckpt_dir, "wav2lip_gan.pth")
+    if not os.path.exists(ckpt_path):
+        downloaded = hf_hub_download(
+            repo_id="camenduru/Wav2Lip",
+            filename="checkpoints/wav2lip_gan.pth",
+            cache_dir="/cache/huggingface",
+        )
+        _shutil.copy2(downloaded, ckpt_path)
+
+    video_path = "/tmp/input_video.mp4"
+    audio_path = "/tmp/input_audio.wav"
+    out_path = "/tmp/result.mp4"
+    with open(video_path, "wb") as f:
+        f.write(video_bytes)
+    with open(audio_path, "wb") as f:
+        f.write(audio_bytes)
+
+    result = subprocess.run(
+        [
+            sys.executable, "/root/Wav2Lip/inference.py",
+            "--checkpoint_path", ckpt_path,
+            "--face", video_path,
+            "--audio", audio_path,
+            "--outfile", out_path,
+        ],
+        cwd="/root/Wav2Lip",
+        capture_output=True, text=True, timeout=1000,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Wav2Lip inference failed:\n{result.stderr[-3000:]}")
+
+    model_cache.commit()
+    with open(out_path, "rb") as f:
+        return f.read()
+
+
+@app.local_entrypoint()
+def test_lipsync(video_path: str, audio_path: str):
+    """Layer 3 test: lip-sync an existing video to an audio track.
+
+    Usage:
+        modal run backend/services/modal_video_worker.py::test_lipsync \\
+            --video-path path/to/clip.mp4 --audio-path path/to/song.mp3
+    """
+    with open(video_path, "rb") as f:
+        video_bytes = f.read()
+    with open(audio_path, "rb") as f:
+        audio_bytes = f.read()
+
+    print("Sending video + audio to Modal for Wav2Lip lip-sync…")
+    print("First run clones Wav2Lip's checkpoint (~435MB) — a few minutes. "
+          "This is the least-tested piece of the pipeline — read the module "
+          "docstring's LAYER 3 section before debugging blind.")
+    result_bytes = apply_lipsync_remote.remote(video_bytes, audio_bytes)
+
+    out_path = "layer3_test_output.mp4"
+    with open(out_path, "wb") as f:
+        f.write(result_bytes)
+    print(f"✅ Wrote {out_path} ({len(result_bytes)} bytes) — watch it and check lip-sync quality.")

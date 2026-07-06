@@ -20,8 +20,9 @@ if (process.platform === 'win32') {
 
 let mainWindow;
 let tray;
+let splashWindow;
 let backendProcess;
-let frontendUrl = isDev ? 'http://localhost:3000' : 'app://react';
+let frontendProcess;
 
 // Embedded fallback icon (32px) so the tray never depends on a file existing.
 const FALLBACK_ICON_DATA_URL =
@@ -45,6 +46,24 @@ function loadIconImage(filePath) {
 const appDataPath = path.join(os.homedir(), '.htxpunk-mv-generator');
 const configPath = path.join(appDataPath, 'config.json');
 const envPath = path.join(appDataPath, '.env');
+
+// In dev, the repo checkout is intact, so the real backend/frontend
+// directories are siblings of electron-app/. In a packaged build there is no
+// such checkout — package.json's `extraResources` config copies the backend
+// source and the frontend's built standalone server into resourcesPath at
+// build time, so we resolve to those instead.
+function getBackendPath() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'backend')
+    : path.join(__dirname, '..', 'backend');
+}
+
+function getFrontendServerPath() {
+  const frontendRoot = app.isPackaged
+    ? path.join(process.resourcesPath, 'frontend')
+    : path.join(__dirname, '..', 'frontend', '.next', 'standalone');
+  return path.join(frontendRoot, 'server.js');
+}
 
 // Ensure app data directory exists
 if (!fs.existsSync(appDataPath)) {
@@ -91,20 +110,20 @@ WHISPER_MODEL=base
   fs.writeFileSync(envPath, envContent);
 }
 
-// Poll the backend /health endpoint until it responds (or we time out).
-// This is far more reliable than parsing uvicorn's log output, which goes
+// Poll an HTTP endpoint until it responds with 2xx/3xx (or we time out).
+// This is far more reliable than parsing a process's log output, which goes
 // to stderr in a format that can change between versions.
-function waitForBackend(port, timeoutMs = 90000) {
+function waitForHttp(port, urlPath, timeoutMs, timeoutMessage) {
   return new Promise((resolve, reject) => {
     const startTime = Date.now();
 
     const attempt = () => {
       const req = http.get(
-        { host: '127.0.0.1', port, path: '/health', timeout: 2000 },
+        { host: '127.0.0.1', port, path: urlPath, timeout: 2000 },
         (res) => {
           // Drain the response so the socket can be reused/closed.
           res.resume();
-          if (res.statusCode === 200) {
+          if (res.statusCode && res.statusCode < 400) {
             resolve(true);
           } else {
             retry();
@@ -120,12 +139,7 @@ function waitForBackend(port, timeoutMs = 90000) {
 
     const retry = () => {
       if (Date.now() - startTime > timeoutMs) {
-        reject(
-          new Error(
-            'Backend did not become healthy in time. It may have failed to ' +
-              'start (e.g. port already in use, or Python dependencies missing).'
-          )
-        );
+        reject(new Error(timeoutMessage));
       } else {
         setTimeout(attempt, 1000);
       }
@@ -133,6 +147,26 @@ function waitForBackend(port, timeoutMs = 90000) {
 
     attempt();
   });
+}
+
+function waitForBackend(port, timeoutMs = 90000) {
+  return waitForHttp(
+    port,
+    '/health',
+    timeoutMs,
+    'Backend did not become healthy in time. It may have failed to start ' +
+      '(e.g. port already in use, or Python dependencies missing).'
+  );
+}
+
+function waitForFrontend(port, timeoutMs = 60000) {
+  return waitForHttp(
+    port,
+    '/',
+    timeoutMs,
+    'Frontend did not become ready in time. It may have failed to start ' +
+      '(e.g. port already in use).'
+  );
 }
 
 // Find a working Python launcher on this machine. Different Windows Python
@@ -153,11 +187,96 @@ function resolvePythonCommand() {
   return null;
 }
 
+// Run `pip install -r requirements.txt` once per requirements.txt content.
+// A one-click installer can't assume the user has already set up a Python
+// environment for this app, so we do it on first run (and again if
+// requirements.txt changes, e.g. after an app update). Subsequent launches
+// skip this via a hash marker in the app data folder, since re-resolving an
+// already-satisfied dependency set still costs several seconds.
+function ensureBackendDependencies(pythonCmd, onProgress) {
+  return new Promise((resolve, reject) => {
+    const backendPath = getBackendPath();
+    const reqPath = path.join(backendPath, 'requirements.txt');
+    const markerPath = path.join(appDataPath, '.deps-installed');
+
+    let currentHash;
+    try {
+      currentHash = require('crypto')
+        .createHash('sha256')
+        .update(fs.readFileSync(reqPath))
+        .digest('hex');
+    } catch (err) {
+      reject(new Error(`Could not read ${reqPath}: ${err.message}`));
+      return;
+    }
+
+    if (fs.existsSync(markerPath) && fs.readFileSync(markerPath, 'utf8').trim() === currentHash) {
+      resolve();
+      return;
+    }
+
+    if (onProgress) onProgress('Installing Python dependencies (first run only, this can take a few minutes)…');
+
+    const pipProcess = spawn(
+      pythonCmd,
+      ['-m', 'pip', 'install', '--user', '--disable-pip-version-check', '-r', reqPath],
+      { stdio: ['ignore', 'pipe', 'pipe'] }
+    );
+
+    const getTail = pipeProcessOutput(pipProcess, 'pip-install');
+
+    pipProcess.on('error', (err) => {
+      reject(new Error(`Failed to run pip: ${err.message}`));
+    });
+
+    pipProcess.on('exit', (code) => {
+      if (code === 0) {
+        fs.writeFileSync(markerPath, currentHash);
+        resolve();
+      } else {
+        const tail = getTail();
+        reject(new Error(
+          `Installing Python dependencies failed (exit code ${code}).\n\n` +
+            (tail ? `Last output:\n${tail}` : '') +
+            '\n\nCheck your internet connection, then restart the app to retry.'
+        ));
+      }
+    });
+  });
+}
+
+// Pipe a child process's stdout/stderr to the console, to a per-process log
+// file under appDataPath/logs/ (truncated fresh each launch — matches the
+// tray's "View Logs" menu item), and into a small in-memory tail so a
+// startup failure's error dialog can show the actual underlying error
+// instead of just an exit code. Packaged GUI apps have no visible console,
+// so without this a failure like "exited with code 3" is undiagnosable.
+function pipeProcessOutput(proc, label) {
+  const logsDir = path.join(appDataPath, 'logs');
+  if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
+  const logStream = fs.createWriteStream(path.join(logsDir, `${label}.log`), { flags: 'w' });
+
+  let tail = '';
+  const MAX_TAIL = 4000;
+  const onData = (data) => {
+    const text = data.toString();
+    console.log(`[${label}]`, text);
+    logStream.write(text);
+    tail = (tail + text).slice(-MAX_TAIL);
+  };
+
+  proc.stdout.on('data', onData);
+  proc.stderr.on('data', onData);
+  proc.on('exit', () => logStream.end());
+
+  return () => tail.trim();
+}
+
 // Start backend
-function startBackend(config) {
+function startBackend(config, pythonCmd) {
   return new Promise((resolve, reject) => {
     try {
-      const backendPath = path.join(__dirname, '..', 'backend');
+      const backendPath = getBackendPath();
 
       // Set environment variables
       const env = {
@@ -178,16 +297,6 @@ function startBackend(config) {
         fs.mkdirSync(config.storagePath, { recursive: true });
       }
 
-      const pythonCmd = resolvePythonCommand();
-      if (!pythonCmd) {
-        reject(new Error(
-          'Could not find Python on this system (tried python, py, python3). ' +
-          'Install Python 3.11+ from python.org — check "Add python.exe to PATH" ' +
-          'during setup — then restart this app.'
-        ));
-        return;
-      }
-
       // Spawn uvicorn process. We capture stdout/stderr purely for logging;
       // readiness is detected by polling /health, not by parsing this output.
       backendProcess = spawn(
@@ -201,16 +310,7 @@ function startBackend(config) {
       );
 
       let exitedEarly = false;
-
-      backendProcess.stdout.on('data', (data) => {
-        console.log('[Backend]', data.toString());
-      });
-
-      backendProcess.stderr.on('data', (data) => {
-        // uvicorn logs (including the "Application startup complete" line)
-        // are written to stderr — this is normal, not an error.
-        console.log('[Backend]', data.toString());
-      });
+      const getTail = pipeProcessOutput(backendProcess, 'backend');
 
       backendProcess.on('error', (err) => {
         exitedEarly = true;
@@ -220,11 +320,12 @@ function startBackend(config) {
       backendProcess.on('exit', (code) => {
         if (code !== null && code !== 0) {
           exitedEarly = true;
+          const tail = getTail();
           reject(
             new Error(
-              `Backend process exited with code ${code} before becoming ready. ` +
-                'Check that port ' + config.backendPort + ' is free and that ' +
-                'the Python dependencies are installed.'
+              `Backend process exited with code ${code} before becoming ready.\n\n` +
+                (tail ? `Last output:\n${tail}` : 'No output was captured — check ' +
+                  path.join(appDataPath, 'logs', 'backend.log'))
             )
           );
         }
@@ -232,6 +333,81 @@ function startBackend(config) {
 
       // Wait for the health endpoint to respond instead of scraping logs.
       waitForBackend(config.backendPort)
+        .then(() => {
+          if (!exitedEarly) resolve(true);
+        })
+        .catch((err) => {
+          if (!exitedEarly) reject(err);
+        });
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+// Start frontend — a self-contained Next.js "standalone" server (see
+// frontend/next.config.js's `output: "standalone"` and
+// scripts/build-frontend.js), run with Electron's own bundled Node via
+// ELECTRON_RUN_AS_NODE so the packaged app needs no separate Node.js/npm
+// install on the target machine.
+function startFrontend(config) {
+  return new Promise((resolve, reject) => {
+    try {
+      const serverPath = getFrontendServerPath();
+      if (!fs.existsSync(serverPath)) {
+        reject(new Error(
+          `Frontend build not found at ${serverPath}. Run "npm run build:frontend" ` +
+            '(or "npm run dist") in electron-app/ before packaging.'
+        ));
+        return;
+      }
+
+      // The browser (renderer) calls relative paths ("/api/...") that
+      // next.config.js's rewrites forward to the backend — but that
+      // destination is baked into the build at `npm run build:frontend`
+      // time (Next resolves rewrites() once, at build/config-load time,
+      // not per request), which happens before any end user has run the
+      // setup wizard and chosen a backendPort. So this — like the old
+      // NEXT_PUBLIC_API_URL approach it replaced — only works correctly
+      // for the default backendPort (8000), which is what gets baked in
+      // since build-frontend.js doesn't set BACKEND_INTERNAL_URL. Changing
+      // backendPort in settings without rebuilding the frontend remains a
+      // known limitation, not something either approach actually solves.
+      const env = {
+        ...process.env,
+        ELECTRON_RUN_AS_NODE: '1',
+        NODE_ENV: 'production',
+        PORT: String(config.frontendPort),
+        HOSTNAME: '127.0.0.1',
+      };
+
+      frontendProcess = spawn(process.execPath, [serverPath], {
+        cwd: path.dirname(serverPath),
+        env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      let exitedEarly = false;
+      const getTail = pipeProcessOutput(frontendProcess, 'frontend');
+
+      frontendProcess.on('error', (err) => {
+        exitedEarly = true;
+        reject(new Error(`Failed to start frontend: ${err.message}`));
+      });
+
+      frontendProcess.on('exit', (code) => {
+        if (code !== null && code !== 0) {
+          exitedEarly = true;
+          const tail = getTail();
+          reject(new Error(
+            `Frontend process exited with code ${code} before becoming ready.\n\n` +
+              (tail ? `Last output:\n${tail}` : 'No output was captured — check ' +
+                path.join(appDataPath, 'logs', 'frontend.log'))
+          ));
+        }
+      });
+
+      waitForFrontend(config.frontendPort)
         .then(() => {
           if (!exitedEarly) resolve(true);
         })
@@ -252,6 +428,7 @@ function createWindow(config) {
     height: 900,
     minWidth: 1000,
     minHeight: 700,
+    show: false, // shown on ready-to-show, in sync with closing the splash
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -260,11 +437,15 @@ function createWindow(config) {
     icon: loadIconImage(path.join(__dirname, 'assets', 'icon.png')),
   });
 
+  mainWindow.once('ready-to-show', () => mainWindow.show());
+
   if (isDev) {
     mainWindow.webContents.openDevTools();
     mainWindow.loadURL('http://localhost:3000');
   } else {
-    mainWindow.loadURL(`http://127.0.0.1:${config.backendPort}`);
+    // The backend only serves /health and /storage — the actual UI is the
+    // bundled Next.js frontend, started separately by startFrontend().
+    mainWindow.loadURL(`http://127.0.0.1:${config.frontendPort}`);
   }
 
   mainWindow.on('closed', () => {
@@ -272,6 +453,42 @@ function createWindow(config) {
   });
 
   return mainWindow;
+}
+
+// Splash screen — shown while the backend/frontend processes come up, since
+// that can take a few minutes on first run (installing Python dependencies)
+// and would otherwise look like the app hung with no window at all.
+function createSplashWindow() {
+  splashWindow = new BrowserWindow({
+    width: 420,
+    height: 280,
+    center: true,
+    frame: false,
+    resizable: false,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
+    },
+    icon: loadIconImage(path.join(__dirname, 'assets', 'icon.png')),
+  });
+  splashWindow.loadFile(path.join(__dirname, 'splash.html'));
+  splashWindow.on('closed', () => {
+    splashWindow = null;
+  });
+  return splashWindow;
+}
+
+function setSplashStatus(message) {
+  if (splashWindow && !splashWindow.isDestroyed()) {
+    splashWindow.webContents.send('splash-status', message);
+  }
+}
+
+function closeSplashWindow() {
+  if (splashWindow && !splashWindow.isDestroyed()) {
+    splashWindow.close();
+  }
 }
 
 // Setup wizard
@@ -370,20 +587,56 @@ app.on('ready', async () => {
 
   let config = loadConfig();
 
-  if (!externalBackend && !config.setupComplete) {
+  // setupComplete alone isn't enough to trust: a config.json saved by an
+  // older version of the wizard (e.g. before Cloudflare replaced Gemini)
+  // can have it set to true with the now-required fields simply absent.
+  // Re-run the wizard whenever anything required is actually missing,
+  // rather than silently spawning a backend that will fail validate_settings()
+  // and exit before ever printing a comprehensible error to the user.
+  const hasRequiredConfig = Boolean(
+    config.groqApiKey && config.cloudflareAccountId && config.cloudflareApiToken
+  );
+
+  if (!externalBackend && (!config.setupComplete || !hasRequiredConfig)) {
     config = await showSetupWizard();
   }
 
   try {
-    // Start backend (unless an external launcher already started it)
     if (externalBackend) {
+      // run.py already started (and owns) both processes.
       await waitForBackend(config.backendPort);
+      await waitForFrontend(config.frontendPort);
     } else {
-      await startBackend(config);
+      // Show a splash immediately — first-run dependency installation plus
+      // backend/frontend startup can take a few minutes, and with no window
+      // at all that looks indistinguishable from a hang.
+      createSplashWindow();
+
+      const pythonCmd = resolvePythonCommand();
+      if (!pythonCmd) {
+        throw new Error(
+          'Could not find Python on this system (tried python, py, python3). ' +
+            'Install Python 3.11+ from python.org — check "Add python.exe to PATH" ' +
+            'during setup — then restart this app.'
+        );
+      }
+
+      await ensureBackendDependencies(pythonCmd, setSplashStatus);
+      setSplashStatus('Starting backend…');
+      await startBackend(config, pythonCmd);
+      // Dev mode (`npm start`/`npm run dev`) expects a hand-run `next dev`
+      // server on :3000 (see createWindow's isDev branch below) — it doesn't
+      // need, and usually won't have, the bundled standalone build this
+      // spawns. Only start it for the real packaged/production path.
+      if (!isDev) {
+        setSplashStatus('Starting frontend…');
+        await startFrontend(config);
+      }
     }
 
     // Create main window
     createWindow(config);
+    mainWindow.once('ready-to-show', () => closeSplashWindow());
 
     // Create tray (non-fatal: a tray failure should never crash the app)
     try {
@@ -402,6 +655,7 @@ app.on('ready', async () => {
     }
   } catch (err) {
     console.error('Startup error:', err);
+    closeSplashWindow();
     require('electron').dialog.showErrorBox('Startup Error', err.message);
     app.quit();
   }
@@ -425,6 +679,9 @@ app.on('activate', () => {
 app.on('before-quit', () => {
   if (backendProcess) {
     backendProcess.kill();
+  }
+  if (frontendProcess) {
+    frontendProcess.kill();
   }
 });
 

@@ -6,7 +6,10 @@ import { api } from '@/lib/api'
 
 const STAGE_LABELS: Record<string, string> = {
   uploaded: 'Uploaded',
-  analyzing: 'Analyzing audio…',
+  preprocessing_audio: 'Converting audio, isolating vocals, transcribing…',
+  awaiting_project_info_review: '✋ Review extracted song info',
+  info_confirmed: 'Saved — starting analysis…',
+  interpreting_song: 'Interpreting song…',
   analyzed: 'Analysis complete',
   treatment_pending: 'Generating creative vision…',
   awaiting_treatment_approval: '✋ Your creative vision is ready',
@@ -25,13 +28,15 @@ const STAGE_LABELS: Record<string, string> = {
 }
 
 const APPROVAL_LINKS: Record<string, { label: string; href: string }> = {
+  awaiting_project_info_review: { label: 'Review Song Info →', href: 'review' },
   awaiting_treatment_approval: { label: 'Review Creative Vision →', href: 'treatment' },
   awaiting_manifest_approval: { label: 'Review Production Plan →', href: 'manifest' },
   awaiting_storyboard_approval: { label: 'Review Storyboard →', href: 'storyboard' },
 }
 
 const STAGE_ORDER = [
-  'uploaded', 'analyzing', 'analyzed',
+  'uploaded', 'preprocessing_audio', 'awaiting_project_info_review',
+  'info_confirmed', 'interpreting_song', 'analyzed',
   'treatment_pending', 'awaiting_treatment_approval', 'treatment_approved',
   'extracting_elements', 'elements_ready',
   'generating_images', 'images_ready',
@@ -108,7 +113,7 @@ export default function ProjectDetail({ id }: { id: string }) {
         {/* Progress dots */}
         <div className="mb-10">
           <div className="flex items-center gap-0 overflow-x-auto pb-2">
-            {STAGE_ORDER.filter(s => s !== 'analyzed' && s !== 'elements_ready').map((stage, i, arr) => {
+            {STAGE_ORDER.filter(s => s !== 'analyzed' && s !== 'elements_ready' && s !== 'info_confirmed').map((stage, i, arr) => {
               const idx = STAGE_ORDER.indexOf(stage)
               const done = idx < currentIndex
               const active = stage === project.stage

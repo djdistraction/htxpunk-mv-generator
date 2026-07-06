@@ -1,15 +1,31 @@
 import json
+import tempfile
 import uuid
+from pathlib import Path
+import httpx
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
-from models.project import ProjectCreate
+from models.project import ProjectCreate, ProjectInfoConfirm
 from database import (
     db_list_projects, db_create_project, db_get_project, db_update_project,
     db_create_asset, db_get_assets,
     db_list_series, db_create_series, db_get_series,
 )
-from utils.storage import upload_bytes
+from utils.storage import upload_bytes, url_to_local_path
 
 router = APIRouter()
+
+# Server-side enforcement — the frontend's accept="audio/*" file-picker hint
+# doesn't stop anyone selecting "All Files" or hitting the API directly.
+ALLOWED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".mp4"}
+
+
+def _validate_audio_file(filename: str | None):
+    ext = ("." + filename.rsplit(".", 1)[-1].lower()) if filename and "." in filename else ""
+    if ext not in ALLOWED_AUDIO_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '{ext or '(none)'}' — only .wav, .mp3, and .mp4 are accepted.",
+        )
 
 
 # ── Reference files (user's supporting material) ──────────────────────────────
@@ -81,12 +97,12 @@ async def _store_references(project_id: str, references, reference_meta: str, so
     return stored
 
 
-@router.get("/")
+@router.get("")
 async def list_projects():
     return db_list_projects()
 
 
-@router.post("/")
+@router.post("")
 async def create_project(data: ProjectCreate):
     project_id = str(uuid.uuid4())
     return db_create_project(project_id, data.title, data.artist)
@@ -97,38 +113,47 @@ async def create_project(data: ProjectCreate):
 @router.post("/upload-audio")
 async def create_and_upload(
     title: str = Form(...),
-    artist: str = Form(""),
-    series_id: str = Form(""),
-    brief: str = Form(""),
-    reference_meta: str = Form("[]"),
+    bpm: str = Form(""),
+    musical_key: str = Form(""),
+    beat_grid: str = Form("[]"),
     file: UploadFile = File(...),
-    references: list[UploadFile] = File(default=[]),
 ):
     """
-    Create a new project and upload audio in one step. The user may also include
-    a free-text creative brief and supporting reference files (images, docs).
-    Audio is the only requirement; everything else is optional context the AI
-    folds into its analysis and treatment.
+    Create a new project: a name for it, plus the audio file — that's the
+    entire upload form. Artist, series, creative brief, and reference files
+    are still deferred to the project-info review screen, filled in once
+    there's real data (transcript, tags) to react to; only the project's own
+    name is needed up front; so it exists as something findable in the
+    project list, and so the human has confirmed the anchor everything else
+    grounds against before preprocessing ever starts.
 
-    The orchestrator picks up stage='uploaded' and starts analysis — so we store
-    the brief and references BEFORE flipping the stage, ensuring they're included.
+    bpm/musical_key/beat_grid are measured client-side (essentia.js, WASM, in
+    the browser — never server-side, per design) and arrive already computed;
+    this endpoint only persists them. They're locked/read-only from here on,
+    surfaced on the project-info review gate alongside the server-measured
+    song_length.
     """
+    _validate_audio_file(file.filename)
+
     project_id = str(uuid.uuid4())
-    db_create_project(project_id, title, artist)
+    db_create_project(project_id, title, "")
 
     contents = await file.read()
     key = f"projects/{project_id}/audio/{file.filename}"
     audio_url = upload_bytes(contents, key, file.content_type or "audio/mpeg")
 
-    # Store brief + references first so analysis includes them.
-    if brief.strip():
-        db_update_project(project_id, user_brief=brief.strip())
-    if references:
-        await _store_references(project_id, references, reference_meta, source="initial")
-
     updates: dict = {"audio_url": audio_url, "stage": "uploaded"}
-    if series_id:
-        updates["series_id"] = series_id
+    if bpm.strip():
+        updates["bpm"] = bpm.strip()
+    if musical_key.strip():
+        updates["musical_key"] = musical_key.strip()
+    if beat_grid.strip():
+        try:
+            parsed_grid = json.loads(beat_grid)
+            if isinstance(parsed_grid, list):
+                updates["beat_grid"] = parsed_grid
+        except json.JSONDecodeError:
+            pass
 
     db_update_project(project_id, **updates)
     # No .delay() — orchestrator sees stage="uploaded" and dispatches automatically
@@ -155,14 +180,17 @@ async def list_references(project_id: str):
 async def add_references(
     project_id: str,
     reference_meta: str = Form("[]"),
+    source: str = Form("revision"),
     references: list[UploadFile] = File(default=[]),
 ):
-    """Attach more reference files to an existing project (e.g. while requesting
-    treatment changes). The treatment generator reads all reference assets, so
-    anything added here is folded into the next regeneration."""
+    """Attach more reference files to an existing project — used both from the
+    project-info review screen (source="initial", first time the artist can
+    attach anything) and later while requesting treatment changes
+    (source="revision", the original use). The treatment generator reads all
+    reference assets regardless of source; it's audit metadata only."""
     if not db_get_project(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
-    stored = await _store_references(project_id, references, reference_meta, source="revision")
+    stored = await _store_references(project_id, references, reference_meta, source=source)
     return {"added": stored}
 
 
@@ -172,11 +200,78 @@ async def upload_audio(project_id: str, file: UploadFile = File(...)):
     project = db_get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    _validate_audio_file(file.filename)
     contents = await file.read()
     key = f"projects/{project_id}/audio/{file.filename}"
     audio_url = upload_bytes(contents, key, file.content_type or "audio/mpeg")
     db_update_project(project_id, audio_url=audio_url, stage="uploaded")
     return {"audio_url": audio_url, "message": "Audio uploaded — analysis starting"}
+
+
+@router.post("/{project_id}/confirm-info")
+async def confirm_project_info(project_id: str, payload: ProjectInfoConfirm):
+    """
+    "Create Project & Save": the human fills in title, artist, series, and
+    creative vision for the first time here (none of it was collected at
+    upload, which is audio-only now), and edits whatever preprocessing
+    extracted (composer, album, transcript — bpm/musical_key arrive here from
+    the client-side essentia.js measurement). We apply the edits, write the
+    human-readable project folder, then hand off to song interpretation (the
+    first LLM call in the pipeline) — grounded in whatever the human just
+    confirmed.
+    """
+    project = db_get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project["stage"] != "awaiting_project_info_review":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Project is not awaiting info review (stage={project['stage']})",
+        )
+
+    updates = payload.model_dump(exclude_unset=True)
+    if "brief" in updates:
+        updates["user_brief"] = updates.pop("brief")
+    if updates:
+        db_update_project(project_id, **updates)
+        project = db_get_project(project_id)
+
+    from services.project_folder import create_human_readable_folder
+
+    def _local_audio_path(url: str | None, suffix: str) -> str:
+        if not url:
+            return ""
+        local_path = url_to_local_path(url)
+        if Path(local_path).exists():
+            return local_path
+        try:
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+                f.write(httpx.get(url, timeout=120).content)
+                return f.name
+        except Exception:
+            return ""
+
+    original_path = _local_audio_path(project.get("audio_url"), ".audio")
+    converted_path = _local_audio_path(project.get("converted_audio_url"), ".mp3")
+
+    folder = create_human_readable_folder(
+        project_id,
+        title=project.get("title", ""),
+        artist=project.get("artist", ""),
+        original_audio_path=original_path,
+        converted_audio_path=converted_path,
+        transcript=project.get("transcript") or {},
+        metadata={
+            "composer": project.get("composer"),
+            "album": project.get("album"),
+            "song_length": project.get("song_length"),
+            "bpm": project.get("bpm"),
+            "musical_key": project.get("musical_key"),
+        },
+    )
+    db_update_project(project_id, project_folder=folder, stage="info_confirmed")
+    # No .delay() — orchestrator sees stage="info_confirmed" and dispatches automatically
+    return db_get_project(project_id)
 
 
 # ── Series endpoints ──────────────────────────────────────────────────────────

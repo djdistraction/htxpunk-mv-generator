@@ -24,12 +24,22 @@ class ProjectRow(Base):
     series_id = Column(String)           # optional: link to a series
     stage = Column(String, default="uploaded")
     audio_url = Column(String)
+    converted_audio_url = Column(String)  # canonical mp3, produced by audio_preprocessor.convert_to_mp3
     user_brief = Column(Text)            # user's free-text creative vision (optional)
     analysis = Column(Text)              # JSON
     treatment = Column(Text)             # JSON
     elements = Column(Text)              # JSON
     panel_order = Column(Text)           # JSON list of asset IDs
     video_url = Column(String)
+    composer = Column(String)            # optional, from file tags or user entry
+    album = Column(String)               # optional, from file tags or user entry
+    song_length = Column(String)         # seconds, measured — locked/read-only once set
+    bpm = Column(String)                 # measured client-side (essentia.js) — locked/read-only
+    musical_key = Column(String)         # measured client-side (essentia.js) — locked/read-only, e.g. "C minor"
+    beat_grid = Column(Text)             # JSON list of per-beat second offsets, from essentia.js
+    transcript = Column(Text)            # JSON — raw Whisper output, shown for review before any LLM sees it
+    project_folder = Column(String)      # path to the human-readable project folder (set on Create Project & Save)
+    processing_step = Column(String)     # human-readable label for the current preprocessing sub-step (loading screen)
     revision_notes = Column(Text)        # feedback for treatment/storyboard revision
     error_message = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -105,6 +115,16 @@ def _migrate_db():
     _add_column_if_missing(conn, "projects", "revision_notes", "TEXT")
     _add_column_if_missing(conn, "projects", "panel_order", "TEXT")
     _add_column_if_missing(conn, "projects", "user_brief", "TEXT")
+    _add_column_if_missing(conn, "projects", "composer", "TEXT")
+    _add_column_if_missing(conn, "projects", "album", "TEXT")
+    _add_column_if_missing(conn, "projects", "song_length", "TEXT")
+    _add_column_if_missing(conn, "projects", "bpm", "TEXT")
+    _add_column_if_missing(conn, "projects", "musical_key", "TEXT")
+    _add_column_if_missing(conn, "projects", "beat_grid", "TEXT")
+    _add_column_if_missing(conn, "projects", "transcript", "TEXT")
+    _add_column_if_missing(conn, "projects", "project_folder", "TEXT")
+    _add_column_if_missing(conn, "projects", "converted_audio_url", "TEXT")
+    _add_column_if_missing(conn, "projects", "processing_step", "TEXT")
     _add_column_if_missing(conn, "series", "continuity_bible", "TEXT")
     conn.commit()
     conn.close()
@@ -137,7 +157,7 @@ def db_list_projects() -> list[dict]:
     result = []
     for row in rows:
         d = dict(row)
-        for field in ("analysis", "treatment", "elements", "panel_order"):
+        for field in ("analysis", "treatment", "elements", "panel_order", "beat_grid", "transcript"):
             if d.get(field):
                 d[field] = json.loads(d[field])
         result.append(d)
@@ -162,7 +182,7 @@ def db_get_project(project_id: str) -> dict | None:
     if not row:
         return None
     d = dict(row)
-    for field in ("analysis", "treatment", "elements", "panel_order"):
+    for field in ("analysis", "treatment", "elements", "panel_order", "beat_grid", "transcript"):
         if d.get(field):
             d[field] = json.loads(d[field])
     return d
