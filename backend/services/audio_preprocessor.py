@@ -103,10 +103,19 @@ def extract_metadata_tags(file_path: str) -> dict:
     return result
 
 
+
+# audio-separator's own default (model_bs_roformer_ep_317_sdr_12.9755.ckpt) is a
+# transformer-based model with the best isolation quality available, but it's
+# heavy enough that a single song measured ~80 minutes on a real CPU-only
+# machine — impractical for actual use. Kim_Vocal_2 is a widely-used MDX-Net
+# vocal model (ONNX, so CPU inference is well-optimized): noticeably lower
+# separation quality than BS-Roformer, but a small fraction of the runtime.
+VOCAL_MODEL = "Kim_Vocal_2.onnx"
+
+
 def separate_vocals(mp3_path: str, output_dir: str) -> str:
     """Isolate a clean vocal stem from the full mix. Returns the path to the
-    isolated vocals file. Quality prioritized over speed — always the
-    default model, no fast/lite mode, per product decision.
+    isolated vocals file.
 
     Raises on failure rather than silently falling back to the full mix —
     a silent fallback here would reintroduce exactly the transcription
@@ -117,7 +126,7 @@ def separate_vocals(mp3_path: str, output_dir: str) -> str:
     from audio_separator.separator import Separator
 
     separator = Separator(output_dir=output_dir, output_single_stem="Vocals")
-    separator.load_model()
+    separator.load_model(model_filename=VOCAL_MODEL)
     output_files = separator.separate(mp3_path)
     if not output_files:
         raise RuntimeError(f"Vocal separation produced no output for {mp3_path}")
