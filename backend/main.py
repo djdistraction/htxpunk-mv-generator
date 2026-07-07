@@ -18,6 +18,17 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     # Validate configuration
     validate_settings()
+    # Loud and unmissable on purpose: a real confirmed failure was two
+    # completely separate databases/storage trees silently diverging
+    # depending on how the backend happened to be launched (packaged app
+    # vs. a manually-run `uvicorn`), with nothing indicating anything had
+    # split. Printing exactly where this instance reads/writes removes the
+    # ambiguity instead of leaving it discoverable only by hunting the
+    # filesystem after the fact.
+    logger.info("=" * 70)
+    logger.info("[Startup] Database : %s", settings.database_url)
+    logger.info("[Startup] Storage  : %s", Path(settings.local_storage_path).resolve())
+    logger.info("=" * 70)
     # Create DB tables on startup (including new tasks + series tables)
     await init_db()
     # Ensure local storage directory exists
