@@ -45,13 +45,24 @@ export default function SettingsPage() {
     }
   }
 
+  // Validation is proxied through the backend (POST /api/settings/validate-*)
+  // rather than fetched directly from the browser. Confirmed real bug: a
+  // direct browser fetch to Groq/Cloudflare's API from this page (served at
+  // http://127.0.0.1:3000) is blocked by CORS — neither provider sends
+  // Access-Control-Allow-Origin for arbitrary origins — so validation always
+  // failed here regardless of whether the credentials were actually valid.
+  // A server-to-server call isn't subject to CORS at all.
   async function testGroqKey(key: string) {
     if (!key) return false;
     try {
-      const response = await fetchWithTimeout('https://api.groq.com/openai/v1/models', {
-        headers: { Authorization: `Bearer ${key}` },
-      }, 5000);
-      return response.ok;
+      const response = await fetchWithTimeout('/api/settings/validate-groq', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: key }),
+      }, 8000);
+      if (!response.ok) return false;
+      const data = await response.json();
+      return data.valid === true;
     } catch {
       return false;
     }
@@ -59,20 +70,15 @@ export default function SettingsPage() {
 
   async function testCloudflareCreds(accountId: string, apiToken: string) {
     if (!accountId || !apiToken) return false;
-    // Hit a Workers AI endpoint, not the general account-details endpoint — a
-    // token scoped only to "Workers AI: Edit" (exactly what we tell users to
-    // create) can't read general account details and would fail that check
-    // even though it's perfectly valid for image generation. Listing models
-    // is a read, so it's free and doesn't burn the daily allocation.
     try {
-      const response = await fetchWithTimeout(
-        `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/models/search`,
-        { headers: { Authorization: `Bearer ${apiToken}` } },
-        5000
-      );
+      const response = await fetchWithTimeout('/api/settings/validate-cloudflare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ account_id: accountId, api_token: apiToken }),
+      }, 8000);
       if (!response.ok) return false;
       const data = await response.json();
-      return data.success === true;
+      return data.valid === true;
     } catch {
       return false;
     }

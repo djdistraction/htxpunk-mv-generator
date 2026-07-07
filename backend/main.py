@@ -11,6 +11,7 @@ import logging
 from config import settings, validate_settings
 from database import init_db
 from api import projects, pipeline, assets
+from api import settings as settings_api
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,7 @@ app.mount("/storage", StaticFiles(directory=str(storage_path)), name="storage")
 app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
 app.include_router(pipeline.router, prefix="/api/pipeline", tags=["pipeline"])
 app.include_router(assets.router, prefix="/api/assets", tags=["assets"])
+app.include_router(settings_api.router, prefix="/api/settings", tags=["settings"])
 
 @app.get("/health")
 def health():
