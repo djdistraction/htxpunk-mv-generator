@@ -32,6 +32,15 @@ def upload_file_path(file_path: str, key: str, content_type: str = "application/
     shutil.copy2(file_path, _local_path(key))
     return _local_url(key)
 
+def delete_project_files(project_id: str) -> None:
+    """Best-effort removal of a project's internal storage folder on delete.
+    Local backend only — R2 cleanup would need API calls we don't make here,
+    so this silently no-ops for storage_backend=r2 rather than half-delete."""
+    if settings.storage_backend != "local":
+        return
+    project_dir = LOCAL_ROOT / "projects" / project_id
+    shutil.rmtree(project_dir, ignore_errors=True)
+
 def get_local_path(key: str) -> str:
     """Return absolute local path — used by FFmpeg which can't read URLs."""
     return str(LOCAL_ROOT / key)

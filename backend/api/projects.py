@@ -1,4 +1,5 @@
 import json
+import re
 import tempfile
 import uuid
 from pathlib import Path
@@ -7,16 +8,33 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from models.project import ProjectCreate, ProjectInfoConfirm
 from database import (
     db_list_projects, db_create_project, db_get_project, db_update_project,
-    db_create_asset, db_get_assets,
+    db_create_asset, db_get_assets, db_delete_project, db_get_last_task,
     db_list_series, db_create_series, db_get_series,
 )
-from utils.storage import upload_bytes, url_to_local_path
+from utils.storage import upload_bytes, url_to_local_path, delete_project_files
 
 router = APIRouter()
 
 # Server-side enforcement — the frontend's accept="audio/*" file-picker hint
 # doesn't stop anyone selecting "All Files" or hitting the API directly.
 ALLOWED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".mp4"}
+
+_WINDOWS_ILLEGAL_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def _sanitize_filename(filename: str | None) -> str:
+    """Storage keys embed the uploaded filename directly in a filesystem
+    path. Linux tolerates almost any character there; Windows doesn't
+    (`: " < > | ? *` are all illegal in a Windows path, and trailing dots/
+    spaces are stripped or rejected) — an unsanitized filename containing
+    any of those crashes the write with an unhelpful 500 on Windows only,
+    which is exactly the failure mode that motivated this function. Confirmed
+    real filenames validate fine elsewhere (extension check) but were never
+    checked for path-safety before being written to disk.
+    """
+    name = (filename or "file").strip().rstrip(". ")
+    name = _WINDOWS_ILLEGAL_CHARS.sub("_", name)
+    return name or "file"
 
 
 def _validate_audio_file(filename: str | None):
@@ -84,7 +102,7 @@ async def _store_references(project_id: str, references, reference_meta: str, so
         description = (meta.get("description") or "").strip()
         role = (meta.get("role") or "").strip()
         kind = _reference_kind(ref.filename, ref.content_type)
-        key = f"projects/{project_id}/references/{uuid.uuid4().hex}_{ref.filename}"
+        key = f"projects/{project_id}/references/{uuid.uuid4().hex}_{_sanitize_filename(ref.filename)}"
         url = upload_bytes(contents, key, ref.content_type or "application/octet-stream")
         extracted_text = _extract_reference_text(ref.filename, contents, ref.content_type)
         asset_id = db_create_asset(
@@ -97,9 +115,30 @@ async def _store_references(project_id: str, references, reference_meta: str, so
     return stored
 
 
+# Preference order for picking one representative image per project for the
+# list view — storyboard panels are the most "finished" look at a project;
+# backgrounds/elements are the best available earlier in the pipeline.
+_THUMBNAIL_ASSET_PRIORITY = ("storyboard_panel", "background", "element")
+
+
+def _thumbnail_for_project(project_id: str) -> str | None:
+    assets = db_get_assets(project_id)
+    for asset_type in _THUMBNAIL_ASSET_PRIORITY:
+        candidates = [a for a in assets if a.get("asset_type") == asset_type and a.get("url")]
+        if not candidates:
+            continue
+        if asset_type == "storyboard_panel":
+            candidates.sort(key=lambda a: a.get("panel_index", 0))
+        return candidates[0]["url"]
+    return None
+
+
 @router.get("")
 async def list_projects():
-    return db_list_projects()
+    projects = db_list_projects()
+    for p in projects:
+        p["thumbnail_url"] = _thumbnail_for_project(p["id"])
+    return projects
 
 
 @router.post("")
@@ -147,7 +186,7 @@ async def create_and_upload(
     db_create_project(project_id, title, "")
 
     contents = await file.read()
-    key = f"projects/{project_id}/audio/{file.filename}"
+    key = f"projects/{project_id}/audio/{_sanitize_filename(file.filename)}"
     audio_url = upload_bytes(contents, key, file.content_type or "audio/mpeg")
 
     updates: dict = {"audio_url": audio_url, "stage": "uploaded"}
@@ -164,7 +203,7 @@ async def create_and_upload(
             pass
     if vocals_file is not None and vocals_file.filename:
         vocals_contents = await vocals_file.read()
-        vocals_key = f"projects/{project_id}/audio/vocals_{vocals_file.filename}"
+        vocals_key = f"projects/{project_id}/audio/vocals_{_sanitize_filename(vocals_file.filename)}"
         updates["user_vocals_url"] = upload_bytes(
             vocals_contents, vocals_key, vocals_file.content_type or "audio/mpeg"
         )
@@ -180,6 +219,52 @@ async def get_project(project_id: str):
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return project
+
+
+@router.delete("/{project_id}")
+async def delete_project(project_id: str):
+    """Delete a project and everything scoped to it. Does not touch the
+    human-readable export folder (HTXpunk Projects/{Artist} - {Title}/) —
+    that's a deliberate permanent artifact, not internal state."""
+    if not db_get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    delete_project_files(project_id)
+    db_delete_project(project_id)
+    return {"deleted": True}
+
+
+@router.post("/{project_id}/retry")
+async def retry_project(project_id: str):
+    """Resume a project stuck in stage='error'. Looks up which pipeline
+    stage's worker most recently failed (via the tasks log) and resets the
+    project back to that stage's dispatch point — the orchestrator picks it
+    up on its next poll, exactly like a fresh arrival at that stage."""
+    project = db_get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project["stage"] != "error":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Project is not in an error state (stage={project['stage']})",
+        )
+
+    last_task = db_get_last_task(project_id)
+    if not last_task:
+        raise HTTPException(
+            status_code=400,
+            detail="No task history found for this project — can't determine where to resume.",
+        )
+
+    from orchestrator import TASK_TYPE_TO_STAGE
+    resume_stage = TASK_TYPE_TO_STAGE.get(last_task["task_type"])
+    if not resume_stage:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unrecognized task type '{last_task['task_type']}' — can't determine where to resume.",
+        )
+
+    db_update_project(project_id, stage=resume_stage, error_message="")
+    return db_get_project(project_id)
 
 
 @router.get("/{project_id}/references")
@@ -216,7 +301,7 @@ async def upload_audio(project_id: str, file: UploadFile = File(...)):
         raise HTTPException(status_code=404, detail="Project not found")
     _validate_audio_file(file.filename)
     contents = await file.read()
-    key = f"projects/{project_id}/audio/{file.filename}"
+    key = f"projects/{project_id}/audio/{_sanitize_filename(file.filename)}"
     audio_url = upload_bytes(contents, key, file.content_type or "audio/mpeg")
     db_update_project(project_id, audio_url=audio_url, stage="uploaded")
     return {"audio_url": audio_url, "message": "Audio uploaded — analysis starting"}

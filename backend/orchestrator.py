@@ -46,6 +46,12 @@ STAGE_WORKERS: dict[str, str] = {
     "storyboard_approved": "run_video_assembly",
 }
 
+# Reverse of STAGE_WORKERS — given the task_type that failed, which stage do
+# we reset a project to so the orchestrator re-dispatches it? Used by the
+# /retry endpoint; computed here so it can never drift out of sync with the
+# forward mapping above.
+TASK_TYPE_TO_STAGE: dict[str, str] = {v: k for k, v in STAGE_WORKERS.items()}
+
 # Stages where a human must act — orchestrator skips them
 HUMAN_GATES = {
     "awaiting_project_info_review",
