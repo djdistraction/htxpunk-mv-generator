@@ -2,44 +2,385 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Smooth scroll behavior */
+/*
+  HTXpunk MV Generator: Classic Windows utility theme
+  ---------------------------------------------------
+  The app intentionally avoids the modern "AI SaaS" visual language here.
+  This skin is plain, durable, and control-panel-like: beveled panels, system
+  fonts, blue title bars, compact controls, and zero glass/gradient sheen.
+*/
+
+:root {
+  --win-desktop: #008080;
+  --win-face: #c0c0c0;
+  --win-face-light: #dfdfdf;
+  --win-face-dark: #808080;
+  --win-shadow: #404040;
+  --win-text: #000000;
+  --win-muted: #3f3f3f;
+  --win-title: #000080;
+  --win-title-text: #ffffff;
+  --win-link: #0000ee;
+  --win-danger: #800000;
+  --win-success: #006000;
+  --win-focus: #000000;
+}
+
 @layer base {
   html {
     scroll-behavior: smooth;
+    background: var(--win-desktop);
   }
 
   body {
-    @apply bg-black text-white;
+    background: var(--win-desktop) !important;
+    color: var(--win-text) !important;
+    font-family: Tahoma, "MS Sans Serif", "Microsoft Sans Serif", Arial, sans-serif;
+    font-size: 13px;
+    line-height: 1.35;
+    letter-spacing: 0;
+    -webkit-font-smoothing: none;
+    text-rendering: optimizeSpeed;
+  }
+
+  * {
+    text-shadow: none !important;
+    box-shadow: none !important;
+  }
+
+  ::selection {
+    background: var(--win-title);
+    color: var(--win-title-text);
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    color: var(--win-text) !important;
+    font-weight: 700 !important;
+    letter-spacing: 0 !important;
+  }
+
+  h1 {
+    font-size: 20px !important;
+  }
+
+  h2 {
+    font-size: 15px !important;
+  }
+
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-size: 13px !important;
+  }
+
+  p,
+  span,
+  li,
+  label,
+  div,
+  td,
+  th {
+    color: inherit;
+  }
+
+  a {
+    color: var(--win-link) !important;
+    text-decoration: underline !important;
+  }
+
+  code {
+    background: #ffffff !important;
+    color: var(--win-text) !important;
+    border: 1px solid var(--win-face-dark) !important;
+    border-radius: 0 !important;
+    padding: 1px 3px !important;
+    font-family: "Courier New", Consolas, monospace !important;
+    font-size: 12px !important;
+  }
+
+  table {
+    border-collapse: collapse !important;
+    background: #ffffff !important;
+    color: var(--win-text) !important;
+    border: 2px solid !important;
+    border-color: var(--win-shadow) #ffffff #ffffff var(--win-shadow) !important;
+  }
+
+  th {
+    background: var(--win-face) !important;
+    border: 1px solid var(--win-face-dark) !important;
+    color: var(--win-text) !important;
+    font-weight: 700 !important;
+  }
+
+  td {
+    background: #ffffff !important;
+    border: 1px solid #a0a0a0 !important;
+    color: var(--win-text) !important;
+  }
+
+  input,
+  textarea,
+  select {
+    background: #ffffff !important;
+    color: var(--win-text) !important;
+    border-radius: 0 !important;
+    border: 2px solid !important;
+    border-color: var(--win-shadow) #ffffff #ffffff var(--win-shadow) !important;
+    font-family: Tahoma, "MS Sans Serif", Arial, sans-serif !important;
+    font-size: 13px !important;
+    outline: none !important;
+  }
+
+  input:focus,
+  textarea:focus,
+  select:focus {
+    outline: 1px dotted var(--win-focus) !important;
+    outline-offset: -4px !important;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: #606060 !important;
+  }
+
+  button,
+  [role="button"] {
+    appearance: none !important;
+    background: var(--win-face) !important;
+    color: var(--win-text) !important;
+    border-radius: 0 !important;
+    border: 2px solid !important;
+    border-color: #ffffff var(--win-shadow) var(--win-shadow) #ffffff !important;
+    font-family: Tahoma, "MS Sans Serif", Arial, sans-serif !important;
+    font-size: 13px !important;
+    font-weight: 400 !important;
+    min-height: 28px;
+    cursor: default !important;
+  }
+
+  button:hover,
+  [role="button"]:hover {
+    background: var(--win-face-light) !important;
+    color: var(--win-text) !important;
+  }
+
+  button:active,
+  [role="button"]:active {
+    border-color: var(--win-shadow) #ffffff #ffffff var(--win-shadow) !important;
+    padding-top: calc(var(--tw-translate-y, 0px) + 1px);
+    padding-left: calc(var(--tw-translate-x, 0px) + 1px);
+  }
+
+  button:disabled,
+  [role="button"][aria-disabled="true"] {
+    color: var(--win-face-dark) !important;
+    background: var(--win-face) !important;
+    text-shadow: 1px 1px #ffffff !important;
+    cursor: not-allowed !important;
   }
 }
 
-/* Custom animations */
 @layer components {
-  .animate-subtle-pulse {
-    animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  /* Root screens become plain application workspaces instead of dark landing pages. */
+  .min-h-screen {
+    background: var(--win-face) !important;
+    color: var(--win-text) !important;
   }
 
-  /* Glass morphism effect for modals/cards */
+  /* The main content container gets a recessed desktop-window frame. */
+  .min-h-screen > div[class*="max-w"] {
+    background: var(--win-face) !important;
+    color: var(--win-text) !important;
+    border: 2px solid !important;
+    border-color: #ffffff var(--win-shadow) var(--win-shadow) #ffffff !important;
+    border-radius: 0 !important;
+    padding: 14px !important;
+  }
+
+  /* Add a title-bar feel to the primary page heading block without touching routing. */
+  .min-h-screen > div[class*="max-w"] > div[class*="mt-6"][class*="mb-8"]:has(h1),
+  .min-h-screen > div[class*="max-w"] > div[class*="flex"][class*="justify-between"]:has(h1) {
+    background: var(--win-title) !important;
+    color: var(--win-title-text) !important;
+    border: 1px solid var(--win-title) !important;
+    margin: 8px 0 12px 0 !important;
+    padding: 4px 6px !important;
+  }
+
+  .min-h-screen > div[class*="max-w"] > div:has(h1) h1,
+  .min-h-screen > div[class*="max-w"] > div:has(h1) p,
+  .min-h-screen > div[class*="max-w"] > div:has(h1) span {
+    color: var(--win-title-text) !important;
+  }
+
+  /* Cards, wells, upload zones, and status panels. */
+  [class*="bg-gray-"],
+  [class*="bg-black"],
+  [class*="bg-purple"],
+  [class*="bg-blue"],
+  [class*="bg-green"],
+  [class*="bg-yellow"],
+  [class*="bg-red"],
+  [class*="from-"],
+  [class*="to-"] {
+    background: var(--win-face) !important;
+    background-image: none !important;
+    color: var(--win-text) !important;
+  }
+
+  .bg-gradient-to-br,
+  .bg-gradient-to-r,
+  .bg-gradient-to-l,
+  .bg-gradient-to-t,
+  .bg-gradient-to-b {
+    background-image: none !important;
+    background: var(--win-face) !important;
+  }
+
+  [class*="rounded"],
+  [class*="rounded-"] {
+    border-radius: 0 !important;
+  }
+
+  [class*="border"],
+  [class*="border-gray"],
+  [class*="border-purple"],
+  [class*="border-blue"],
+  [class*="border-green"],
+  [class*="border-yellow"],
+  [class*="border-red"] {
+    border-color: var(--win-face-dark) !important;
+  }
+
+  /* Anything that looked like a modern card now looks like a Windows group box. */
+  div[class*="border"][class*="p-"],
+  div[class*="border"][class*="py-"],
+  div[class*="border"][class*="px-"] {
+    background: var(--win-face) !important;
+    border: 2px solid !important;
+    border-color: #ffffff var(--win-shadow) var(--win-shadow) #ffffff !important;
+  }
+
+  /* Recessed preview panes and image slots. */
+  .aspect-video,
+  img,
+  video,
+  audio {
+    border-radius: 0 !important;
+  }
+
+  .aspect-video,
+  div[class*="overflow-hidden"] {
+    background: #ffffff !important;
+    border: 2px solid !important;
+    border-color: var(--win-shadow) #ffffff #ffffff var(--win-shadow) !important;
+  }
+
+  /* Text utility overrides: keep hierarchy, remove neon. */
+  [class*="text-white"],
+  [class*="text-gray"],
+  [class*="text-purple"],
+  [class*="text-blue"],
+  [class*="text-green"],
+  [class*="text-yellow"],
+  [class*="text-red"] {
+    color: var(--win-text) !important;
+  }
+
+  p[class*="text-gray"],
+  span[class*="text-gray"],
+  div[class*="text-gray"],
+  label[class*="text-gray"] {
+    color: var(--win-muted) !important;
+  }
+
+  .text-red-300,
+  .text-red-400,
+  .text-red-500,
+  [class*="text-red"] {
+    color: var(--win-danger) !important;
+  }
+
+  .text-green-300,
+  .text-green-400,
+  .text-green-500,
+  [class*="text-green"] {
+    color: var(--win-success) !important;
+  }
+
+  /* Progress bars: old-school recessed track with navy fill. */
+  div[class*="h-2"][class*="overflow-hidden"] {
+    background: #ffffff !important;
+    border: 2px solid !important;
+    border-color: var(--win-shadow) #ffffff #ffffff var(--win-shadow) !important;
+    height: 14px !important;
+  }
+
+  div[class*="h-full"][class*="bg-purple"] {
+    background: var(--win-title) !important;
+  }
+
+  /* Upload drop zones should feel like file dialog panels, not marketing cards. */
+  div[class*="border-dashed"] {
+    border-style: solid !important;
+    border-color: var(--win-shadow) #ffffff #ffffff var(--win-shadow) !important;
+    background: #ffffff !important;
+  }
+
+  /* Keep utility animations but remove the slick modern shimmer. */
+  .animate-subtle-pulse,
+  .animate-pulse {
+    animation: none !important;
+  }
+
+  .animate-spin {
+    animation-duration: 1.5s !important;
+  }
+
   .glass-effect {
-    @apply bg-white/5 backdrop-blur-md border border-white/10;
+    background: var(--win-face) !important;
+    border: 2px solid !important;
+    border-color: #ffffff var(--win-shadow) var(--win-shadow) #ffffff !important;
+    backdrop-filter: none !important;
   }
 
-  /* Loading skeleton */
   .skeleton {
-    @apply bg-gray-800 animate-pulse rounded;
+    background: repeating-linear-gradient(
+      45deg,
+      var(--win-face),
+      var(--win-face) 4px,
+      var(--win-face-light) 4px,
+      var(--win-face-light) 8px
+    ) !important;
+    border-radius: 0 !important;
   }
 }
 
-/* Improve scrollbar appearance */
+/* Classic scrollbars where supported. */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 16px;
+  height: 16px;
 }
 
 ::-webkit-scrollbar-track {
-  @apply bg-gray-900;
+  background: var(--win-face) !important;
+  border: 1px solid var(--win-face-dark);
 }
 
 ::-webkit-scrollbar-thumb {
-  @apply bg-gray-700 rounded hover:bg-gray-600;
+  background: var(--win-face) !important;
+  border: 2px solid !important;
+  border-color: #ffffff var(--win-shadow) var(--win-shadow) #ffffff !important;
+  border-radius: 0 !important;
+}
+
+::-webkit-scrollbar-corner {
+  background: var(--win-face) !important;
 }

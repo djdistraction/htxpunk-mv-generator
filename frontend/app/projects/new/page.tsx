@@ -226,8 +226,8 @@ export default function NewProjectPage() {
               <li>✓ Make sure the backend is running on <code className="bg-black/40 px-1 rounded">http://localhost:8000</code></li>
               <li>✓ Check backend health: <code className="bg-black/40 px-1 rounded">curl http://localhost:8000/health</code></li>
               <li>✓ Need API keys?</li>
-              <li>— Groq (free): <code className="bg-black/40 px-1 rounded">console.groq.com</code></li>
-              <li>— Gemini (500 free images/day): <code className="bg-black/40 px-1 rounded">aistudio.google.com</code></li>
+              <li>— Groq (text analysis): <code className="bg-black/40 px-1 rounded">console.groq.com</code></li>
+              <li>— Cloudflare Workers AI (image generation): <code className="bg-black/40 px-1 rounded">dash.cloudflare.com</code></li>
             </ul>
           </div>
         </div>

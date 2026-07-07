@@ -2,22 +2,21 @@
 """
 HTXpunk MV Generator — one-command launcher.
 
-This single script takes care of EVERYTHING for you:
+This single script takes care of the local development launch:
 
   1. Checks that Python and Node.js are installed
-  2. Asks for your Groq + HuggingFace API keys (only the first time) and
-     writes them to .env
-  3. Installs all backend (pip) and frontend (npm) dependencies
+  2. Asks for your Groq + Cloudflare credentials when needed and writes .env
+  3. Installs all backend, frontend, and optional Electron dependencies
   4. Frees ports 8000 / 3000 if a previous run left something behind
-  5. Starts the backend (FastAPI) and waits until it is healthy
-  6. Starts the frontend (Next.js)
-  7. Opens the app in your browser  (or the desktop window with --electron)
+  5. Starts the backend and waits until it is healthy
+  6. Starts the frontend
+  7. Opens the app in your browser, or the desktop window with --electron
   8. Cleans everything up when you press Ctrl+C
 
 Usage:
     py run.py                # backend + frontend, opens in your browser
     py run.py --electron     # backend + frontend + the Electron desktop app
-    py run.py --no-install   # skip dependency installation (faster restarts)
+    py run.py --no-install   # skip dependency installation for faster restarts
     py run.py --diagnose     # run network diagnostics and exit
 
 You can leave this window open while you use the app. Press Ctrl+C here to
@@ -49,6 +48,8 @@ BACKEND_PORT = 8000
 FRONTEND_PORT = 3000
 
 IS_WINDOWS = os.name == "nt"
+DEFAULT_DATA_DIR = Path.home() / ".htxpunk-mv-generator" / "storage"
+DEFAULT_DATABASE_URL = f"sqlite+aiosqlite:///{DEFAULT_DATA_DIR / 'htxpunk.db'}"
 
 # Track child processes so we can clean them up on exit.
 _children: list[subprocess.Popen] = []
@@ -175,7 +176,7 @@ def port_in_use(port: int) -> bool:
 
 
 def free_port(port: int) -> None:
-    """Best-effort: kill whatever is listening on a port (e.g. a zombie run)."""
+    """Best-effort: kill whatever is listening on a port from a previous run."""
     if not port_in_use(port):
         return
     warn(f"Port {port} is in use — trying to free it…")
@@ -255,8 +256,8 @@ def check_prerequisites() -> None:
     ok("Node.js / npm found")
 
     if shutil.which("ffmpeg") is None:
-        warn("FFmpeg not found. Video assembly needs it. "
-             "On Windows: https://www.gyan.dev/ffmpeg/builds/  (add bin/ to PATH)")
+        warn("FFmpeg not found on PATH. The app can still use the bundled "
+             "imageio-ffmpeg fallback for local video assembly.")
     else:
         ok("FFmpeg found")
 
@@ -274,28 +275,88 @@ def read_env() -> dict:
     return data
 
 
+def _looks_like_legacy_storage_path(value: str) -> bool:
+    v = (value or "").strip().replace("\\", "/")
+    return v in {"./backend/storage", "backend/storage", "./storage", "storage"}
+
+
+def _looks_like_legacy_database_url(value: str) -> bool:
+    v = (value or "").strip().replace("\\", "/")
+    return (
+        v in {
+            "sqlite+aiosqlite:///./backend/htxpunk.db",
+            "sqlite+aiosqlite:///backend/htxpunk.db",
+            "sqlite+aiosqlite:///./voodoo.db",
+            "sqlite+aiosqlite:///./htxpunk.db",
+        }
+        or v.endswith("/backend/htxpunk.db")
+        or v.endswith("/backend/voodoo.db")
+    )
+
+
+def normalize_legacy_env_paths(values: dict) -> bool:
+    """Fix older dev .env files that point at repo-local DB/storage.
+
+    Those older paths make manual/dev runs and packaged Electron runs silently
+    see different projects. Only known legacy defaults are auto-normalized;
+    deliberate custom paths are preserved.
+    """
+    changed = False
+    if _looks_like_legacy_storage_path(values.get("LOCAL_STORAGE_PATH", "")):
+        warn("LOCAL_STORAGE_PATH points at an old repo-local dev folder; switching to the shared app data storage folder.")
+        values.pop("LOCAL_STORAGE_PATH", None)
+        changed = True
+    if _looks_like_legacy_database_url(values.get("DATABASE_URL", "")):
+        warn("DATABASE_URL points at an old repo-local dev database; switching to the shared app data database.")
+        values.pop("DATABASE_URL", None)
+        changed = True
+    return changed
+
+
 def write_env(values: dict) -> None:
+    image_backend = (values.get("IMAGE_BACKEND") or "cloudflare").strip().lower()
+    if image_backend not in {"cloudflare", "gemini", "placeholder"}:
+        image_backend = "cloudflare"
+
+    local_storage_path = values.get("LOCAL_STORAGE_PATH") or str(DEFAULT_DATA_DIR)
+    database_url = values.get("DATABASE_URL") or DEFAULT_DATABASE_URL
+
     lines = [
         "# HTXpunk MV Generator configuration",
         "# Generated/updated by run.py",
         "",
+        "# LLM / text analysis",
         f"GROQ_API_KEY={values.get('GROQ_API_KEY', '')}",
-        "GROQ_MODEL=llama-3.3-70b-versatile",
+        f"GROQ_MODEL={values.get('GROQ_MODEL', 'llama-3.3-70b-versatile')}",
         "",
-        f"HF_TOKEN={values.get('HF_TOKEN', '')}",
-        "HF_IMAGE_MODEL=black-forest-labs/FLUX.1-schnell",
+        "# Image generation backend: cloudflare | gemini | placeholder",
+        f"IMAGE_BACKEND={image_backend}",
         "",
-        "WHISPER_MODEL=base",
+        "# Cloudflare Workers AI image generation",
+        f"CLOUDFLARE_ACCOUNT_ID={values.get('CLOUDFLARE_ACCOUNT_ID', '')}",
+        f"CLOUDFLARE_API_TOKEN={values.get('CLOUDFLARE_API_TOKEN', '')}",
         "",
+        "# Gemini/Imagen only if IMAGE_BACKEND=gemini",
+        f"GEMINI_API_KEY={values.get('GEMINI_API_KEY', '')}",
+        "",
+        "# Audio transcription",
+        f"WHISPER_MODEL={values.get('WHISPER_MODEL', 'base')}",
+        "",
+        "# Local storage / database",
         "STORAGE_BACKEND=local",
-        f"LOCAL_STORAGE_PATH={values.get('LOCAL_STORAGE_PATH', './backend/storage')}",
+        f"LOCAL_STORAGE_PATH={local_storage_path}",
+        f"DATABASE_URL={database_url}",
         "",
-        f"DATABASE_URL={values.get('DATABASE_URL', 'sqlite+aiosqlite:///./backend/htxpunk.db')}",
+        "# Video generation",
+        f"VIDEO_BACKEND={values.get('VIDEO_BACKEND', 'ffmpeg')}",
+        f"VIDEO_FPS={values.get('VIDEO_FPS', '25')}",
+        f"CLIP_DURATION={values.get('CLIP_DURATION', '5')}",
+        f"OUTPUT_RESOLUTION={values.get('OUTPUT_RESOLUTION', '1920x1080')}",
         "",
-        "VIDEO_BACKEND=ffmpeg",
-        "VIDEO_FPS=25",
-        "CLIP_DURATION=5",
-        "OUTPUT_RESOLUTION=1920x1080",
+        "# Modal serverless GPU only if VIDEO_BACKEND=modal",
+        f"LIPSYNC_ENABLED={values.get('LIPSYNC_ENABLED', 'true')}",
+        f"MODAL_TOKEN_ID={values.get('MODAL_TOKEN_ID', '')}",
+        f"MODAL_TOKEN_SECRET={values.get('MODAL_TOKEN_SECRET', '')}",
         "",
     ]
     ENV_FILE.write_text("\n".join(lines), encoding="utf-8")
@@ -304,52 +365,98 @@ def write_env(values: dict) -> None:
 def is_placeholder(value: str) -> bool:
     if not value:
         return True
-    v = value.lower()
-    return ("your_api_key" in v or "your_token" in v or v in ("gsk_...", "hf_...")
-            or v.endswith("_here"))
+    v = value.lower().strip()
+    return (
+        "your_api_key" in v
+        or "your_token" in v
+        or "your_account" in v
+        or v in ("gsk_...", "hf_...", "...")
+        or v.endswith("_here")
+    )
 
 
 def ensure_env() -> None:
     say("Checking API keys (.env)")
     values = read_env()
+    normalized_paths = normalize_legacy_env_paths(values)
+
+    image_backend = (values.get("IMAGE_BACKEND") or "cloudflare").strip().lower()
+    if image_backend not in {"cloudflare", "gemini", "placeholder"}:
+        warn(f"Unknown IMAGE_BACKEND={image_backend!r}; resetting to cloudflare")
+        image_backend = "cloudflare"
 
     groq = values.get("GROQ_API_KEY", "")
-    hf = values.get("HF_TOKEN", "")
+    cf_account_id = values.get("CLOUDFLARE_ACCOUNT_ID", "")
+    cf_token = values.get("CLOUDFLARE_API_TOKEN", "")
+    gemini = values.get("GEMINI_API_KEY", "")
 
     need_groq = is_placeholder(groq)
-    need_hf = is_placeholder(hf)
+    need_cloudflare = image_backend == "cloudflare" and (
+        is_placeholder(cf_account_id) or is_placeholder(cf_token)
+    )
+    need_gemini = image_backend == "gemini" and is_placeholder(gemini)
 
-    if not need_groq and not need_hf:
-        ok("API keys already configured")
+    if not (need_groq or need_cloudflare or need_gemini):
+        if normalized_paths:
+            values.setdefault("LOCAL_STORAGE_PATH", str(DEFAULT_DATA_DIR))
+            values.setdefault("DATABASE_URL", DEFAULT_DATABASE_URL)
+            values["IMAGE_BACKEND"] = image_backend
+            write_env(values)
+            ok("Updated .env to use the shared app data storage/database location")
+        ok(f"API keys already configured (IMAGE_BACKEND={image_backend})")
         return
 
-    print("\n  I need your two free API keys to finish setup.")
-    print("  (They are saved locally in .env and never leave your computer.)\n")
+    print("\n  The app reads credentials from the project .env file.")
+    print("  They are saved locally and are not committed to Git.\n")
 
     if need_groq:
-        print("  • Groq API key — get one free at https://console.groq.com")
-        print("    (Create New Key → it starts with 'gsk_')")
-        entered = input("    Paste your GROQ_API_KEY: ").strip()
+        print("  • Groq API key — get one at https://console.groq.com")
+        print("    Create New Key → it starts with 'gsk_'")
+        entered = input("    Paste GROQ_API_KEY, or press Enter to leave blank: ").strip()
         if entered:
             groq = entered
 
-    if need_hf:
-        print("\n  • HuggingFace token — get one free at "
-              "https://huggingface.co/settings/tokens")
-        print("    (New token → Read access → it starts with 'hf_')")
-        entered = input("    Paste your HF_TOKEN: ").strip()
+    if need_cloudflare:
+        print("\n  • Cloudflare Workers AI credentials for image generation")
+        print("    Account ID: dash.cloudflare.com → Workers & Pages → right sidebar")
+        print("    API Token: My Profile → API Tokens → Account · Workers AI · Edit")
+        print("    Press Enter on both prompts to use IMAGE_BACKEND=placeholder for a local smoke test.")
+        entered = input("    Paste CLOUDFLARE_ACCOUNT_ID: ").strip()
         if entered:
-            hf = entered
+            cf_account_id = entered
+        entered = input("    Paste CLOUDFLARE_API_TOKEN: ").strip()
+        if entered:
+            cf_token = entered
+        if is_placeholder(cf_account_id) or is_placeholder(cf_token):
+            warn("Cloudflare credentials are incomplete. Switching to IMAGE_BACKEND=placeholder so the app can start for local testing.")
+            image_backend = "placeholder"
+
+    if need_gemini:
+        print("\n  • Gemini API key — only required because IMAGE_BACKEND=gemini")
+        entered = input("    Paste GEMINI_API_KEY, or press Enter to switch to placeholder: ").strip()
+        if entered:
+            gemini = entered
+        else:
+            warn("Gemini key missing. Switching to IMAGE_BACKEND=placeholder so the app can start for local testing.")
+            image_backend = "placeholder"
 
     values["GROQ_API_KEY"] = groq
-    values["HF_TOKEN"] = hf
+    values["IMAGE_BACKEND"] = image_backend
+    values["CLOUDFLARE_ACCOUNT_ID"] = cf_account_id
+    values["CLOUDFLARE_API_TOKEN"] = cf_token
+    values["GEMINI_API_KEY"] = gemini
+    values.setdefault("LOCAL_STORAGE_PATH", str(DEFAULT_DATA_DIR))
+    values.setdefault("DATABASE_URL", DEFAULT_DATABASE_URL)
+    values.setdefault("VIDEO_BACKEND", "ffmpeg")
+    values.setdefault("WHISPER_MODEL", "base")
+
     write_env(values)
 
-    if is_placeholder(groq) or is_placeholder(hf):
-        warn("One or both keys are still missing. The app will start, but "
-             "AI features won't work until you add them to .env.")
+    if image_backend == "placeholder":
+        ok("Saved .env using IMAGE_BACKEND=placeholder for local smoke testing")
+        warn("Placeholder mode starts the app without paid/image credentials, but it will not generate final production-quality AI images.")
     else:
-        ok("API keys saved to .env")
+        ok(f"Saved .env using IMAGE_BACKEND={image_backend}")
 
 
 # ── Dependency installation ─────────────────────────────────────────────────
@@ -428,7 +535,10 @@ def start_backend() -> None:
 def start_frontend() -> None:
     say("Starting frontend (Next.js on port 3000)")
     free_port(FRONTEND_PORT)
-    cmd, shell = npm_command("run dev")
+    # Clean the dev build cache before startup. A stale .next cache can keep
+    # serving an old route manifest and produce 404s for routes that exist on
+    # disk, such as /projects/[id]/treatment after pulling new code.
+    cmd, shell = npm_command("run clean-dev")
     start_background(cmd, cwd=FRONTEND_DIR, prefix="frontend", shell=shell)
     print("  Waiting for frontend to come up…", flush=True)
     if wait_for_port(FRONTEND_PORT):
@@ -458,7 +568,6 @@ def main() -> None:
                         help="Run network diagnostics and exit")
     args = parser.parse_args()
 
-    # Handle --diagnose flag
     if args.diagnose:
         print("\033[1;36m" + "=" * 60)
         print("  HTXpunk Network Diagnostic Tool")
@@ -503,6 +612,8 @@ def main() -> None:
     print("=" * 60 + "\033[0m")
     print("  • App:      http://localhost:3000")
     print("  • Backend:  http://127.0.0.1:8000/health")
+    if args.electron:
+        print("  • Desktop:  Electron window")
     print("\n  Leave this window open while you use the app.")
     print("  Press \033[1mCtrl+C\033[0m here to stop everything.\n")
 
