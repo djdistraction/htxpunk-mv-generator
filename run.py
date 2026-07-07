@@ -275,6 +275,44 @@ def read_env() -> dict:
     return data
 
 
+def _looks_like_legacy_storage_path(value: str) -> bool:
+    v = (value or "").strip().replace("\\", "/")
+    return v in {"./backend/storage", "backend/storage", "./storage", "storage"}
+
+
+def _looks_like_legacy_database_url(value: str) -> bool:
+    v = (value or "").strip().replace("\\", "/")
+    return (
+        v in {
+            "sqlite+aiosqlite:///./backend/htxpunk.db",
+            "sqlite+aiosqlite:///backend/htxpunk.db",
+            "sqlite+aiosqlite:///./voodoo.db",
+            "sqlite+aiosqlite:///./htxpunk.db",
+        }
+        or v.endswith("/backend/htxpunk.db")
+        or v.endswith("/backend/voodoo.db")
+    )
+
+
+def normalize_legacy_env_paths(values: dict) -> bool:
+    """Fix older dev .env files that point at repo-local DB/storage.
+
+    Those older paths make manual/dev runs and packaged Electron runs silently
+    see different projects. Only known legacy defaults are auto-normalized;
+    deliberate custom paths are preserved.
+    """
+    changed = False
+    if _looks_like_legacy_storage_path(values.get("LOCAL_STORAGE_PATH", "")):
+        warn("LOCAL_STORAGE_PATH points at an old repo-local dev folder; switching to the shared app data storage folder.")
+        values.pop("LOCAL_STORAGE_PATH", None)
+        changed = True
+    if _looks_like_legacy_database_url(values.get("DATABASE_URL", "")):
+        warn("DATABASE_URL points at an old repo-local dev database; switching to the shared app data database.")
+        values.pop("DATABASE_URL", None)
+        changed = True
+    return changed
+
+
 def write_env(values: dict) -> None:
     image_backend = (values.get("IMAGE_BACKEND") or "cloudflare").strip().lower()
     if image_backend not in {"cloudflare", "gemini", "placeholder"}:
@@ -340,6 +378,7 @@ def is_placeholder(value: str) -> bool:
 def ensure_env() -> None:
     say("Checking API keys (.env)")
     values = read_env()
+    normalized_paths = normalize_legacy_env_paths(values)
 
     image_backend = (values.get("IMAGE_BACKEND") or "cloudflare").strip().lower()
     if image_backend not in {"cloudflare", "gemini", "placeholder"}:
@@ -358,6 +397,12 @@ def ensure_env() -> None:
     need_gemini = image_backend == "gemini" and is_placeholder(gemini)
 
     if not (need_groq or need_cloudflare or need_gemini):
+        if normalized_paths:
+            values.setdefault("LOCAL_STORAGE_PATH", str(DEFAULT_DATA_DIR))
+            values.setdefault("DATABASE_URL", DEFAULT_DATABASE_URL)
+            values["IMAGE_BACKEND"] = image_backend
+            write_env(values)
+            ok("Updated .env to use the shared app data storage/database location")
         ok(f"API keys already configured (IMAGE_BACKEND={image_backend})")
         return
 
