@@ -1,190 +1,186 @@
 # HTXpunk MV Generator — Working Development Setup
 
-This is the **tested, working setup** to run the app end-to-end on your Windows machine.
+This is the recommended local setup for Windows development. Use the launcher first. It keeps the backend, frontend, and optional Electron shell in one controlled process tree so you do not have to juggle three terminals.
 
-## Prerequisites (Install Once)
+## Prerequisites
 
 1. **Python 3.11+**
-   - Download from https://python.org
-   - Install (no special options needed, `py` command will work automatically on Windows)
-   - Verify: `py --version`
+   - Install from python.org.
+   - Verify in PowerShell:
+     ```powershell
+     py --version
+     ```
 
-2. **Node.js 16+**
-   - Download from https://nodejs.org
-   - Install with defaults
-   - Verify: `node --version && npm --version`
+2. **Node.js / npm**
+   - Install from nodejs.org.
+   - Verify:
+     ```powershell
+     node --version
+     npm --version
+     ```
 
-3. **Your API Keys**
-   - Groq API Key from https://console.groq.com (free, no credit card)
-   - HuggingFace Token from https://huggingface.co/settings/tokens (free, read access)
+3. **API credentials**
+   - Groq API key for text analysis: https://console.groq.com
+   - Cloudflare Workers AI Account ID and API token for image generation.
+   - If you do not have Cloudflare credentials yet, the launcher can use `IMAGE_BACKEND=placeholder` so the app can start for a local smoke test.
 
-## Step 1: Install All Dependencies
+## Recommended Start Command
 
-Run these once in the project root:
+From the project root:
 
 ```powershell
 cd "C:\Users\booki\HTXpunk LLC\htxpunk-mv-generator"
-
-# Backend dependencies (takes 2-3 minutes, includes ML models)
-cd backend
-py -m pip install -r requirements.txt
-cd ..
-
-# Frontend dependencies
-cd frontend
-npm install
-cd ..
-
-# Electron app dependencies
-cd electron-app
-npm install
-cd ..
+py run.py --electron
 ```
 
-## Step 2: Create `.env` File
+The launcher will:
 
-Create a file named `.env` in the project root (same level as `backend/`, `frontend/`, `electron-app/`):
+1. Check Python and Node.
+2. Create or update `.env`.
+3. Install Python, frontend, and Electron dependencies when needed.
+4. Free ports `8000` and `3000` from old stuck runs.
+5. Start the FastAPI backend.
+6. Start the Next.js frontend.
+7. Open the Electron desktop window.
 
+Leave that PowerShell window open while using the app. Press **Ctrl+C** in that same window to shut everything down cleanly.
+
+## Browser-Only Mode
+
+To run without Electron:
+
+```powershell
+py run.py
 ```
-GROQ_API_KEY=gsk_YOUR_KEY_HERE
-HF_TOKEN=hf_YOUR_TOKEN_HERE
-STORAGE_BACKEND=local
-LOCAL_STORAGE_PATH=./backend/storage
-DATABASE_URL=sqlite+aiosqlite:///./backend/htxpunk.db
-VIDEO_BACKEND=ffmpeg
-WHISPER_MODEL=base
+
+Then open:
+
+```text
+http://localhost:3000
 ```
 
-Replace:
-- `gsk_YOUR_KEY_HERE` with your actual Groq API key
-- `hf_YOUR_TOKEN_HERE` with your actual HuggingFace token
+## Faster Restarts
 
-## Step 3: Open Three Terminals
+After dependencies are already installed:
 
-You'll run three servers in parallel. Use PowerShell or CMD for each:
+```powershell
+py run.py --electron --no-install
+```
 
-### Terminal 1: Backend (Port 8000)
+## Expected Success Output
+
+The backend should become healthy here:
+
+```text
+http://127.0.0.1:8000/health
+```
+
+The frontend should be reachable here:
+
+```text
+http://localhost:3000
+```
+
+The Electron app should show the same dashboard as the browser UI.
+
+## Smoke Test
+
+1. Start the app with `py run.py --electron`.
+2. Confirm `http://127.0.0.1:8000/health` returns JSON.
+3. Confirm `http://localhost:3000` loads the dashboard.
+4. Click **+ New Video**.
+5. Upload a short MP3, ideally 30-60 seconds for the first test.
+6. Confirm the project appears and the pipeline begins.
+
+If you used `IMAGE_BACKEND=placeholder`, the app can start and exercise the workflow, but generated imagery will be placeholder/test output rather than final AI imagery.
+
+## Manual Three-Terminal Mode
+
+Only use this if you are deliberately debugging one service at a time.
+
+### Terminal 1: Backend
 
 ```powershell
 cd "C:\Users\booki\HTXpunk LLC\htxpunk-mv-generator\backend"
-py -m uvicorn main:app --port 8000 --reload
+py -m uvicorn main:app --port 8000 --host 127.0.0.1 --reload
 ```
 
-**Expected output:**
-```
-INFO:     Started server process [xxxx]
-INFO:     Waiting for application startup.
-INFO:     Chimera Tower online (orchestrator ready)
-INFO:     Application startup complete.
-INFO:     Uvicorn running on http://127.0.0.1:8000
-```
-
-✓ When you see "running on http://127.0.0.1:8000", the backend is ready.
-
-### Terminal 2: Frontend (Port 3000)
+### Terminal 2: Frontend
 
 ```powershell
 cd "C:\Users\booki\HTXpunk LLC\htxpunk-mv-generator\frontend"
 npm run dev
 ```
 
-**Expected output:**
-```
-  ▲ Next.js 16.2.9
-  - Local:        http://localhost:3000
-  - Environments: .env.local
-```
+### Terminal 3: Electron Shell
 
-✓ When you see "Local: http://localhost:3000", the frontend is ready.
-
-### Terminal 3: Electron App
+Because the backend and frontend are already running, tell Electron not to spawn its own backend:
 
 ```powershell
 cd "C:\Users\booki\HTXpunk LLC\htxpunk-mv-generator\electron-app"
+$env:HTXPUNK_SKIP_BACKEND="1"
 npm start
 ```
 
-**Expected sequence:**
-1. Electron window opens
-2. Setup wizard appears (if first run)
-3. Enter your Groq key and HuggingFace token
-4. Choose a storage folder (default is `./backend/storage`)
-5. Click "Finish"
-6. Dashboard loads
-
-✓ You should see the project list page with a "New Video" button.
-
-## Step 4: Test End-to-End
-
-Once all three terminals show they're running:
-
-1. **Go to http://localhost:3000** in your browser (should show the same dashboard as the Electron app)
-2. **Click "+ New Video"** in the Electron app
-3. **Upload a test song** (any MP3, 30-60 seconds for fast testing)
-4. **Wait for analysis** — you should see progress updates
-5. **Approve the treatment** — when ready, click "Review Creative Vision" and approve
-6. **Wait for images** — background and character images generate (takes 3-5 minutes)
-7. **Approve storyboard** — when ready, review and approve
-8. **Wait for video** — video assembles (takes 10-20 minutes for 1 min song)
-9. **Download video** — when complete, you can download the MP4
-
-✓ **If you get through all these steps and can download a video, the app is working.**
+Without `HTXPUNK_SKIP_BACKEND=1`, Electron may try to start another backend on port `8000`, causing a port conflict.
 
 ## Troubleshooting
 
-### "Backend won't start"
+### Backend does not start
+
+Check the health endpoint:
+
+```powershell
+curl http://127.0.0.1:8000/health
 ```
-Error: GROQ_API_KEY not set
+
+If the backend exits with configuration errors, open `.env` and verify:
+
+```text
+GROQ_API_KEY=...
+IMAGE_BACKEND=cloudflare
+CLOUDFLARE_ACCOUNT_ID=...
+CLOUDFLARE_API_TOKEN=...
 ```
-→ Your `.env` file is missing or the keys are wrong. Check the file exists and keys are correct.
 
-### "Port 8000 already in use"
+For a local smoke test without Cloudflare:
+
+```text
+IMAGE_BACKEND=placeholder
 ```
-error while attempting to bind on address ('127.0.0.1', 8000)
+
+### Port 8000 or 3000 already in use
+
+The launcher tries to free those ports automatically. If manual cleanup is needed:
+
+```powershell
+taskkill /IM python.exe /F
+taskkill /IM node.exe /F
 ```
-→ Kill any lingering backend: `taskkill /IM python.exe /F`
 
-### "Setup wizard won't close"
-→ Make sure API keys are filled in (no empty fields) and click "Finish", not a blank area.
+### Frontend does not load
 
-### "Electron won't connect to backend"
-→ Verify Terminal 1 says "Uvicorn running on http://127.0.0.1:8000"
-→ Open http://127.0.0.1:8000/health in your browser — should show JSON
+Restart through the launcher:
 
-### "Frontend won't load"
-→ Verify Terminal 2 says "Local: http://localhost:3000"
-→ Open http://localhost:3000 in your browser — should show the dashboard
+```powershell
+py run.py --electron --no-install
+```
 
-### "Image generation fails"
-→ Verify your HF_TOKEN is correct and has read permissions
-→ Check that you've waited 24 hours if your HuggingFace account is brand new
+### Electron opens but cannot connect
 
-## Keeping Everything Running
+Use the launcher or set this before `npm start` in manual mode:
 
-**Important:** Keep all three terminals open while you're using the app. If any terminal closes:
-- Close the others
-- Start over from Terminal 1
-
-Later, once this is working, we can bundle everything into a single installer.
+```powershell
+$env:HTXPUNK_SKIP_BACKEND="1"
+```
 
 ## Success Checklist
 
-- [ ] `.env` file created with your real API keys
-- [ ] Terminal 1: Backend says "Uvicorn running on http://127.0.0.1:8000"
-- [ ] Terminal 2: Frontend says "Local: http://localhost:3000"
-- [ ] Terminal 3: Electron window opens
-- [ ] Setup wizard appears or dashboard loads
-- [ ] Can upload a song
-- [ ] Can approve treatment
-- [ ] Can view generated images
-- [ ] Can approve storyboard
-- [ ] Can download a video file
+- [ ] `.env` exists in the project root.
+- [ ] Backend health endpoint returns JSON.
+- [ ] Frontend dashboard loads.
+- [ ] Electron window opens when using `--electron`.
+- [ ] A short MP3 can be uploaded.
+- [ ] The project pipeline begins.
 
-✓ If all checkboxes pass, your app is fully operational.
-
-## Next Steps
-
-Once you confirm this setup works, we'll:
-1. Build a self-contained Windows installer
-2. Bundle the frontend and backend together
-3. Create a true one-click install experience
+Once this passes, the next step is packaging the app into a true one-click Windows installer.
