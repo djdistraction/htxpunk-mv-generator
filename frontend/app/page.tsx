@@ -3,30 +3,29 @@ import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { api, mediaUrl } from "../lib/api"
-import { RefreshCw, Trash2, RotateCcw, Search } from "lucide-react"
 
 const STAGE_LABELS: Record<string, string> = {
-  uploaded: "⬆️ Uploaded",
-  preprocessing_audio: "🎧 Processing audio…",
-  awaiting_project_info_review: "✋ Review song info",
-  info_confirmed: "Saved…",
-  interpreting_song: "🔄 Interpreting song…",
-  analyzing: "🔄 Analyzing audio…",
-  analyzed: "✅ Analyzed",
-  treatment_pending: "🎨 Generating treatment…",
-  awaiting_treatment_approval: "✋ Review your creative vision",
-  treatment_approved: "✅ Treatment approved",
-  extracting_elements: "🧩 Designing elements…",
-  elements_ready: "🧩 Elements ready",
-  generating_images: "🖼️ Generating images…",
-  images_ready: "🖼️ Images ready",
-  building_storyboard: "📋 Building storyboard…",
-  awaiting_manifest_approval: "✋ Review production plan",
-  awaiting_storyboard_approval: "✋ Review storyboard",
-  storyboard_approved: "✅ Storyboard approved",
-  assembling: "🎬 Assembling video…",
-  complete: "✅ Complete",
-  error: "❌ Error",
+  uploaded: "Uploaded",
+  preprocessing_audio: "Processing audio",
+  awaiting_project_info_review: "Review song info",
+  info_confirmed: "Saved",
+  interpreting_song: "Interpreting song",
+  analyzing: "Analyzing audio",
+  analyzed: "Analyzed",
+  treatment_pending: "Generating treatment",
+  awaiting_treatment_approval: "Review creative vision",
+  treatment_approved: "Treatment approved",
+  extracting_elements: "Designing elements",
+  elements_ready: "Elements ready",
+  generating_images: "Generating images",
+  images_ready: "Images ready",
+  building_storyboard: "Building storyboard",
+  awaiting_manifest_approval: "Review production plan",
+  awaiting_storyboard_approval: "Review storyboard",
+  storyboard_approved: "Storyboard approved",
+  assembling: "Assembling video",
+  complete: "Complete",
+  error: "Error",
 }
 
 type StageCategory = "review" | "progress" | "complete" | "error"
@@ -39,10 +38,10 @@ function stageCategory(stage: string): StageCategory {
 }
 
 const CATEGORY_LABELS: Record<StageCategory, string> = {
-  review: "✋ Needs Your Review",
-  progress: "🔄 In Progress",
-  complete: "✅ Complete",
-  error: "❌ Error",
+  review: "Needs Review",
+  progress: "In Progress",
+  complete: "Complete",
+  error: "Error",
 }
 
 type SortKey = "newest" | "oldest" | "artist" | "title"
@@ -69,7 +68,7 @@ export default function Home() {
       setProjectList(data)
       setError("")
     } catch (err) {
-      setError("Failed to load projects. Is the backend running? (http://localhost:8000)")
+      setError("Failed to load projects. Confirm the backend is running at http://localhost:8000.")
     } finally {
       setRefreshing(false)
       setLoading(false)
@@ -92,7 +91,7 @@ export default function Home() {
   const handleDelete = async (e: React.MouseEvent, id: string, title: string) => {
     e.preventDefault()
     e.stopPropagation()
-    if (!confirm(`Delete "${title}"? This can't be undone — the project, its assets, and generated video will be permanently removed. (Your exported "HTXpunk Projects" folder, if you saved one, is untouched.)`)) {
+    if (!confirm(`Delete "${title}"? This cannot be undone. The project, assets, and generated video will be permanently removed. Your exported HTXpunk Projects folder is not touched.`)) {
       return
     }
     setBusyId(id)
@@ -100,7 +99,7 @@ export default function Home() {
       await api.projects.delete(id)
       setProjectList(prev => prev.filter(p => p.id !== id))
     } catch {
-      alert('Could not delete project — is the backend running?')
+      alert('Could not delete project. Confirm the backend is running.')
     } finally {
       setBusyId(null)
     }
@@ -114,7 +113,7 @@ export default function Home() {
       await api.projects.retry(id)
       router.push(`/projects/${id}`)
     } catch {
-      alert('Could not retry project — is the backend running?')
+      alert('Could not retry project. Confirm the backend is running.')
       setBusyId(null)
     }
   }
@@ -165,55 +164,53 @@ export default function Home() {
     <main className="max-w-5xl mx-auto p-8">
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-purple-600">🎬 HTXpunk Productions</h1>
-          <p className="text-gray-400 mt-1">AI Music Video Generator</p>
+          <h1 className="text-3xl font-bold text-purple-600">HTXpunk MV Generator</h1>
+          <p className="text-gray-400 mt-1">Music video project workstation</p>
         </div>
         <div className="flex gap-3">
           <button
             onClick={loadProjects}
             disabled={refreshing}
-            className="p-2 rounded-lg border border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 transition disabled:opacity-50"
+            className="px-3 py-2 rounded-lg border border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 transition disabled:opacity-50"
             title="Refresh project list"
           >
-            <RefreshCw size={20} className={refreshing ? "animate-spin" : ""} />
+            {refreshing ? "Refreshing" : "Refresh"}
           </button>
           <Link
             href="/settings"
             className="px-3 py-2 rounded-lg border border-gray-700 text-gray-300 hover:text-white hover:border-gray-500 transition text-sm"
             title="API Settings"
           >
-            ⚙️ Settings
+            Settings
           </Link>
           <Link
             href="/projects/new"
             className="bg-purple-600 hover:bg-purple-700 px-5 py-2 rounded-lg font-medium transition"
           >
-            + New Video
+            New Video
           </Link>
         </div>
       </div>
 
       {projectList.length > 0 && (
         <div className="mb-6 flex flex-wrap items-center gap-3">
-          <div className="relative flex-1 min-w-[200px]">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
-            <input
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Search title, artist, or series…"
-              className="w-full bg-gray-900 border border-gray-700 rounded-lg pl-9 pr-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-purple-500"
-            />
-          </div>
+          <label className="text-sm text-gray-500">Find:</label>
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Title, artist, or series"
+            className="flex-1 min-w-[220px] bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-purple-500"
+          />
           <select
             value={categoryFilter}
             onChange={e => setCategoryFilter(e.target.value as StageCategory | "all")}
             className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-purple-500"
           >
             <option value="all">All stages</option>
-            <option value="review">✋ Needs Your Review</option>
-            <option value="progress">🔄 In Progress</option>
-            <option value="complete">✅ Complete</option>
-            <option value="error">❌ Error</option>
+            <option value="review">Needs Review</option>
+            <option value="progress">In Progress</option>
+            <option value="complete">Complete</option>
+            <option value="error">Error</option>
           </select>
           <select
             value={sortKey}
@@ -222,8 +219,8 @@ export default function Home() {
           >
             <option value="newest">Newest first</option>
             <option value="oldest">Oldest first</option>
-            <option value="artist">Artist (A–Z)</option>
-            <option value="title">Title (A–Z)</option>
+            <option value="artist">Artist (A-Z)</option>
+            <option value="title">Title (A-Z)</option>
           </select>
           <select
             value={groupKey}
@@ -245,24 +242,21 @@ export default function Home() {
 
       {loading ? (
         <div className="text-center py-12">
-          <div className="animate-pulse text-4xl mb-3">🎬</div>
-          <p className="text-gray-500">Loading projects…</p>
+          <p className="text-gray-500">Loading projects...</p>
         </div>
       ) : projectList.length === 0 ? (
         <div className="text-center py-20 text-gray-500">
-          <p className="text-5xl mb-4">🎵</p>
           <p className="text-xl">No videos yet. Upload a song to get started.</p>
           <Link
             href="/projects/new"
             className="mt-6 inline-block bg-purple-600 hover:bg-purple-700 px-6 py-2 rounded-lg font-medium transition"
           >
-            Create your first video
+            Create First Video
           </Link>
         </div>
       ) : visibleProjects.length === 0 ? (
         <div className="text-center py-16 text-gray-500">
-          <p className="text-3xl mb-3">🔍</p>
-          <p>No projects match your search/filter.</p>
+          <p>No projects match your search or filter.</p>
         </div>
       ) : (
         <div className="space-y-8">
@@ -285,7 +279,7 @@ export default function Home() {
                         // eslint-disable-next-line @next/next/no-img-element
                         <img src={mediaUrl(p.thumbnail_url)} alt="" className="w-full h-full object-cover" />
                       ) : (
-                        <span className="text-2xl">🎵</span>
+                        <span className="text-sm text-gray-500">No Image</span>
                       )}
                     </div>
                     <div className="min-w-0 flex-1">
@@ -311,18 +305,18 @@ export default function Home() {
                           onClick={(e) => handleRetry(e, p.id)}
                           disabled={busyId === p.id}
                           title="Retry from where it failed"
-                          className="p-2 rounded-lg border border-gray-700 text-gray-400 hover:text-yellow-400 hover:border-yellow-600 transition disabled:opacity-50"
+                          className="px-3 py-1 rounded-lg border border-gray-700 text-gray-400 hover:text-yellow-400 hover:border-yellow-600 transition disabled:opacity-50"
                         >
-                          <RotateCcw size={16} />
+                          Retry
                         </button>
                       )}
                       <button
                         onClick={(e) => handleDelete(e, p.id, p.title)}
                         disabled={busyId === p.id}
                         title="Delete project"
-                        className="p-2 rounded-lg border border-gray-700 text-gray-400 hover:text-red-400 hover:border-red-600 transition disabled:opacity-50"
+                        className="px-3 py-1 rounded-lg border border-gray-700 text-gray-400 hover:text-red-400 hover:border-red-600 transition disabled:opacity-50"
                       >
-                        <Trash2 size={16} />
+                        Delete
                       </button>
                     </div>
                   </Link>
