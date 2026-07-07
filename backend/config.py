@@ -4,6 +4,18 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Canonical default data location — the SAME directory the packaged Electron
+# app uses (electron-app/main.js: path.join(os.homedir(), '.htxpunk-mv-generator')).
+# Confirmed real-world failure this default fixes: running the backend
+# manually (`uvicorn main:app --reload`) previously fell back to
+# repo-relative paths (./backend/storage, ./backend/htxpunk.db) whenever a
+# dev .env didn't override them — a SEPARATE, silently-diverging database
+# and storage tree from the one the packaged app actually uses, with no
+# indication anything had split. Defaulting both launch paths to the same
+# home-directory location means "run it manually for a quick check" and
+# "use the installed app" now see the same projects either way.
+_DEFAULT_DATA_DIR = Path.home() / ".htxpunk-mv-generator" / "storage"
+
 class Settings(BaseSettings):
     # Basic Auth gate for hosted deployments (e.g. htxpunk.com/mvgen) — unset
     # (both empty) means no auth is enforced, which is correct for local/
@@ -36,7 +48,7 @@ class Settings(BaseSettings):
 
     # Storage — local filesystem (swap to r2 when deploying)
     storage_backend: str = "local"  # "local" | "r2"
-    local_storage_path: str = str(Path(__file__).parent / "storage")
+    local_storage_path: str = str(_DEFAULT_DATA_DIR)
 
     # R2 (only needed if storage_backend = "r2")
     r2_account_id: str = ""
@@ -45,7 +57,7 @@ class Settings(BaseSettings):
     r2_bucket_name: str = "voodoo-mv"
 
     # Database — SQLite by default (swap to postgres url when deploying)
-    database_url: str = f"sqlite+aiosqlite:///{Path(__file__).parent / 'htxpunk.db'}"
+    database_url: str = f"sqlite+aiosqlite:///{_DEFAULT_DATA_DIR / 'htxpunk.db'}"
 
     # Video generation backend: "ffmpeg" | "runway" | "wan2"
     video_backend: str = "ffmpeg"   # ffmpeg (Ken Burns stills) | modal (AI video + lip-sync)
