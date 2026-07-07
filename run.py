@@ -490,7 +490,10 @@ def start_backend() -> None:
 def start_frontend() -> None:
     say("Starting frontend (Next.js on port 3000)")
     free_port(FRONTEND_PORT)
-    cmd, shell = npm_command("run dev")
+    # Clean the dev build cache before startup. A stale .next cache can keep
+    # serving an old route manifest and produce 404s for routes that exist on
+    # disk, such as /projects/[id]/treatment after pulling new code.
+    cmd, shell = npm_command("run clean-dev")
     start_background(cmd, cwd=FRONTEND_DIR, prefix="frontend", shell=shell)
     print("  Waiting for frontend to come up…", flush=True)
     if wait_for_port(FRONTEND_PORT):
