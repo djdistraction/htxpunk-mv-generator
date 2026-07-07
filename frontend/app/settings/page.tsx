@@ -8,6 +8,9 @@ export default function SettingsPage() {
   const [groqKey, setGroqKey] = useState('');
   const [cloudflareAccountId, setCloudflareAccountId] = useState('');
   const [cloudflareApiToken, setCloudflareApiToken] = useState('');
+  const [videoBackend, setVideoBackend] = useState<'ffmpeg' | 'modal'>('ffmpeg');
+  const [modalTokenId, setModalTokenId] = useState('');
+  const [modalTokenSecret, setModalTokenSecret] = useState('');
   const [groqStatus, setGroqStatus] = useState<'idle' | 'validating' | 'valid' | 'invalid'>('idle');
   const [cloudflareStatus, setCloudflareStatus] = useState<'idle' | 'validating' | 'valid' | 'invalid'>('idle');
   const [message, setMessage] = useState('');
@@ -24,6 +27,9 @@ export default function SettingsPage() {
       if (config.groqApiKey) setGroqKey(config.groqApiKey);
       if (config.cloudflareAccountId) setCloudflareAccountId(config.cloudflareAccountId);
       if (config.cloudflareApiToken) setCloudflareApiToken(config.cloudflareApiToken);
+      if (config.videoBackend) setVideoBackend(config.videoBackend);
+      if (config.modalTokenId) setModalTokenId(config.modalTokenId);
+      if (config.modalTokenSecret) setModalTokenSecret(config.modalTokenSecret);
     } catch (err) {
       console.error('Failed to load config:', err);
     }
@@ -122,6 +128,9 @@ export default function SettingsPage() {
         groqApiKey: groqKey,
         cloudflareAccountId,
         cloudflareApiToken,
+        videoBackend,
+        modalTokenId,
+        modalTokenSecret,
       };
       await (window as any).electron.saveConfig(config);
       setMessage('Settings saved! Restart the app for changes to take effect.');
@@ -242,6 +251,43 @@ export default function SettingsPage() {
               </a>
               . Account ID is in the Workers &amp; Pages sidebar; create the token under My Profile → API Tokens with <strong>Account · Workers AI · Edit</strong> permission. Free daily image generation allowance, no credit card.
             </p>
+          </div>
+
+          {/* Video backend / Modal (optional, advanced) */}
+          <div className="space-y-3 pt-4 border-t border-gray-700">
+            <label className="font-semibold text-lg">Video Backend</label>
+            <select
+              value={videoBackend}
+              onChange={(e) => setVideoBackend(e.target.value as 'ffmpeg' | 'modal')}
+              className="w-full px-4 py-3 rounded-lg bg-gray-700/50 border border-gray-600 focus:border-purple-500 focus:outline-none transition text-white"
+            >
+              <option value="ffmpeg">FFmpeg (free, Ken Burns stills — default)</option>
+              <option value="modal">Modal (AI image-to-video + lip-sync, serverless GPU)</option>
+            </select>
+            {videoBackend === 'modal' && (
+              <>
+                <input
+                  type="text"
+                  placeholder="Modal Token ID"
+                  value={modalTokenId}
+                  onChange={(e) => setModalTokenId(e.target.value)}
+                  className="w-full px-4 py-3 rounded-lg bg-gray-700/50 border border-gray-600 focus:border-purple-500 focus:outline-none transition text-white placeholder-gray-400"
+                />
+                <input
+                  type="password"
+                  placeholder="Modal Token Secret"
+                  value={modalTokenSecret}
+                  onChange={(e) => setModalTokenSecret(e.target.value)}
+                  className="w-full px-4 py-3 rounded-lg bg-gray-700/50 border border-gray-600 focus:border-purple-500 focus:outline-none transition text-white placeholder-gray-400"
+                />
+                <p className="text-sm text-gray-400">
+                  Run <code className="bg-black/40 px-1 rounded">modal token new</code> on this machine to get both values, or find them at{' '}
+                  <a href="https://modal.com/settings/tokens" target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:underline">
+                    modal.com/settings/tokens
+                  </a>.
+                </p>
+              </>
+            )}
           </div>
 
           {/* Save Button */}

@@ -83,13 +83,22 @@ function loadConfig() {
     backendPort: 8000,
     frontendPort: 3000,
     setupComplete: false,
+    videoBackend: 'ffmpeg',
+    modalTokenId: '',
+    modalTokenSecret: '',
   };
 }
 
-// Save config
-function saveConfig(config) {
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-  generateEnvFile(config);
+// Save config. Merges onto the existing saved config rather than replacing
+// it outright — a real, confirmed data-loss bug: the Settings page only
+// ever sends {groqApiKey, cloudflareAccountId, cloudflareApiToken}, so a
+// plain overwrite silently wiped storagePath/backendPort/setupComplete and
+// any Modal credentials on every single settings save. Any partial update
+// from any caller is now safe by construction.
+function saveConfig(partialConfig) {
+  const merged = { ...loadConfig(), ...partialConfig };
+  fs.writeFileSync(configPath, JSON.stringify(merged, null, 2));
+  generateEnvFile(merged);
 }
 
 // Generate .env file
@@ -101,11 +110,14 @@ IMAGE_BACKEND=cloudflare
 STORAGE_BACKEND=local
 LOCAL_STORAGE_PATH=${config.storagePath}
 DATABASE_URL=sqlite+aiosqlite:///${path.join(config.storagePath, 'htxpunk.db')}
-VIDEO_BACKEND=ffmpeg
+VIDEO_BACKEND=${config.videoBackend || 'ffmpeg'}
 VIDEO_FPS=25
 CLIP_DURATION=5
 OUTPUT_RESOLUTION=1920x1080
 WHISPER_MODEL=base
+LIPSYNC_ENABLED=${config.videoBackend === 'modal' ? 'true' : 'false'}
+MODAL_TOKEN_ID=${config.modalTokenId || ''}
+MODAL_TOKEN_SECRET=${config.modalTokenSecret || ''}
 `;
   fs.writeFileSync(envPath, envContent);
 }
