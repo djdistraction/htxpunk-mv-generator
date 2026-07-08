@@ -11,27 +11,15 @@ from database import (
     db_create_asset, db_get_assets, db_delete_project, db_get_last_task,
     db_list_series, db_create_series, db_get_series,
 )
-from utils.storage import upload_bytes, url_to_local_path, delete_project_files
+from utils.storage import upload_bytes, upload_file_path, url_to_local_path, delete_project_files
 
 router = APIRouter()
 
-# Server-side enforcement — the frontend's accept="audio/*" file-picker hint
-# doesn't stop anyone selecting "All Files" or hitting the API directly.
 ALLOWED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".mp4"}
-
 _WINDOWS_ILLEGAL_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
 def _sanitize_filename(filename: str | None) -> str:
-    """Storage keys embed the uploaded filename directly in a filesystem
-    path. Linux tolerates almost any character there; Windows doesn't
-    (`: " < > | ? *` are all illegal in a Windows path, and trailing dots/
-    spaces are stripped or rejected) — an unsanitized filename containing
-    any of those crashes the write with an unhelpful 500 on Windows only,
-    which is exactly the failure mode that motivated this function. Confirmed
-    real filenames validate fine elsewhere (extension check) but were never
-    checked for path-safety before being written to disk.
-    """
     name = (filename or "file").strip().rstrip(". ")
     name = _WINDOWS_ILLEGAL_CHARS.sub("_", name)
     return name or "file"
@@ -46,11 +34,31 @@ def _validate_audio_file(filename: str | None):
         )
 
 
-# ── Reference files (user's supporting material) ──────────────────────────────
+def _get_project_or_404(project_id: str) -> dict:
+    project = db_get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
 
-# Plain-text document types we can read directly to feed the LLM. Anything else
-# (images, PDFs, binary docs) relies on the user's description, which is exactly
-# why we require one per reference.
+
+def _local_audio_path(url: str | None, suffix: str = ".audio") -> str:
+    if not url:
+        raise HTTPException(status_code=400, detail="Project does not have an audio file for this step.")
+    local_path = url_to_local_path(url)
+    if Path(local_path).exists():
+        return local_path
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+            f.write(httpx.get(url, timeout=120).content)
+            return f.name
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not resolve audio file: {exc}")
+
+
+def _set_guided_failure(project_id: str, step: str, exc: Exception):
+    db_update_project(project_id, processing_step=f"Failed: {step}", error_message=str(exc))
+
+
 _TEXT_EXTENSIONS = {".txt", ".md", ".markdown", ".rtf", ".csv"}
 
 
@@ -64,12 +72,6 @@ def _reference_kind(filename: str, content_type: str | None) -> str:
 
 
 def _extract_reference_text(filename: str, contents: bytes, content_type: str | None) -> str:
-    """Pull readable text out of a reference document, if we safely can.
-
-    We only decode obvious text formats — images and binary documents return ""
-    and rely on the user's description. Capped so a giant file can't blow up the
-    LLM prompt later.
-    """
     ct = (content_type or "").lower()
     is_textual = ct.startswith("text/") or any(
         (filename or "").lower().endswith(ext) for ext in _TEXT_EXTENSIONS
@@ -83,11 +85,6 @@ def _extract_reference_text(filename: str, contents: bytes, content_type: str | 
 
 
 async def _store_references(project_id: str, references, reference_meta: str, source: str) -> list[dict]:
-    """Persist uploaded reference files as 'reference' assets.
-
-    reference_meta is a JSON array aligned positionally with `references`, each:
-      {"description": "who/what this is", "role": "where it fits in the video"}
-    """
     try:
         meta_list = json.loads(reference_meta) if reference_meta else []
     except json.JSONDecodeError:
@@ -115,9 +112,6 @@ async def _store_references(project_id: str, references, reference_meta: str, so
     return stored
 
 
-# Preference order for picking one representative image per project for the
-# list view — storyboard panels are the most "finished" look at a project;
-# backgrounds/elements are the best available earlier in the pipeline.
 _THUMBNAIL_ASSET_PRIORITY = ("storyboard_panel", "background", "element")
 
 
@@ -147,8 +141,6 @@ async def create_project(data: ProjectCreate):
     return db_create_project(project_id, data.title, data.artist)
 
 
-# Combined endpoint: create project + upload audio in one multipart call
-# !! Must be defined BEFORE /{project_id} to avoid routing ambiguity !!
 @router.post("/upload-audio")
 async def create_and_upload(
     title: str = Form(...),
@@ -158,25 +150,11 @@ async def create_and_upload(
     file: UploadFile = File(...),
     vocals_file: UploadFile | None = File(None),
 ):
-    """
-    Create a new project: a name for it, plus the audio file — that's the
-    entire upload form. Artist, series, creative brief, and reference files
-    are still deferred to the project-info review screen, filled in once
-    there's real data (transcript, tags) to react to; only the project's own
-    name is needed up front; so it exists as something findable in the
-    project list, and so the human has confirmed the anchor everything else
-    grounds against before preprocessing ever starts.
+    """Create a new project and save the original audio only.
 
-    bpm/musical_key/beat_grid are measured client-side (essentia.js, WASM, in
-    the browser — never server-side, per design) and arrive already computed;
-    this endpoint only persists them. They're locked/read-only from here on,
-    surfaced on the project-info review gate alongside the server-measured
-    song_length.
-
-    vocals_file is optional: if the artist already has an isolated vocal
-    stem (e.g. from their own DAW session), uploading it here skips
-    run_audio_preprocessing's separate_vocals() step entirely — real time
-    and CPU saved, since separation is the slowest part of preprocessing.
+    The guided workflow now runs each expensive/meaningful operation one at a
+    time from the project page instead of launching the whole preprocessing
+    stack immediately.
     """
     _validate_audio_file(file.filename)
     if vocals_file is not None and vocals_file.filename:
@@ -189,7 +167,12 @@ async def create_and_upload(
     key = f"projects/{project_id}/audio/{_sanitize_filename(file.filename)}"
     audio_url = upload_bytes(contents, key, file.content_type or "audio/mpeg")
 
-    updates: dict = {"audio_url": audio_url, "stage": "uploaded"}
+    updates: dict = {
+        "audio_url": audio_url,
+        "stage": "audio_uploaded",
+        "processing_step": "Upload complete",
+        "error_message": "",
+    }
     if bpm.strip():
         updates["bpm"] = bpm.strip()
     if musical_key.strip():
@@ -209,7 +192,6 @@ async def create_and_upload(
         )
 
     db_update_project(project_id, **updates)
-    # No .delay() — orchestrator sees stage="uploaded" and dispatches automatically
     return db_get_project(project_id)
 
 
@@ -223,9 +205,6 @@ async def get_project(project_id: str):
 
 @router.delete("/{project_id}")
 async def delete_project(project_id: str):
-    """Delete a project and everything scoped to it. Does not touch the
-    human-readable export folder (HTXpunk Projects/{Artist} - {Title}/) —
-    that's a deliberate permanent artifact, not internal state."""
     if not db_get_project(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
     delete_project_files(project_id)
@@ -235,58 +214,158 @@ async def delete_project(project_id: str):
 
 @router.post("/{project_id}/retry")
 async def retry_project(project_id: str):
-    """Resume a project stuck in stage='error'. Looks up which pipeline
-    stage's worker most recently failed (via the tasks log) and resets the
-    project back to that stage's dispatch point — the orchestrator picks it
-    up on its next poll, exactly like a fresh arrival at that stage."""
     project = db_get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     if project["stage"] != "error":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Project is not in an error state (stage={project['stage']})",
-        )
+        raise HTTPException(status_code=400, detail=f"Project is not in an error state (stage={project['stage']})")
 
     last_task = db_get_last_task(project_id)
     if not last_task:
-        raise HTTPException(
-            status_code=400,
-            detail="No task history found for this project — can't determine where to resume.",
-        )
+        raise HTTPException(status_code=400, detail="No task history found for this project — can't determine where to resume.")
 
     from orchestrator import TASK_TYPE_TO_STAGE
     resume_stage = TASK_TYPE_TO_STAGE.get(last_task["task_type"])
     if not resume_stage:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unrecognized task type '{last_task['task_type']}' — can't determine where to resume.",
-        )
+        raise HTTPException(status_code=400, detail=f"Unrecognized task type '{last_task['task_type']}' — can't determine where to resume.")
 
     db_update_project(project_id, stage=resume_stage, error_message="")
     return db_get_project(project_id)
 
 
+# ── Guided audio workflow endpoints ───────────────────────────────────────────
+
+@router.post("/{project_id}/guided/analyze-rhythm-key")
+async def guided_analyze_rhythm_key(project_id: str, payload: dict):
+    project = _get_project_or_404(project_id)
+    if not project.get("audio_url"):
+        raise HTTPException(status_code=400, detail="Upload a song before analyzing rhythm/key.")
+
+    bpm = str(payload.get("bpm") or "").strip()
+    musical_key = str(payload.get("musical_key") or payload.get("musicalKey") or "").strip()
+    beat_grid = payload.get("beat_grid", payload.get("beatGrid", []))
+    if not isinstance(beat_grid, list):
+        beat_grid = []
+    if not bpm and not musical_key and not beat_grid:
+        raise HTTPException(status_code=400, detail="No rhythm/key result was provided.")
+
+    db_update_project(
+        project_id,
+        bpm=bpm,
+        musical_key=musical_key,
+        beat_grid=beat_grid,
+        stage="rhythm_key_analyzed",
+        processing_step="Analyze Rhythm & Key complete",
+        error_message="",
+    )
+    return db_get_project(project_id)
+
+
+@router.post("/{project_id}/guided/prepare-audio")
+async def guided_prepare_audio(project_id: str):
+    project = _get_project_or_404(project_id)
+    try:
+        from services.audio_preprocessor import convert_to_mp3
+        original_path = _local_audio_path(project.get("audio_url"), ".audio")
+        original_ext = Path(original_path).suffix.lower()
+        with tempfile.TemporaryDirectory(prefix="htxpunk_prepare_audio_") as tmp:
+            converted_path = str(Path(tmp) / "converted.mp3")
+            convert_to_mp3(original_path, converted_path)
+            converted_url = upload_file_path(converted_path, f"projects/{project_id}/audio/converted.mp3", "audio/mpeg")
+
+        action = "Source was already MP3. Conversion skipped; file copied." if original_ext == ".mp3" else "Source converted to MP3."
+        db_update_project(project_id, converted_audio_url=converted_url, stage="audio_prepared", processing_step=action, error_message="")
+        return {"project": db_get_project(project_id), "result": {"action": action, "converted_audio_url": converted_url}}
+    except Exception as exc:
+        _set_guided_failure(project_id, "Prepare Project Audio", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/{project_id}/guided/read-metadata")
+async def guided_read_metadata(project_id: str):
+    project = _get_project_or_404(project_id)
+    try:
+        from services.audio_preprocessor import extract_metadata_tags
+        mp3_path = _local_audio_path(project.get("converted_audio_url"), ".mp3")
+        tags = extract_metadata_tags(mp3_path)
+        db_update_project(
+            project_id,
+            title=project.get("title") or tags.get("title") or Path(project.get("audio_url", "song")).stem,
+            artist=project.get("artist") or tags.get("artist") or "",
+            composer=tags.get("composer") or "",
+            album=tags.get("album") or "",
+            song_length=str(tags["length"]) if tags.get("length") else "",
+            stage="metadata_ready",
+            processing_step="Metadata tags read",
+            error_message="",
+        )
+        return {"project": db_get_project(project_id), "result": tags}
+    except Exception as exc:
+        _set_guided_failure(project_id, "Read Metadata Tags", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/{project_id}/guided/isolate-vocals")
+async def guided_isolate_vocals(project_id: str):
+    project = _get_project_or_404(project_id)
+    try:
+        existing = db_get_assets(project_id, asset_type="vocal_stem")
+        if existing:
+            db_update_project(project_id, stage="vocals_ready", processing_step="Vocal stem already available", error_message="")
+            return {"project": db_get_project(project_id), "result": {"action": "Existing vocal stem reused."}}
+
+        if project.get("user_vocals_url"):
+            db_create_asset(project_id, "vocal_stem", "User-provided vocal stem", project["user_vocals_url"], "", source="user")
+            db_update_project(project_id, stage="vocals_ready", processing_step="Using user-provided vocal stem", error_message="")
+            return {"project": db_get_project(project_id), "result": {"action": "User-provided vocal stem used."}}
+
+        from services.audio_preprocessor import separate_vocals
+        mp3_path = _local_audio_path(project.get("converted_audio_url"), ".mp3")
+        with tempfile.TemporaryDirectory(prefix="htxpunk_vocals_") as tmp:
+            vocals_path = separate_vocals(mp3_path, tmp)
+            suffix = Path(vocals_path).suffix.lower() or ".wav"
+            content_type = "audio/wav" if suffix == ".wav" else "audio/mpeg"
+            vocals_url = upload_file_path(vocals_path, f"projects/{project_id}/audio/isolated_vocals{suffix}", content_type)
+
+        db_create_asset(project_id, "vocal_stem", "Generated vocal stem", vocals_url, "", source="generated")
+        db_update_project(project_id, stage="vocals_ready", processing_step="Vocal stem isolated", error_message="")
+        return {"project": db_get_project(project_id), "result": {"action": "Vocal stem isolated.", "url": vocals_url}}
+    except Exception as exc:
+        _set_guided_failure(project_id, "Isolate Vocal Stem", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/{project_id}/guided/transcribe-lyrics")
+async def guided_transcribe_lyrics(project_id: str):
+    project = _get_project_or_404(project_id)
+    try:
+        from services.audio_analyzer import transcribe_audio
+        vocal_assets = db_get_assets(project_id, asset_type="vocal_stem")
+        vocals_url = vocal_assets[-1].get("url") if vocal_assets else ""
+        if not vocals_url:
+            vocals_url = project.get("user_vocals_url") or ""
+        if not vocals_url:
+            raise RuntimeError("No vocal stem is available. Run Isolate Vocal Stem first.")
+
+        vocals_path = _local_audio_path(vocals_url, Path(vocals_url).suffix or ".audio")
+        transcript = transcribe_audio(vocals_path)
+        segment_count = len(transcript.get("segments", [])) if isinstance(transcript, dict) else 0
+        db_update_project(project_id, transcript=transcript, stage="awaiting_project_info_review", processing_step="Transcription complete", error_message="")
+        return {"project": db_get_project(project_id), "result": {"segments": segment_count}}
+    except Exception as exc:
+        _set_guided_failure(project_id, "Transcribe & Timestamp Lyrics", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @router.get("/{project_id}/references")
 async def list_references(project_id: str):
-    """List the supporting reference files attached to a project."""
     if not db_get_project(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
     return db_get_assets(project_id, asset_type="reference")
 
 
 @router.post("/{project_id}/references")
-async def add_references(
-    project_id: str,
-    reference_meta: str = Form("[]"),
-    source: str = Form("revision"),
-    references: list[UploadFile] = File(default=[]),
-):
-    """Attach more reference files to an existing project — used both from the
-    project-info review screen (source="initial", first time the artist can
-    attach anything) and later while requesting treatment changes
-    (source="revision", the original use). The treatment generator reads all
-    reference assets regardless of source; it's audit metadata only."""
+async def add_references(project_id: str, reference_meta: str = Form("[]"), source: str = Form("revision"), references: list[UploadFile] = File(default=[])):
     if not db_get_project(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
     stored = await _store_references(project_id, references, reference_meta, source=source)
@@ -295,7 +374,6 @@ async def add_references(
 
 @router.post("/{project_id}/upload-audio")
 async def upload_audio(project_id: str, file: UploadFile = File(...)):
-    """Upload audio to an existing project."""
     project = db_get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -303,30 +381,17 @@ async def upload_audio(project_id: str, file: UploadFile = File(...)):
     contents = await file.read()
     key = f"projects/{project_id}/audio/{_sanitize_filename(file.filename)}"
     audio_url = upload_bytes(contents, key, file.content_type or "audio/mpeg")
-    db_update_project(project_id, audio_url=audio_url, stage="uploaded")
-    return {"audio_url": audio_url, "message": "Audio uploaded — analysis starting"}
+    db_update_project(project_id, audio_url=audio_url, stage="audio_uploaded", error_message="", processing_step="Upload complete")
+    return {"audio_url": audio_url, "message": "Audio uploaded. Continue with Analyze Rhythm & Key."}
 
 
 @router.post("/{project_id}/confirm-info")
 async def confirm_project_info(project_id: str, payload: ProjectInfoConfirm):
-    """
-    "Create Project & Save": the human fills in title, artist, series, and
-    creative vision for the first time here (none of it was collected at
-    upload, which is audio-only now), and edits whatever preprocessing
-    extracted (composer, album, transcript — bpm/musical_key arrive here from
-    the client-side essentia.js measurement). We apply the edits, write the
-    human-readable project folder, then hand off to song interpretation (the
-    first LLM call in the pipeline) — grounded in whatever the human just
-    confirmed.
-    """
     project = db_get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     if project["stage"] != "awaiting_project_info_review":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Project is not awaiting info review (stage={project['stage']})",
-        )
+        raise HTTPException(status_code=400, detail=f"Project is not awaiting info review (stage={project['stage']})")
 
     updates = payload.model_dump(exclude_unset=True)
     if "brief" in updates:
@@ -336,20 +401,6 @@ async def confirm_project_info(project_id: str, payload: ProjectInfoConfirm):
         project = db_get_project(project_id)
 
     from services.project_folder import create_human_readable_folder
-
-    def _local_audio_path(url: str | None, suffix: str) -> str:
-        if not url:
-            return ""
-        local_path = url_to_local_path(url)
-        if Path(local_path).exists():
-            return local_path
-        try:
-            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
-                f.write(httpx.get(url, timeout=120).content)
-                return f.name
-        except Exception:
-            return ""
-
     original_path = _local_audio_path(project.get("audio_url"), ".audio")
     converted_path = _local_audio_path(project.get("converted_audio_url"), ".mp3")
 
@@ -369,11 +420,8 @@ async def confirm_project_info(project_id: str, payload: ProjectInfoConfirm):
         },
     )
     db_update_project(project_id, project_folder=folder, stage="info_confirmed")
-    # No .delay() — orchestrator sees stage="info_confirmed" and dispatches automatically
     return db_get_project(project_id)
 
-
-# ── Series endpoints ──────────────────────────────────────────────────────────
 
 @router.get("/series/list")
 async def list_series():
