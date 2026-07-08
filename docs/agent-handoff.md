@@ -23,6 +23,7 @@ Purpose:
 - Split the front audio-prep phase into guided, visible user-triggered steps.
 - Prevent silent Ken Burns fallback output.
 - Stop paid/API image generation when real video output is not configured.
+- Preserve an explicit $0 local smoke-test path when preview/slideshow mode is deliberately enabled.
 
 ## Current major issue
 
@@ -108,10 +109,45 @@ Observed problems:
 - `ffmpeg`/Ken Burns preview rendering is blocked unless `ALLOW_FALLBACK_VIDEO=true`.
 - If preview mode is explicitly enabled, slideshow duration is distributed across audio duration instead of truncating.
 - Cloudflare/Gemini image generation is blocked if real video generation is unavailable, unless preview mode is explicitly enabled.
+- `run.py` now writes `ALLOW_FALLBACK_VIDEO=false` by default and preserves the flag in `.env`.
+- `run.py --allow-preview-video` explicitly enables `$0` Ken Burns preview mode for local smoke tests.
+- `electron-app/main.js` now includes `allowFallbackVideo` in saved config, generated app-data `.env`, and the environment passed to the spawned backend process.
+- `.env.example` now documents that `ffmpeg` is preview-only and `ALLOW_FALLBACK_VIDEO` defaults to false.
 - `docs/production-workbook-implementation-plan.md` added.
 - `AGENTS.md` added.
 - `docs/agent-handoff.md` added.
 - `docs/decision-log.md` added.
+
+## Collaboration note: Claude Code review of PR #19
+
+Claude Code reviewed the current branch and correctly identified a real gap: the backend had gained `ALLOW_FALLBACK_VIDEO`, but the launcher/Electron paths did not yet surface or preserve that flag.
+
+My opinion of that analysis:
+
+- Correct on the main technical concern.
+- Correct that `run.py` did not write `ALLOW_FALLBACK_VIDEO` before this follow-up patch.
+- Correct that Electron needed special attention because it both writes an app-data `.env` and passes environment variables directly when spawning Uvicorn.
+- Correct that the strict fallback block should not accidentally kill the deliberate `$0` placeholder smoke-test path.
+- I would not remove the fallback-blocking behavior from PR #19. The product rule belongs with this guided workflow work because both changes enforce the same principle: stop clearly instead of silently continuing toward bad downstream output.
+- The right compromise is now implemented: fallback slideshow mode remains disabled by default, but can be intentionally enabled for smoke tests.
+
+Important nuance for future agents:
+
+- `IMAGE_BACKEND=placeholder` alone means free placeholder images.
+- `VIDEO_BACKEND=ffmpeg` alone does **not** mean preview video is allowed.
+- A complete explicit smoke-test preview requires:
+
+```env
+IMAGE_BACKEND=placeholder
+VIDEO_BACKEND=ffmpeg
+ALLOW_FALLBACK_VIDEO=true
+```
+
+CLI shortcut for local browser-mode smoke tests:
+
+```powershell
+py run.py --no-install --allow-preview-video
+```
 
 ## Recommended next issues
 
@@ -197,6 +233,15 @@ Good Cursor tasks:
 cd "C:\Users\booki\HTXpunk LLC\htxpunk-mv-generator"
 py run.py --no-install
 ```
+
+## Explicit local preview smoke-test command
+
+```powershell
+cd "C:\Users\booki\HTXpunk LLC\htxpunk-mv-generator"
+py run.py --no-install --allow-preview-video
+```
+
+Use this only when the user/developer intentionally wants `$0` placeholder/ffmpeg preview behavior.
 
 ## Sync command for current branch
 
