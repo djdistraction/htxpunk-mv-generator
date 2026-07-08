@@ -9,6 +9,7 @@ export default function SettingsPage() {
   const [cloudflareAccountId, setCloudflareAccountId] = useState('');
   const [cloudflareApiToken, setCloudflareApiToken] = useState('');
   const [videoBackend, setVideoBackend] = useState<'ffmpeg' | 'modal'>('ffmpeg');
+  const [allowFallbackVideo, setAllowFallbackVideo] = useState(false);
   const [modalTokenId, setModalTokenId] = useState('');
   const [modalTokenSecret, setModalTokenSecret] = useState('');
   const [groqStatus, setGroqStatus] = useState<'idle' | 'validating' | 'valid' | 'invalid'>('idle');
@@ -28,6 +29,7 @@ export default function SettingsPage() {
       if (config.cloudflareAccountId) setCloudflareAccountId(config.cloudflareAccountId);
       if (config.cloudflareApiToken) setCloudflareApiToken(config.cloudflareApiToken);
       if (config.videoBackend) setVideoBackend(config.videoBackend);
+      setAllowFallbackVideo(Boolean(config.allowFallbackVideo));
       if (config.modalTokenId) setModalTokenId(config.modalTokenId);
       if (config.modalTokenSecret) setModalTokenSecret(config.modalTokenSecret);
     } catch (err) {
@@ -135,6 +137,7 @@ export default function SettingsPage() {
         cloudflareAccountId,
         cloudflareApiToken,
         videoBackend,
+        allowFallbackVideo,
         modalTokenId,
         modalTokenSecret,
       };
@@ -267,9 +270,27 @@ export default function SettingsPage() {
               onChange={(e) => setVideoBackend(e.target.value as 'ffmpeg' | 'modal')}
               className="w-full px-4 py-3 rounded-lg bg-gray-700/50 border border-gray-600 focus:border-purple-500 focus:outline-none transition text-white"
             >
-              <option value="ffmpeg">FFmpeg (free, Ken Burns stills — default)</option>
+              <option value="ffmpeg">FFmpeg (Ken Burns slideshow — preview only)</option>
               <option value="modal">Modal (AI image-to-video + lip-sync, serverless GPU)</option>
             </select>
+            {videoBackend === 'ffmpeg' && (
+              <div className="space-y-2">
+                <label className="flex items-start gap-2 text-sm text-gray-300">
+                  <input
+                    type="checkbox"
+                    checked={allowFallbackVideo}
+                    onChange={(e) => setAllowFallbackVideo(e.target.checked)}
+                    className="mt-1"
+                  />
+                  <span>
+                    Enable Ken Burns preview rendering. Off by default so the app fails
+                    with a clear error instead of silently producing a slideshow when
+                    you asked for a real AI-generated music video. Leave this unchecked
+                    unless you specifically want a $0 preview/smoke-test render.
+                  </span>
+                </label>
+              </div>
+            )}
             {videoBackend === 'modal' && (
               <>
                 <input
