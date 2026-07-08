@@ -110,7 +110,7 @@ export default function ManifestDetail({ id }: { id: string }) {
           <h1 className="text-3xl font-bold">Production Plan</h1>
           <p className="text-gray-500 mt-2">
             {manifests.length} shots planned for <span className="text-white">{project.title}</span>.
-            Review the shot manifest and approve to begin storyboard generation.
+            Review the shot manifest and approve to unlock storyboard image generation on the workbook page.
           </p>
         </div>
 
