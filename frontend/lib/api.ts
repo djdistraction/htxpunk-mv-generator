@@ -28,17 +28,6 @@ export function mediaUrl(url?: string | null): string {
 
 const client = axios.create({
   baseURL: API_URL,
-  // Generous, not because any single request is slow to process (uploads
-  // and DB writes are fast), but because the backend runs CPU-heavy
-  // preprocessing (vocal separation, transcription) in the same process as
-  // the API server. That work is dispatched to a background thread and the
-  // request itself already returned before it starts — but Python's GIL
-  // means a long-running native compute call in that thread can still delay
-  // how promptly an already-finished response actually gets flushed back to
-  // the browser. A real fix would move that work to a separate process; this
-  // timeout is the pragmatic mitigation until that's done — confirmed via a
-  // real failure that a fast, already-completed upload took ~2 minutes to
-  // report back, right at the old timeout's edge.
   timeout: 600000, // 10 minutes
 })
 
@@ -80,6 +69,26 @@ export const api = {
       const { data } = await client.post('/api/projects/upload-audio', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
+      return data
+    },
+    saveRhythmKey: async (id: string, payload: { bpm: string; musical_key: string; beat_grid: number[] }) => {
+      const { data } = await client.post(`/api/projects/${id}/guided/analyze-rhythm-key`, payload)
+      return data
+    },
+    prepareAudio: async (id: string) => {
+      const { data } = await client.post(`/api/projects/${id}/guided/prepare-audio`)
+      return data
+    },
+    readMetadata: async (id: string) => {
+      const { data } = await client.post(`/api/projects/${id}/guided/read-metadata`)
+      return data
+    },
+    isolateVocals: async (id: string) => {
+      const { data } = await client.post(`/api/projects/${id}/guided/isolate-vocals`)
+      return data
+    },
+    transcribeLyrics: async (id: string) => {
+      const { data } = await client.post(`/api/projects/${id}/guided/transcribe-lyrics`)
       return data
     },
     listReferences: async (id: string) => {

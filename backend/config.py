@@ -59,8 +59,12 @@ class Settings(BaseSettings):
     # Database — SQLite by default (swap to postgres url when deploying)
     database_url: str = f"sqlite+aiosqlite:///{_DEFAULT_DATA_DIR / 'htxpunk.db'}"
 
-    # Video generation backend: "ffmpeg" | "runway" | "wan2"
-    video_backend: str = "ffmpeg"   # ffmpeg (Ken Burns stills) | modal (AI video + lip-sync)
+    # Video generation backend: "modal" | "remotion" | "runway" | "ffmpeg"
+    # ffmpeg is only a Ken Burns preview renderer. It is intentionally blocked
+    # unless ALLOW_FALLBACK_VIDEO=true so the app fails loudly instead of
+    # producing an unusable fake video when real image-to-video is unavailable.
+    video_backend: str = "ffmpeg"
+    allow_fallback_video: bool = False
     runway_api_key: str = ""
 
     # Modal — serverless GPU for AI image-to-video + lip-sync (self-hosted models)
@@ -70,9 +74,9 @@ class Settings(BaseSettings):
     modal_token_id: str = ""
     modal_token_secret: str = ""
 
-    # FFmpeg ken burns settings
+    # FFmpeg preview settings
     video_fps: int = 25
-    clip_duration: int = 5  # seconds per clip
+    clip_duration: int = 5  # seconds per clip when no shot/audio duration is known
     output_resolution: str = "1920x1080"
 
     class Config:
@@ -118,7 +122,4 @@ def validate_settings():
         logger.error("Configuration errors:")
         for e in errors:
             logger.error(e)
-        raise RuntimeError(
-            "Missing required configuration: " + "; ".join(errors) + ". "
-            "Set the keys in .env, or use IMAGE_BACKEND=placeholder for offline dev mode."
-        )
+        raise RuntimeError("Invalid configuration. Check .env file.")

@@ -27,6 +27,44 @@ def _use_placeholder() -> bool:
     return backend == "placeholder"
 
 
+def _assert_visual_generation_allowed():
+    """Prevent spending image-generation tokens when final video cannot be real.
+
+    The user asked for a music video, not a Ken Burns slideshow. Generating
+    dozens of paid/API images when VIDEO_BACKEND is only the ffmpeg preview path
+    wastes credits and produces a result the app should have pushed back on.
+
+    Placeholder mode is allowed because it costs nothing and is explicitly for
+    local smoke tests. Real image generation is allowed only when the real video
+    backend is configured, or when the operator explicitly opts into fallback
+    preview mode with ALLOW_FALLBACK_VIDEO=true.
+    """
+    image_backend = (settings.image_backend or "cloudflare").lower()
+    if image_backend == "placeholder":
+        return
+
+    video_backend = (settings.video_backend or "ffmpeg").lower()
+    if video_backend == "modal":
+        if not settings.modal_token_id or not settings.modal_token_secret:
+            raise RuntimeError(
+                "Image generation was stopped before spending tokens because VIDEO_BACKEND=modal "
+                "is selected, but MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are not configured. "
+                "Configure Modal for real image-to-video generation, or explicitly set "
+                "ALLOW_FALLBACK_VIDEO=true with VIDEO_BACKEND=ffmpeg if you only want a preview slideshow."
+            )
+        return
+
+    if settings.allow_fallback_video:
+        return
+
+    raise RuntimeError(
+        f"Image generation was stopped before spending tokens because VIDEO_BACKEND={video_backend} "
+        "cannot produce the requested real music video. The ffmpeg/Remotion-style preview path "
+        "must be explicitly requested with ALLOW_FALLBACK_VIDEO=true. Configure VIDEO_BACKEND=modal "
+        "for real image-to-video generation before running paid/API image generation."
+    )
+
+
 # ── Placeholder renderer (offline, no API) ────────────────────────────────────
 
 _PALETTE = [
@@ -167,14 +205,18 @@ def generate_image(prompt: str, style_suffix: str = "", width: int = 1024, heigh
                    label: str = "", subtitle: str = "", negative_prompt: str = "") -> bytes:
     """Generate an image and return raw PNG bytes.
 
-    Routes to Gemini or the offline placeholder renderer based on
-    settings.image_backend. Gemini is the default cloud backend (free tier).
+    Routes to Gemini, Cloudflare, or the offline placeholder renderer based on
+    settings.image_backend. Paid/API image generation is blocked before the
+    call if the final video backend cannot satisfy a real music-video request.
     """
     full_prompt = f"{prompt}. {style_suffix}".strip(" .")
 
     backend = (settings.image_backend or "cloudflare").lower()
     if backend == "placeholder":
         return render_placeholder(full_prompt, width, height, label=label, subtitle=subtitle)
+
+    _assert_visual_generation_allowed()
+
     if backend == "gemini":
         return _generate_gemini(full_prompt, width, height, negative_prompt)
     # default: cloudflare
