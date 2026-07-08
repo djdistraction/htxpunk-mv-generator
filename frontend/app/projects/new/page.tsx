@@ -3,14 +3,6 @@
 import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { api } from '@/lib/api'
-import { analyzeAudioFile, AudioAnalysisStep } from '@/lib/audioAnalysis'
-import { AUDIO_PIPELINE_STEPS, stepProgress } from '@/lib/pipelineSteps'
-
-const CLIENT_STEP_INDEX: Record<AudioAnalysisStep, number> = {
-  bpm: 0,
-  beatgrid: 1,
-  key: 2,
-}
 
 export default function NewProjectPage() {
   const router = useRouter()
@@ -21,9 +13,7 @@ export default function NewProjectPage() {
   const [hasVocalStems, setHasVocalStems] = useState(false)
   const [vocalsFile, setVocalsFile] = useState<File | null>(null)
   const [error, setError] = useState('')
-
-  const [processing, setProcessing] = useState(false)
-  const [stepIndex, setStepIndex] = useState(0)
+  const [uploading, setUploading] = useState(false)
 
   const canSubmit = Boolean(file && title.trim() && (!hasVocalStems || vocalsFile))
 
@@ -31,51 +21,32 @@ export default function NewProjectPage() {
     e.preventDefault()
     if (!canSubmit || !file) return
     setError('')
-    setProcessing(true)
-    setStepIndex(0)
+    setUploading(true)
     try {
-      const analysis = await analyzeAudioFile(file, (step) => {
-        setStepIndex(CLIENT_STEP_INDEX[step])
-      })
-      // Whether or not BPM/key detection succeeded (some browsers/contexts
-      // can't run it), the very next real thing is server-side conversion —
-      // show that as soon as client analysis finishes, since the upload
-      // itself (a few MB, typically) completes well within that step.
-      setStepIndex(3)
-
       const formData = new FormData()
       formData.append('title', title.trim())
       formData.append('file', file)
-      if (analysis) {
-        formData.append('bpm', analysis.bpm)
-        formData.append('musical_key', analysis.musicalKey)
-        formData.append('beat_grid', JSON.stringify(analysis.beatGrid))
-      }
       if (hasVocalStems && vocalsFile) {
         formData.append('vocals_file', vocalsFile)
       }
       const project = await api.projects.uploadAudio(formData)
-      router.push(`/projects/${project.id}/processing`)
+      router.push(`/projects/${project.id}`)
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'Upload failed. Check that the backend is running.')
-      setProcessing(false)
+      setError(err?.response?.data?.detail || err?.message || 'Upload failed. Check that the backend is running.')
+      setUploading(false)
     }
   }
 
-  if (processing) {
+  if (uploading) {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center p-8">
         <div className="max-w-md w-full text-center">
-          <div className="text-5xl mb-6 animate-pulse">🎧</div>
-          <p className="text-xl text-white font-medium mb-6">{AUDIO_PIPELINE_STEPS[stepIndex]}…</p>
+          <h1 className="text-xl font-semibold mb-6">Uploading song</h1>
           <div className="w-full h-2 bg-gray-800 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-purple-600 transition-all duration-500 ease-out"
-              style={{ width: `${stepProgress(stepIndex)}%` }}
-            />
+            <div className="h-full bg-purple-600 transition-all duration-500 ease-out" style={{ width: '50%' }} />
           </div>
           <p className="text-gray-600 text-sm mt-4">
-            This can take a few minutes once vocal separation and transcription start.
+            The app is only saving the original file. Rhythm, key, metadata, vocals, and lyrics will run as separate steps on the project page.
           </p>
           {error && (
             <div className="mt-6 bg-red-900/30 border border-red-700 rounded-lg p-3 text-red-300 text-sm">
@@ -94,13 +65,10 @@ export default function NewProjectPage() {
 
         <h1 className="text-3xl font-bold mt-6 mb-2">New Music Video</h1>
         <p className="text-gray-400 mb-8">
-          Name it and drop in the song — everything else (artist, series, your
-          creative vision, reference files) comes next, once we've pulled the
-          lyrics and tags back for you to confirm.
+          Start by uploading the song. The project page will walk through each processing step one at a time with its own result and retry point.
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Project name */}
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1">Project Name *</label>
             <input
@@ -113,7 +81,6 @@ export default function NewProjectPage() {
             />
           </div>
 
-          {/* Audio file */}
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1">Audio File *</label>
             <div
@@ -122,7 +89,6 @@ export default function NewProjectPage() {
             >
               {file ? (
                 <div>
-                  <div className="text-purple-400 text-2xl mb-1">🎵</div>
                   <div className="text-white font-medium">{file.name}</div>
                   <div className="text-gray-500 text-sm">{(file.size / 1024 / 1024).toFixed(1)} MB</div>
                 </div>
@@ -143,7 +109,6 @@ export default function NewProjectPage() {
             />
           </div>
 
-          {/* Pre-isolated vocal stems (optional) */}
           <div>
             <label className="flex items-start gap-2 cursor-pointer">
               <input
@@ -155,7 +120,7 @@ export default function NewProjectPage() {
               <span className="text-sm text-gray-300">
                 I already have an isolated vocal stems file
                 <span className="text-gray-500 font-normal block text-xs mt-0.5">
-                  Skips vocal separation entirely — saves significant time and processing, since that's the slowest step.
+                  The guided workflow will use it and skip vocal isolation.
                 </span>
               </span>
             </label>
@@ -169,7 +134,6 @@ export default function NewProjectPage() {
                 >
                   {vocalsFile ? (
                     <div>
-                      <div className="text-purple-400 text-xl mb-1">🎤</div>
                       <div className="text-white font-medium">{vocalsFile.name}</div>
                       <div className="text-gray-500 text-sm">{(vocalsFile.size / 1024 / 1024).toFixed(1)} MB</div>
                     </div>
@@ -203,33 +167,21 @@ export default function NewProjectPage() {
             disabled={!canSubmit}
             className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold py-3 rounded-lg transition-colors"
           >
-            Upload & Analyze
+            Upload Song
           </button>
         </form>
 
-        <div className="mt-8 space-y-4">
-          <div className="p-4 bg-gray-900 rounded-lg border border-gray-800">
-            <h3 className="text-sm font-semibold text-gray-300 mb-2">Pipeline Timeline</h3>
-            <ol className="text-gray-500 text-sm space-y-1 list-decimal list-inside">
-              <li>Audio is converted and tagged, then vocals are isolated (skipped if you supplied your own stem) for transcription</li>
-              <li>You review the extracted song info and lyrics — add artist, series, your creative vision, and reference files here — then save</li>
-              <li>AI interprets the song, then generates a visual treatment — you review, attach more, and approve</li>
-              <li>Backgrounds and character elements are generated (~5–10 min)</li>
-              <li>Storyboard is built — you review and approve panel order</li>
-              <li>Final video is assembled with your audio (~15–25 min)</li>
-            </ol>
-          </div>
-
-          <div className="p-4 bg-blue-900/30 rounded-lg border border-blue-700">
-            <h3 className="text-sm font-semibold text-blue-300 mb-2">💡 Getting started</h3>
-            <ul className="text-blue-200 text-xs space-y-1">
-              <li>✓ Make sure the backend is running on <code className="bg-black/40 px-1 rounded">http://localhost:8000</code></li>
-              <li>✓ Check backend health: <code className="bg-black/40 px-1 rounded">curl http://localhost:8000/health</code></li>
-              <li>✓ Need API keys?</li>
-              <li>— Groq (text analysis): <code className="bg-black/40 px-1 rounded">console.groq.com</code></li>
-              <li>— Cloudflare Workers AI (image generation): <code className="bg-black/40 px-1 rounded">dash.cloudflare.com</code></li>
-            </ul>
-          </div>
+        <div className="mt-8 p-4 bg-gray-900 rounded-lg border border-gray-800">
+          <h3 className="text-sm font-semibold text-gray-300 mb-2">Guided Pipeline</h3>
+          <ol className="text-gray-500 text-sm space-y-1 list-decimal list-inside">
+            <li>Upload song</li>
+            <li>Analyze rhythm and key</li>
+            <li>Prepare project audio</li>
+            <li>Read metadata tags</li>
+            <li>Isolate vocal stem</li>
+            <li>Transcribe and timestamp lyrics</li>
+            <li>Review song info and continue to creative generation</li>
+          </ol>
         </div>
       </div>
     </div>
