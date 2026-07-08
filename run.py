@@ -2,25 +2,18 @@
 """
 HTXpunk MV Generator — one-command launcher.
 
-This single script takes care of the local development launch:
+This script launches the local development stack:
 
-  1. Checks that Python and Node.js are installed
-  2. Asks for your Groq + Cloudflare credentials when needed and writes .env
-  3. Installs all backend, frontend, and optional Electron dependencies
-  4. Frees ports 8000 / 3000 if a previous run left something behind
-  5. Starts the backend and waits until it is healthy
-  6. Starts the frontend
-  7. Opens the app in your browser, or the desktop window with --electron
-  8. Cleans everything up when you press Ctrl+C
+  1. Checks Python and Node.js
+  2. Writes/updates the project .env
+  3. Installs dependencies unless --no-install is used
+  4. Frees ports 8000 / 3000
+  5. Starts FastAPI and Next.js
+  6. Opens the browser, or Electron with --electron
 
-Usage:
-    py run.py                # backend + frontend, opens in your browser
-    py run.py --electron     # backend + frontend + the Electron desktop app
-    py run.py --no-install   # skip dependency installation for faster restarts
-    py run.py --diagnose     # run network diagnostics and exit
-
-You can leave this window open while you use the app. Press Ctrl+C here to
-shut everything down.
+Preview slideshow behavior is explicit. Ken Burns / ffmpeg preview output is
+blocked by default and is only enabled when --allow-preview-video is supplied
+or ALLOW_FALLBACK_VIDEO=true already exists in .env.
 """
 
 import argparse
@@ -37,7 +30,6 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
-# ── Paths ───────────────────────────────────────────────────────────────────
 ROOT = Path(__file__).resolve().parent
 BACKEND_DIR = ROOT / "backend"
 FRONTEND_DIR = ROOT / "frontend"
@@ -51,11 +43,9 @@ IS_WINDOWS = os.name == "nt"
 DEFAULT_DATA_DIR = Path.home() / ".htxpunk-mv-generator" / "storage"
 DEFAULT_DATABASE_URL = f"sqlite+aiosqlite:///{DEFAULT_DATA_DIR / 'htxpunk.db'}"
 
-# Track child processes so we can clean them up on exit.
 _children: list[subprocess.Popen] = []
 
 
-# ── Pretty printing ─────────────────────────────────────────────────────────
 def say(msg: str) -> None:
     print(f"\n\033[1;35m▶ {msg}\033[0m", flush=True)
 
@@ -72,9 +62,7 @@ def fail(msg: str) -> None:
     print(f"\n\033[1;31m✗ {msg}\033[0m", flush=True)
 
 
-# ── Subprocess helpers ──────────────────────────────────────────────────────
 def stream_output(proc: subprocess.Popen, prefix: str) -> None:
-    """Read a process's combined output and echo it with a label."""
     for line in iter(proc.stdout.readline, ""):
         if line:
             print(f"  [{prefix}] {line.rstrip()}", flush=True)
@@ -82,7 +70,6 @@ def stream_output(proc: subprocess.Popen, prefix: str) -> None:
 
 
 def run_blocking(cmd, cwd: Path, shell: bool = False) -> int:
-    """Run a command to completion, streaming its output. Returns exit code."""
     printable = cmd if isinstance(cmd, str) else " ".join(cmd)
     print(f"  $ {printable}", flush=True)
     proc = subprocess.Popen(
@@ -103,16 +90,11 @@ def run_blocking(cmd, cwd: Path, shell: bool = False) -> int:
 
 def start_background(cmd, cwd: Path, prefix: str, shell: bool = False,
                      extra_env: dict | None = None) -> subprocess.Popen:
-    """Launch a long-running process in the background, streaming its output."""
     env = os.environ.copy()
     if extra_env:
         env.update(extra_env)
 
-    creationflags = 0
-    if IS_WINDOWS:
-        # Lets us kill the whole process tree cleanly later.
-        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP
-
+    creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if IS_WINDOWS else 0
     proc = subprocess.Popen(
         cmd,
         cwd=str(cwd),
@@ -130,20 +112,16 @@ def start_background(cmd, cwd: Path, prefix: str, shell: bool = False,
 
 
 def npm_command(args: str):
-    """Build an npm command that runs reliably on Windows and Unix."""
-    # On Windows, npm is npm.cmd and is most reliable through the shell.
     if IS_WINDOWS:
-        return (f"npm {args}", True)  # (command, shell)
+        return (f"npm {args}", True)
     return (["npm"] + args.split(), False)
 
 
-# ── Cleanup ─────────────────────────────────────────────────────────────────
 def kill_process(proc: subprocess.Popen) -> None:
     if proc.poll() is not None:
         return
     try:
         if IS_WINDOWS:
-            # Kill the entire tree (npm spawns node children).
             subprocess.run(
                 ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
                 stdout=subprocess.DEVNULL,
@@ -164,11 +142,9 @@ def shutdown(*_args) -> None:
     for proc in _children:
         kill_process(proc)
     print("\nGoodbye. 👋", flush=True)
-    # Avoid running shutdown twice (atexit + signal).
     os._exit(0)
 
 
-# ── Port helpers ────────────────────────────────────────────────────────────
 def port_in_use(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(0.5)
@@ -176,47 +152,32 @@ def port_in_use(port: int) -> bool:
 
 
 def free_port(port: int) -> None:
-    """Best-effort: kill whatever is listening on a port from a previous run."""
     if not port_in_use(port):
         return
     warn(f"Port {port} is in use — trying to free it…")
     try:
         if IS_WINDOWS:
-            out = subprocess.run(
-                ["netstat", "-ano"], capture_output=True, text=True
-            ).stdout
+            out = subprocess.run(["netstat", "-ano"], capture_output=True, text=True).stdout
             pids = set()
             for line in out.splitlines():
                 if f":{port} " in line and "LISTENING" in line:
                     pids.add(line.split()[-1])
             for pid in pids:
-                subprocess.run(
-                    ["taskkill", "/F", "/PID", pid],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
+                subprocess.run(["taskkill", "/F", "/PID", pid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         else:
-            out = subprocess.run(
-                ["lsof", "-ti", f"tcp:{port}"], capture_output=True, text=True
-            ).stdout
+            out = subprocess.run(["lsof", "-ti", f"tcp:{port}"], capture_output=True, text=True).stdout
             for pid in out.split():
-                subprocess.run(["kill", "-9", pid],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(["kill", "-9", pid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(1.0)
-        if port_in_use(port):
-            warn(f"Could not free port {port}. You may need to close it manually.")
-        else:
-            ok(f"Freed port {port}.")
+        ok(f"Freed port {port}.") if not port_in_use(port) else warn(f"Could not free port {port}. Close it manually.")
     except Exception as e:
         warn(f"Couldn't free port {port} automatically ({e}).")
 
 
-# ── Health / readiness ──────────────────────────────────────────────────────
 def wait_for_health(port: int, timeout: int = 120) -> bool:
     url = f"http://127.0.0.1:{port}/health"
     start = time.time()
     while time.time() - start < timeout:
-        # If the backend process died, stop waiting.
         for proc in _children:
             if proc.poll() is not None and proc.returncode not in (0, None):
                 return False
@@ -239,13 +200,10 @@ def wait_for_port(port: int, timeout: int = 120) -> bool:
     return False
 
 
-# ── Prerequisite checks ─────────────────────────────────────────────────────
 def check_prerequisites() -> None:
     say("Checking prerequisites")
-
     if sys.version_info < (3, 11):
-        warn(f"Python {sys.version_info.major}.{sys.version_info.minor} detected. "
-             "Python 3.11+ is recommended.")
+        warn(f"Python {sys.version_info.major}.{sys.version_info.minor} detected. Python 3.11+ is recommended.")
     else:
         ok(f"Python {sys.version_info.major}.{sys.version_info.minor}")
 
@@ -256,13 +214,11 @@ def check_prerequisites() -> None:
     ok("Node.js / npm found")
 
     if shutil.which("ffmpeg") is None:
-        warn("FFmpeg not found on PATH. The app can still use the bundled "
-             "imageio-ffmpeg fallback for local video assembly.")
+        warn("FFmpeg not found on PATH. Preview assembly can still use imageio-ffmpeg if installed.")
     else:
         ok("FFmpeg found")
 
 
-# ── .env handling ───────────────────────────────────────────────────────────
 def read_env() -> dict:
     data = {}
     if ENV_FILE.exists():
@@ -295,22 +251,22 @@ def _looks_like_legacy_database_url(value: str) -> bool:
 
 
 def normalize_legacy_env_paths(values: dict) -> bool:
-    """Fix older dev .env files that point at repo-local DB/storage.
-
-    Those older paths make manual/dev runs and packaged Electron runs silently
-    see different projects. Only known legacy defaults are auto-normalized;
-    deliberate custom paths are preserved.
-    """
     changed = False
     if _looks_like_legacy_storage_path(values.get("LOCAL_STORAGE_PATH", "")):
-        warn("LOCAL_STORAGE_PATH points at an old repo-local dev folder; switching to the shared app data storage folder.")
+        warn("LOCAL_STORAGE_PATH points at an old repo-local dev folder; switching to shared app data storage.")
         values.pop("LOCAL_STORAGE_PATH", None)
         changed = True
     if _looks_like_legacy_database_url(values.get("DATABASE_URL", "")):
-        warn("DATABASE_URL points at an old repo-local dev database; switching to the shared app data database.")
+        warn("DATABASE_URL points at an old repo-local dev database; switching to shared app data database.")
         values.pop("DATABASE_URL", None)
         changed = True
     return changed
+
+
+def _env_bool(value: str | None, default: bool = False) -> str:
+    if value is None or value == "":
+        return "true" if default else "false"
+    return "true" if str(value).strip().lower() in {"1", "true", "yes", "y", "on"} else "false"
 
 
 def write_env(values: dict) -> None:
@@ -320,6 +276,7 @@ def write_env(values: dict) -> None:
 
     local_storage_path = values.get("LOCAL_STORAGE_PATH") or str(DEFAULT_DATA_DIR)
     database_url = values.get("DATABASE_URL") or DEFAULT_DATABASE_URL
+    allow_fallback_video = _env_bool(values.get("ALLOW_FALLBACK_VIDEO"), default=False)
 
     lines = [
         "# HTXpunk MV Generator configuration",
@@ -349,6 +306,8 @@ def write_env(values: dict) -> None:
         "",
         "# Video generation",
         f"VIDEO_BACKEND={values.get('VIDEO_BACKEND', 'ffmpeg')}",
+        "# Ken Burns / ffmpeg preview output is disabled unless this is explicitly true.",
+        f"ALLOW_FALLBACK_VIDEO={allow_fallback_video}",
         f"VIDEO_FPS={values.get('VIDEO_FPS', '25')}",
         f"CLIP_DURATION={values.get('CLIP_DURATION', '5')}",
         f"OUTPUT_RESOLUTION={values.get('OUTPUT_RESOLUTION', '1920x1080')}",
@@ -375,10 +334,16 @@ def is_placeholder(value: str) -> bool:
     )
 
 
-def ensure_env() -> None:
+def ensure_env(allow_preview_video: bool = False) -> None:
     say("Checking API keys (.env)")
     values = read_env()
     normalized_paths = normalize_legacy_env_paths(values)
+
+    if allow_preview_video:
+        values["ALLOW_FALLBACK_VIDEO"] = "true"
+        warn("Explicit preview mode enabled: ALLOW_FALLBACK_VIDEO=true")
+    else:
+        values.setdefault("ALLOW_FALLBACK_VIDEO", "false")
 
     image_backend = (values.get("IMAGE_BACKEND") or "cloudflare").strip().lower()
     if image_backend not in {"cloudflare", "gemini", "placeholder"}:
@@ -391,18 +356,16 @@ def ensure_env() -> None:
     gemini = values.get("GEMINI_API_KEY", "")
 
     need_groq = is_placeholder(groq)
-    need_cloudflare = image_backend == "cloudflare" and (
-        is_placeholder(cf_account_id) or is_placeholder(cf_token)
-    )
+    need_cloudflare = image_backend == "cloudflare" and (is_placeholder(cf_account_id) or is_placeholder(cf_token))
     need_gemini = image_backend == "gemini" and is_placeholder(gemini)
 
     if not (need_groq or need_cloudflare or need_gemini):
-        if normalized_paths:
+        if normalized_paths or allow_preview_video or "ALLOW_FALLBACK_VIDEO" not in values:
             values.setdefault("LOCAL_STORAGE_PATH", str(DEFAULT_DATA_DIR))
             values.setdefault("DATABASE_URL", DEFAULT_DATABASE_URL)
             values["IMAGE_BACKEND"] = image_backend
             write_env(values)
-            ok("Updated .env to use the shared app data storage/database location")
+            ok("Updated .env")
         ok(f"API keys already configured (IMAGE_BACKEND={image_backend})")
         return
 
@@ -411,16 +374,13 @@ def ensure_env() -> None:
 
     if need_groq:
         print("  • Groq API key — get one at https://console.groq.com")
-        print("    Create New Key → it starts with 'gsk_'")
         entered = input("    Paste GROQ_API_KEY, or press Enter to leave blank: ").strip()
         if entered:
             groq = entered
 
     if need_cloudflare:
         print("\n  • Cloudflare Workers AI credentials for image generation")
-        print("    Account ID: dash.cloudflare.com → Workers & Pages → right sidebar")
-        print("    API Token: My Profile → API Tokens → Account · Workers AI · Edit")
-        print("    Press Enter on both prompts to use IMAGE_BACKEND=placeholder for a local smoke test.")
+        print("    Press Enter on both prompts to use IMAGE_BACKEND=placeholder for local testing.")
         entered = input("    Paste CLOUDFLARE_ACCOUNT_ID: ").strip()
         if entered:
             cf_account_id = entered
@@ -449,17 +409,17 @@ def ensure_env() -> None:
     values.setdefault("DATABASE_URL", DEFAULT_DATABASE_URL)
     values.setdefault("VIDEO_BACKEND", "ffmpeg")
     values.setdefault("WHISPER_MODEL", "base")
+    values.setdefault("ALLOW_FALLBACK_VIDEO", "false")
 
     write_env(values)
 
     if image_backend == "placeholder":
         ok("Saved .env using IMAGE_BACKEND=placeholder for local smoke testing")
-        warn("Placeholder mode starts the app without paid/image credentials, but it will not generate final production-quality AI images.")
+        warn("Placeholder image mode costs $0, but final ffmpeg/Ken Burns preview output still requires ALLOW_FALLBACK_VIDEO=true or --allow-preview-video.")
     else:
         ok(f"Saved .env using IMAGE_BACKEND={image_backend}")
 
 
-# ── Dependency installation ─────────────────────────────────────────────────
 def backend_deps_installed() -> bool:
     try:
         subprocess.run(
@@ -480,11 +440,7 @@ def install_dependencies(want_electron: bool) -> None:
     if backend_deps_installed():
         ok("Backend dependencies already installed")
     else:
-        print("  Installing backend (Python) packages…")
-        code = run_blocking(
-            [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"],
-            cwd=BACKEND_DIR,
-        )
+        code = run_blocking([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"], cwd=BACKEND_DIR)
         if code != 0:
             fail("Backend dependency installation failed. See messages above.")
             sys.exit(1)
@@ -493,7 +449,6 @@ def install_dependencies(want_electron: bool) -> None:
     if (FRONTEND_DIR / "node_modules").exists():
         ok("Frontend dependencies already installed")
     else:
-        print("  Installing frontend (npm) packages…")
         cmd, shell = npm_command("install")
         code = run_blocking(cmd, cwd=FRONTEND_DIR, shell=shell)
         if code != 0:
@@ -505,7 +460,6 @@ def install_dependencies(want_electron: bool) -> None:
         if (ELECTRON_DIR / "node_modules").exists():
             ok("Electron dependencies already installed")
         else:
-            print("  Installing Electron (npm) packages…")
             cmd, shell = npm_command("install")
             code = run_blocking(cmd, cwd=ELECTRON_DIR, shell=shell)
             if code != 0:
@@ -514,13 +468,11 @@ def install_dependencies(want_electron: bool) -> None:
             ok("Electron dependencies installed")
 
 
-# ── Service startup ─────────────────────────────────────────────────────────
 def start_backend() -> None:
     say("Starting backend (FastAPI on port 8000)")
     free_port(BACKEND_PORT)
     start_background(
-        [sys.executable, "-m", "uvicorn", "main:app",
-         "--port", str(BACKEND_PORT), "--host", "127.0.0.1"],
+        [sys.executable, "-m", "uvicorn", "main:app", "--port", str(BACKEND_PORT), "--host", "127.0.0.1"],
         cwd=BACKEND_DIR,
         prefix="backend",
     )
@@ -535,9 +487,6 @@ def start_backend() -> None:
 def start_frontend() -> None:
     say("Starting frontend (Next.js on port 3000)")
     free_port(FRONTEND_PORT)
-    # Clean the dev build cache before startup. A stale .next cache can keep
-    # serving an old route manifest and produce 404s for routes that exist on
-    # disk, such as /projects/[id]/treatment after pulling new code.
     cmd, shell = npm_command("run clean-dev")
     start_background(cmd, cwd=FRONTEND_DIR, prefix="frontend", shell=shell)
     print("  Waiting for frontend to come up…", flush=True)
@@ -550,44 +499,40 @@ def start_frontend() -> None:
 def start_electron() -> None:
     say("Starting the desktop app (Electron)")
     cmd, shell = npm_command("start")
-    start_background(
-        cmd, cwd=ELECTRON_DIR, prefix="electron", shell=shell,
-        extra_env={"HTXPUNK_SKIP_BACKEND": "1"},
-    )
+    start_background(cmd, cwd=ELECTRON_DIR, prefix="electron", shell=shell, extra_env={"HTXPUNK_SKIP_BACKEND": "1"})
     ok("Electron window launching…")
 
 
-# ── Main ────────────────────────────────────────────────────────────────────
 def main() -> None:
     parser = argparse.ArgumentParser(description="Launch HTXpunk MV Generator")
-    parser.add_argument("--electron", action="store_true",
-                        help="Open the Electron desktop app instead of a browser tab")
-    parser.add_argument("--no-install", action="store_true",
-                        help="Skip dependency installation")
-    parser.add_argument("--diagnose", action="store_true",
-                        help="Run network diagnostics and exit")
+    parser.add_argument("--electron", action="store_true", help="Open the Electron desktop app instead of a browser tab")
+    parser.add_argument("--no-install", action="store_true", help="Skip dependency installation")
+    parser.add_argument("--diagnose", action="store_true", help="Run network diagnostics and exit")
+    parser.add_argument(
+        "--allow-preview-video",
+        action="store_true",
+        help="Explicitly enable ffmpeg/Ken Burns preview slideshow output for local smoke tests",
+    )
     args = parser.parse_args()
 
     if args.diagnose:
         print("\033[1;36m" + "=" * 60)
         print("  HTXpunk Network Diagnostic Tool")
         print("=" * 60 + "\033[0m\n")
-        diagnose_script = ROOT / "diagnose_network.py"
-        subprocess.run([sys.executable, str(diagnose_script)])
+        subprocess.run([sys.executable, str(ROOT / "diagnose_network.py")])
         sys.exit(0)
 
     print("\033[1;35m" + "=" * 60)
     print("  HTXpunk MV Generator — Launcher")
     print("=" * 60 + "\033[0m")
 
-    # Clean shutdown on Ctrl+C / termination.
     signal.signal(signal.SIGINT, shutdown)
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, shutdown)
     atexit.register(lambda: [kill_process(p) for p in _children])
 
     check_prerequisites()
-    ensure_env()
+    ensure_env(allow_preview_video=args.allow_preview_video)
     if not args.no_install:
         install_dependencies(want_electron=args.electron)
     else:
@@ -617,7 +562,6 @@ def main() -> None:
     print("\n  Leave this window open while you use the app.")
     print("  Press \033[1mCtrl+C\033[0m here to stop everything.\n")
 
-    # Keep the launcher alive; watch for a service dying unexpectedly.
     try:
         while True:
             time.sleep(2)
