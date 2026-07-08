@@ -2,19 +2,17 @@
 video_assembler.py  —  music video assembly
 
 Backends, selected by settings.video_backend:
-  "ffmpeg"   (default) — Ken Burns slideshow rendered with ffmpeg. Works with
-                         no external services. Audio is optional (silent video
-                         if none attached). The $0, no-GPU fallback.
-  "modal"              — the real pipeline: per-panel image-to-video on
+  "modal"             — the real pipeline: per-panel image-to-video on
                          Modal's GPUs (LTX-Video), stitched with ffmpeg,
                          synced to audio, then a Wav2Lip lip-sync pass — see
                          services/modal_pipeline.py + modal_video_worker.py.
-  "remotion"           — React/Remotion render (needs Node + remotion-composer).
-  "runway"             — reserved for the experimental Gen-4 backend.
+  "remotion"          — React/Remotion render (needs Node + remotion-composer).
+  "runway"            — reserved for the experimental Gen-4 backend.
+  "ffmpeg"            — Ken Burns preview renderer only. Blocked by default
+                         unless ALLOW_FALLBACK_VIDEO=true.
 
-The ffmpeg backend finds a binary via PATH, falling back to the one bundled
-with the `imageio-ffmpeg` Python package, so it works even when ffmpeg isn't
-installed system-wide.
+The app should fail loudly when real video generation is not configured. A
+fake slideshow that says "complete" is worse than a clear, actionable error.
 """
 
 import json
@@ -53,6 +51,36 @@ def find_ffmpeg() -> str:
     )
 
 
+def _find_ffprobe(ffmpeg: str) -> str | None:
+    exe = shutil.which("ffprobe")
+    if exe:
+        return exe
+    ffmpeg_path = Path(ffmpeg)
+    candidate = ffmpeg_path.with_name("ffprobe.exe" if os.name == "nt" else "ffprobe")
+    return str(candidate) if candidate.exists() else None
+
+
+def _probe_media_duration(ffmpeg: str, media_path: str) -> float | None:
+    """Best-effort duration probe used only for the opt-in preview renderer."""
+    if not media_path or not os.path.exists(media_path):
+        return None
+    ffprobe = _find_ffprobe(ffmpeg)
+    if not ffprobe:
+        return None
+    cmd = [
+        ffprobe, "-v", "error", "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1", media_path,
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if result.returncode != 0:
+            return None
+        duration = float(result.stdout.strip())
+        return duration if duration > 0 else None
+    except Exception:
+        return None
+
+
 def _resolution() -> tuple[int, int]:
     try:
         w, h = settings.output_resolution.lower().split("x")
@@ -61,7 +89,7 @@ def _resolution() -> tuple[int, int]:
         return 1920, 1080
 
 
-# ── Ken Burns clip rendering ──────────────────────────────────────────────────
+# ── Ken Burns preview rendering ───────────────────────────────────────────────
 
 def _ken_burns_filter(effect: str, dur_frames: int, w: int, h: int, fps: int) -> str:
     """Build a zoompan filter string for one still image.
@@ -69,7 +97,6 @@ def _ken_burns_filter(effect: str, dur_frames: int, w: int, h: int, fps: int) ->
     Upscaling before zoompan avoids the well-known zoompan jitter.
     """
     d = max(dur_frames, 1)
-    # upscale before zoompan so sub-pixel zoom steps land cleanly (avoids jitter)
     pre = f"scale={w*2}:{h*2}:force_original_aspect_ratio=increase,crop={w*2}:{h*2}"
     if effect == "zoom-out":
         z = "if(lte(on,1),1.5,max(zoom-0.0010,1.0))"
@@ -114,52 +141,65 @@ def assemble_with_ffmpeg(
     panels: list[dict],
     output_filename: str = "final.mp4",
 ) -> str:
-    """Render a Ken Burns music video with ffmpeg. Returns storage URL."""
+    """Render an explicitly opt-in Ken Burns preview with ffmpeg.
+
+    This is not a production video backend. It exists only for manual preview
+    testing when ALLOW_FALLBACK_VIDEO=true. If panel durations are absent and
+    audio is available, it distributes panels across the full song duration so
+    preview output does not truncate the song.
+    """
     ffmpeg = find_ffmpeg()
     w, h = _resolution()
     fps = settings.video_fps
-    default_dur = float(settings.clip_duration)
+    fallback_default_dur = float(settings.clip_duration)
 
     workdir = Path(tempfile.mkdtemp(prefix=f"mv_{project_id[:8]}_"))
     clip_paths: list[Path] = []
     try:
+        renderable: list[tuple[int, dict, str]] = []
         for i, panel in enumerate(panels):
             image_url = panel.get("composite_url") or panel.get("image_url", "")
             image_path = url_to_local_path(image_url) if image_url else ""
             if not image_path or not os.path.exists(image_path):
-                logger.warning("[assemble] missing image for panel %d (%s) — skipping",
-                               i, image_url)
+                logger.warning("[assemble] missing image for panel %d (%s) — skipping", i, image_url)
                 continue
+            renderable.append((i, panel, image_path))
+
+        if not renderable:
+            raise ValueError("No renderable panels (all images missing).")
+
+        has_explicit_durations = any(p.get("duration") for _, p, _ in renderable)
+        audio_duration = _probe_media_duration(ffmpeg, audio_path)
+        if audio_duration and not has_explicit_durations:
+            default_dur = max(audio_duration / len(renderable), 1.0)
+            logger.info(
+                "[assemble] distributing %d preview panels across %.1fs audio (%.2fs each)",
+                len(renderable), audio_duration, default_dur,
+            )
+        else:
+            default_dur = fallback_default_dur
+
+        for out_i, (panel_i, panel, image_path) in enumerate(renderable):
             duration = panel.get("duration") or default_dur
             try:
                 duration = float(duration)
             except (TypeError, ValueError):
                 duration = default_dur
-            effect = KEN_BURNS_EFFECTS[i % len(KEN_BURNS_EFFECTS)]
-            clip_path = workdir / f"clip_{i:04d}.mp4"
+            effect = KEN_BURNS_EFFECTS[panel_i % len(KEN_BURNS_EFFECTS)]
+            clip_path = workdir / f"clip_{out_i:04d}.mp4"
             _render_clip(ffmpeg, image_path, str(clip_path), effect, duration, w, h, fps)
             clip_paths.append(clip_path)
 
-        if not clip_paths:
-            raise ValueError("No renderable panels (all images missing).")
-
-        # Concatenate clips (same codec/params → stream copy is safe)
         concat_list = workdir / "concat.txt"
-        concat_list.write_text(
-            "".join(f"file '{p.as_posix()}'\n" for p in clip_paths)
-        )
+        concat_list.write_text("".join(f"file '{p.as_posix()}'\n" for p in clip_paths))
         silent_video = workdir / "silent.mp4"
-        cmd = [
-            ffmpeg, "-y", "-f", "concat", "-safe", "0",
-            "-i", str(concat_list), "-c", "copy", str(silent_video),
-        ]
+        cmd = [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", str(concat_list), "-c", "copy", str(silent_video)]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
         if result.returncode != 0:
             raise RuntimeError(f"ffmpeg concat failed:\n{result.stderr[-1500:]}")
 
         out_path = workdir / output_filename
         if audio_path and os.path.exists(audio_path):
-            # Mux audio, cut to whichever stream is shorter
             cmd = [
                 ffmpeg, "-y", "-i", str(silent_video), "-i", audio_path,
                 "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
@@ -169,12 +209,12 @@ def assemble_with_ffmpeg(
             if result.returncode != 0:
                 raise RuntimeError(f"ffmpeg audio mux failed:\n{result.stderr[-1500:]}")
         else:
-            logger.info("[assemble] no audio attached — rendering silent video")
+            logger.info("[assemble] no audio attached — rendering silent preview video")
             shutil.move(str(silent_video), str(out_path))
 
         storage_key = f"projects/{project_id}/videos/{output_filename}"
         url = upload_file_path(str(out_path), storage_key, "video/mp4")
-        logger.info("[assemble] ffmpeg render complete → %s", url)
+        logger.info("[assemble] ffmpeg preview render complete → %s", url)
         return url
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
@@ -200,10 +240,7 @@ def build_timeline(
             return None
         start_sec = panel_index * clip_duration
         end_sec = start_sec + clip_duration
-        words = [
-            w["word"] for w in word_timestamps
-            if start_sec <= w.get("start", 0) < end_sec
-        ]
+        words = [w["word"] for w in word_timestamps if start_sec <= w.get("start", 0) < end_sec]
         return " ".join(words).strip() or None
 
     timeline_panels = []
@@ -234,40 +271,28 @@ def build_timeline(
     }
 
 
-def render_with_remotion(project_id: str, timeline: dict,
-                         output_filename: str = "final.mp4") -> str:
+def render_with_remotion(project_id: str, timeline: dict, output_filename: str = "final.mp4") -> str:
     """Call Remotion to render MusicVideo. Returns storage URL of rendered video."""
     if not REMOTION_DIR.exists():
         raise RuntimeError(
-            f"remotion-composer/ not found at {REMOTION_DIR}. "
-            "Run: cd remotion-composer && npm install"
+            f"remotion-composer/ not found at {REMOTION_DIR}. Run: cd remotion-composer && npm install"
         )
 
     out_dir = REMOTION_DIR / "out"
     out_dir.mkdir(exist_ok=True)
     out_path = out_dir / f"{project_id}_{output_filename}"
 
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".json", delete=False, dir=REMOTION_DIR
-    ) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, dir=REMOTION_DIR) as f:
         json.dump(timeline, f)
         props_path = f.name
 
     try:
-        cmd = [
-            "npx", "remotion", "render", "MusicVideo",
-            str(out_path), f"--props={props_path}", "--log=verbose",
-        ]
+        cmd = ["npx", "remotion", "render", "MusicVideo", str(out_path), f"--props={props_path}", "--log=verbose"]
         logger.info("Starting Remotion render: %s", " ".join(cmd))
-        result = subprocess.run(
-            cmd, cwd=str(REMOTION_DIR),
-            capture_output=True, text=True, timeout=1800,
-        )
+        result = subprocess.run(cmd, cwd=str(REMOTION_DIR), capture_output=True, text=True, timeout=1800)
         if result.returncode != 0:
             logger.error("Remotion stderr:\n%s", result.stderr)
-            raise RuntimeError(
-                f"Remotion render failed (exit {result.returncode}):\n{result.stderr[-2000:]}"
-            )
+            raise RuntimeError(f"Remotion render failed (exit {result.returncode}):\n{result.stderr[-2000:]}")
         storage_key = f"projects/{project_id}/videos/{output_filename}"
         return upload_file_path(str(out_path), storage_key, "video/mp4")
     finally:
@@ -285,28 +310,40 @@ def assemble_music_video(
     panels: list[dict],
     word_timestamps: Optional[list[dict]] = None,
 ) -> str:
-    """Dispatch to the configured video backend. ffmpeg is the working default."""
+    """Dispatch to the configured video backend.
+
+    ffmpeg/Ken Burns is treated as an explicit preview renderer, not a fallback.
+    """
     backend = (settings.video_backend or "ffmpeg").lower()
-    logger.info("Assembling music video for project %s (%d panels, backend=%s)",
-                project_id, len(panels), backend)
+    logger.info("Assembling music video for project %s (%d panels, backend=%s)", project_id, len(panels), backend)
 
     if backend == "remotion":
-        timeline = build_timeline(
-            project_id=project_id, audio_path=audio_path,
-            panels=panels, word_timestamps=word_timestamps,
-        )
-        logger.info("Timeline: %d frames @ %dfps = %.1fs",
-                    timeline["durationInFrames"], timeline["fps"],
-                    timeline["durationInFrames"] / timeline["fps"])
+        timeline = build_timeline(project_id=project_id, audio_path=audio_path, panels=panels, word_timestamps=word_timestamps)
+        logger.info("Timeline: %d frames @ %dfps = %.1fs", timeline["durationInFrames"], timeline["fps"], timeline["durationInFrames"] / timeline["fps"])
         return render_with_remotion(project_id, timeline)
 
     if backend == "modal":
         from services.modal_pipeline import assemble_with_modal
-        return assemble_with_modal(
-            project_id=project_id, audio_path=audio_path, panels=panels,
+        return assemble_with_modal(project_id=project_id, audio_path=audio_path, panels=panels)
+
+    if backend == "ffmpeg":
+        if not settings.allow_fallback_video:
+            raise RuntimeError(
+                "Real video generation is not configured. VIDEO_BACKEND=ffmpeg would only produce "
+                "a Ken Burns preview slideshow, so rendering was stopped instead of creating an "
+                "unusable fake video. Configure VIDEO_BACKEND=modal for real image-to-video, or set "
+                "ALLOW_FALLBACK_VIDEO=true only when you explicitly want a preview slideshow."
+            )
+        return assemble_with_ffmpeg(project_id=project_id, audio_path=audio_path, panels=panels)
+
+    if backend in {"runway", "wan2"}:
+        raise RuntimeError(
+            f"VIDEO_BACKEND={backend} is selected, but that backend is not implemented yet. "
+            "Configure VIDEO_BACKEND=modal, or set ALLOW_FALLBACK_VIDEO=true with VIDEO_BACKEND=ffmpeg "
+            "only for a preview slideshow."
         )
 
-    # default: ffmpeg (also used for "runway" until that backend lands)
-    return assemble_with_ffmpeg(
-        project_id=project_id, audio_path=audio_path, panels=panels,
+    raise RuntimeError(
+        f"Unknown VIDEO_BACKEND={backend}. Supported values: modal, remotion, ffmpeg. "
+        "ffmpeg requires ALLOW_FALLBACK_VIDEO=true because it is only a preview renderer."
     )
