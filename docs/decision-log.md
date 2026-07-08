@@ -160,10 +160,30 @@ Implementation rule:
 
 - `VIDEO_BACKEND=ffmpeg` is blocked by default.
 - It may only run if `ALLOW_FALLBACK_VIDEO=true`.
+- `run.py --allow-preview-video` may be used to intentionally enable the flag for local smoke tests.
+- Electron must preserve/pass `ALLOW_FALLBACK_VIDEO`; because it spawns the backend with direct environment variables, writing a `.env` alone is not enough.
 
 Reason:
 
-The user requested a real music video. A slideshow fallback produced an unusable result and should not be labeled complete.
+The user requested a real music video. A slideshow fallback produced an unusable result and should not be labeled complete. However, an intentional `$0` smoke test path remains useful as long as it is explicit.
+
+## 2026-07-08: Explicit preview smoke-test path
+
+Decision:
+
+The local `$0` smoke-test path is allowed only when all relevant preview settings are explicit.
+
+Required config:
+
+```env
+IMAGE_BACKEND=placeholder
+VIDEO_BACKEND=ffmpeg
+ALLOW_FALLBACK_VIDEO=true
+```
+
+Reason:
+
+Placeholder images cost no external image-generation tokens and are useful for validating pipeline wiring. But placeholder images plus ffmpeg preview output should still be opt-in, not the silent behavior when a user requested a real music video.
 
 ## 2026-07-08: Fail before wasting visual-generation tokens
 
