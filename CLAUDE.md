@@ -143,11 +143,23 @@ IMAGE_BACKEND=cloudflare  # Production mode (default). Use "placeholder" for dev
 ```
 
 **3. Backend**
+
+System dependency: **espeak-ng** (or classic espeak) must be on PATH — it
+drives lyric forced alignment (`aeneas`, used when a user supplies exact
+lyrics instead of relying on Whisper transcription). Install it the same
+way you'd install `ffmpeg`:
+- macOS: `brew install espeak-ng`
+- Debian/Ubuntu: `sudo apt-get install espeak-ng`
+- Windows: install via the [espeak-ng releases page](https://github.com/espeak-ng/espeak-ng/releases) and ensure it's on PATH
+
 ```bash
 cd backend
-pip install -r requirements.txt
+AENEAS_WITH_CEW=False SETUPTOOLS_USE_DISTUTILS=stdlib pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 ```
+(The two env vars are only needed for the `pip install` step — they skip
+aeneas's optional C extension and work around a setuptools incompatibility
+in its packaging. They don't need to be set when running the server.)
 
 **4. Frontend**
 ```bash
@@ -467,6 +479,13 @@ per-shot timecodes. See `services/shot_prompt.py`.
 **Issue:** Elements appear as gray boxes
 - **Likely:** Background removal (rembg) timed out or failed
 - **Fix:** Regenerate image from Elements page, check error logs
+
+### Lyric alignment fails
+**Error:** `Lyric alignment requires espeak-ng (or espeak) and/or ffprobe on PATH`
+- **Fix:** Install `espeak-ng` (see Manual Setup step 3) and make sure `ffprobe` is on PATH — the bundled `imageio-ffmpeg` binary only ships `ffmpeg`, not `ffprobe`, so a system-wide FFmpeg install is required for this feature specifically.
+
+**Error:** `pip install` fails on `aeneas` with `AttributeError: install_layout` or a C compile error
+- **Fix:** Set `AENEAS_WITH_CEW=False SETUPTOOLS_USE_DISTUTILS=stdlib` before running `pip install -r requirements.txt` (see Manual Setup step 3) — `run.py` and the packaged Electron app already set these automatically.
 
 ---
 

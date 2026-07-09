@@ -198,7 +198,14 @@ function ensureBackendDependencies(pythonCmd, onProgress) {
     const pipProcess = spawn(
       pythonCmd,
       ['-m', 'pip', 'install', '--user', '--disable-pip-version-check', '-r', reqPath],
-      { stdio: ['ignore', 'pipe', 'pipe'] }
+      {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        // aeneas (lyric forced alignment) needs these set at install time —
+        // AENEAS_WITH_CEW=False skips its optional C extension (avoids
+        // needing espeak dev headers), SETUPTOOLS_USE_DISTUTILS=stdlib
+        // works around an install_layout error under current setuptools.
+        env: { ...process.env, AENEAS_WITH_CEW: 'False', SETUPTOOLS_USE_DISTUTILS: 'stdlib' },
+      }
     );
     const getTail = pipeProcessOutput(pipProcess, 'pip-install');
     pipProcess.on('error', (err) => reject(new Error(`Failed to run pip: ${err.message}`)));

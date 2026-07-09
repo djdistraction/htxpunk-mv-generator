@@ -16,8 +16,13 @@ jobs:
           python-version: "3.11"
           cache: "pip"
           cache-dependency-path: backend/requirements.txt
+      - name: Install espeak-ng (lyric forced alignment)
+        run: sudo apt-get update && sudo apt-get install -y espeak-ng
       - name: Install dependencies
         working-directory: backend
+        env:
+          AENEAS_WITH_CEW: "False"
+          SETUPTOOLS_USE_DISTUTILS: "stdlib"
         run: pip install -r requirements.txt
       - name: Compile check (catches syntax errors)
         working-directory: backend
@@ -56,6 +61,9 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - name: Install dependencies
         working-directory: backend
+        env:
+          AENEAS_WITH_CEW: "False"
+          SETUPTOOLS_USE_DISTUTILS: "stdlib"
         run: pip install -r requirements.txt
       - name: Run Windows-sensitive tests
         working-directory: backend

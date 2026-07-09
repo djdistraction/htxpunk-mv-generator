@@ -5,6 +5,7 @@ import uuid
 from pathlib import Path
 import httpx
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from pydantic import BaseModel
 from models.project import ProjectCreate, ProjectInfoConfirm
 from database import (
     db_list_projects, db_create_project, db_get_project, db_update_project,
@@ -190,6 +191,7 @@ async def create_and_upload(
     bpm: str = Form(""),
     musical_key: str = Form(""),
     beat_grid: str = Form("[]"),
+    lyrics_text: str = Form(""),
     file: UploadFile = File(...),
     vocals_file: UploadFile | None = File(None),
 ):
@@ -228,6 +230,8 @@ async def create_and_upload(
                 updates["beat_grid"] = parsed_grid
         except json.JSONDecodeError:
             pass
+    if lyrics_text.strip():
+        updates["user_lyrics_text"] = lyrics_text.strip()
     if vocals_file is not None and vocals_file.filename:
         vocals_contents = await vocals_file.read()
         vocals_key = f"projects/{project_id}/audio/vocals_{_sanitize_filename(vocals_file.filename)}"
@@ -408,6 +412,49 @@ async def guided_transcribe_lyrics(project_id: str):
         return {"project": db_get_project(project_id), "result": {"segments": segment_count}}
     except Exception as exc:
         _set_guided_failure(project_id, "Transcribe & Timestamp Lyrics", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+class LyricsAlignRequest(BaseModel):
+    lyrics_text: str | None = None
+
+
+@router.post("/{project_id}/guided/align-lyrics")
+async def guided_align_lyrics(project_id: str, payload: LyricsAlignRequest | None = None):
+    """Forced-align user-supplied lyrics against the vocal stem instead of
+    transcribing with Whisper.
+
+    Serves two cases with the same endpoint: lyrics provided upfront at
+    upload (called with no body, reads project.user_lyrics_text), and a
+    correction after a bad Whisper transcript (payload.lyrics_text is
+    stored as the new user_lyrics_text, then aligned) — both produce the
+    same transcript shape Transcribe & Timestamp Lyrics does, so nothing
+    downstream needs to know which path ran.
+    """
+    project = _get_project_or_404(project_id)
+    try:
+        lyrics_text = ((payload.lyrics_text if payload else None) or project.get("user_lyrics_text") or "").strip()
+        if not lyrics_text:
+            raise RuntimeError("No lyrics text provided. Paste or upload lyrics first.")
+        if payload and payload.lyrics_text and payload.lyrics_text.strip() != (project.get("user_lyrics_text") or "").strip():
+            db_update_project(project_id, user_lyrics_text=lyrics_text)
+
+        vocal_assets = db_get_assets(project_id, asset_type="vocal_stem")
+        vocals_url = vocal_assets[-1].get("url") if vocal_assets else ""
+        if not vocals_url:
+            vocals_url = project.get("user_vocals_url") or ""
+        if not vocals_url:
+            raise RuntimeError("No vocal stem is available. Run Isolate Vocal Stem first.")
+
+        vocals_path = _local_audio_path(vocals_url, Path(vocals_url).suffix or ".audio")
+        from services.lyrics_aligner import align_lyrics
+        segments = align_lyrics(vocals_path, lyrics_text)
+        transcript = {"segments": segments}
+        db_update_project(project_id, transcript=transcript, stage="awaiting_project_info_review", processing_step="Lyric alignment complete", error_message="")
+        _mark_generated(project_id, "lyrics", "Timestamped lyrics aligned from your provided text. Review and approve before song analysis.")
+        return {"project": db_get_project(project_id), "result": {"segments": len(segments)}}
+    except Exception as exc:
+        _set_guided_failure(project_id, "Align Lyrics", exc)
         raise HTTPException(status_code=500, detail=str(exc))
 
 
