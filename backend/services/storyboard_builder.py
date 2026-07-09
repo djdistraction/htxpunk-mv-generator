@@ -12,8 +12,20 @@ def _groq_client():
     return OpenAI(api_key=settings.groq_api_key, base_url="https://api.groq.com/openai/v1")
 
 
-def build_scene_plan(treatment: dict, elements: dict, analysis: dict) -> list[dict]:
-    """Returns ordered list of storyboard panels."""
+def build_scene_plan(
+    treatment: dict,
+    elements: dict,
+    analysis: dict,
+    creative_brief: str = "",
+    reference_notes: str = "",
+) -> list[dict]:
+    """Returns ordered list of storyboard panels.
+
+    creative_brief / reference_notes: same user-supplied context threaded
+    through treatment/element generation — kept in scope here too so a
+    referenced scene or moment the artist described can actually land in the
+    storyboard, not just the treatment's prose.
+    """
     client = _groq_client()
 
     transcript = analysis.get("transcript", {})
@@ -54,6 +66,24 @@ def build_scene_plan(treatment: dict, elements: dict, analysis: dict) -> list[di
         "",
         f"Song duration: ~{song_duration}s. Create {num_panels} storyboard panels.",
         "",
+    ]
+
+    if creative_brief.strip():
+        prompt_lines += [
+            "ARTIST'S CREATIVE VISION:",
+            creative_brief.strip(),
+            "",
+        ]
+    if reference_notes.strip():
+        prompt_lines += [
+            "REFERENCE MATERIAL the artist supplied. If a described scene, "
+            "character, or moment fits a panel, use it by name rather than "
+            "inventing a replacement:",
+            reference_notes.strip(),
+            "",
+        ]
+
+    prompt_lines += [
         'Return a JSON object: {"panels": [{"panel_id": "panel_001", "panel_index": 0,',
         '"timestamp_start": 0.0, "timestamp_end": 8.0, "background_id": "bg_001",',
         '"elements_visible": [{"state_id": "char_001_neutral", "x": 0.5, "y": 0.75, "scale": 0.4, "z_index": 1}],',

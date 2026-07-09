@@ -238,8 +238,12 @@ def run_element_extraction(project_id: str):
 
     analysis = project.get("analysis") or {}
     treatment = project.get("treatment") or {}
+    creative_brief, reference_notes = _collect_creative_context(project_id, project)
 
-    elements = extract_elements(treatment, analysis)
+    elements = extract_elements(
+        treatment, analysis,
+        creative_brief=creative_brief, reference_notes=reference_notes,
+    )
     db_update_project(project_id, elements=elements, stage="elements_ready")
     logger.info("[Worker] Elements extracted for %s (%d bg, %d chars, %d props)",
                 project_id[:8],
@@ -315,6 +319,7 @@ def run_storyboard_build(project_id: str):
     treatment = project.get("treatment") or {}
     elements_data = project.get("elements") or {}
     assets = db_get_assets(project_id)
+    creative_brief, reference_notes = _collect_creative_context(project_id, project)
 
     # Build lookup maps: elem_id → url for backgrounds, state_id → url for elements
     bg_map = {
@@ -326,7 +331,10 @@ def run_storyboard_build(project_id: str):
         for a in assets if a.get("asset_type") == "element"
     }
 
-    panels = build_scene_plan(treatment, elements_data, analysis)
+    panels = build_scene_plan(
+        treatment, elements_data, analysis,
+        creative_brief=creative_brief, reference_notes=reference_notes,
+    )
     # build_scene_plan(treatment, elements, analysis) — analysis contains transcript
     logger.info("[Worker] Building %d storyboard panels for %s", len(panels), project_id[:8])
 
@@ -384,6 +392,8 @@ def run_manifest_generation(project_id: str):
             continuity_bible = series.get("continuity_bible") or {}
             style_prompt = series.get("style_prompt") or ""
 
+    _, reference_notes = _collect_creative_context(project_id, project)
+
     logger.info("[Worker] Manifest generation: %d shots for %s",
                 len(manifests), project_id[:8])
 
@@ -392,7 +402,7 @@ def run_manifest_generation(project_id: str):
         db_update_asset(old["id"], asset_type="storyboard_panel_old")
 
     for i, shot in enumerate(manifests):
-        prompt = build_shot_prompt(shot, continuity_bible, style_prompt)
+        prompt = build_shot_prompt(shot, continuity_bible, style_prompt, reference_notes)
         negative = build_negative_prompt(shot, continuity_bible)
         duration = shot_duration_seconds(shot, default=settings_clip_default())
         style_suffix = f"Avoid: {negative}" if negative else ""
