@@ -87,7 +87,7 @@ export default function TreatmentDetail({ id }: { id: string }) {
           <h1 className="text-3xl font-bold">Your Creative Vision</h1>
           <p className="text-gray-500 mt-2">
             Our AI director drafted this treatment for <span className="text-white">{project.title}</span>.
-            Approve to start generating images, or request changes.
+            Approve to unlock the Element Plan step, or request changes.
           </p>
         </div>
 
@@ -179,7 +179,7 @@ export default function TreatmentDetail({ id }: { id: string }) {
                   disabled={working}
                   className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 text-white font-semibold py-4 rounded-xl text-lg transition-colors"
                 >
-                  {working ? 'Approving…' : '✓ Looks great — start generating images'}
+                  {working ? 'Approving…' : 'Approve treatment'}
                 </button>
                 <button
                   onClick={() => setMode('changes')}
