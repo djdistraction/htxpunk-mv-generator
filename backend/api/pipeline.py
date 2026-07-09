@@ -1,3 +1,7 @@
+import logging
+import threading
+import traceback
+
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from database import (
@@ -7,6 +11,7 @@ from database import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 # ── Request/response models ───────────────────────────────────────────────────
@@ -38,14 +43,150 @@ class ManifestApproval(BaseModel):
     revision_notes: str = ""  # optional notes before approving
 
 
+# ── Manual workbook worker dispatch ───────────────────────────────────────────
+#
+# Mirrors orchestrator.py's _in_flight guard. Without it, checking
+# project.stage and then starting a background thread leaves a window where
+# a second near-simultaneous request (double-click, two open tabs, a client
+# retry) for the same project passes the same stage check before the first
+# worker's own _set_stage() call has a chance to move the stage forward —
+# both requests then start a worker for the same project concurrently.
+# Confirmed real with a TestClient repro: two overlapping POSTs to the same
+# action both returned 200 and both invoked the worker.
+_in_flight: set[str] = set()
+_lock = threading.Lock()
+
+
+def _start_manual_worker(
+    project_id: str,
+    worker_name: str,
+    allowed_stages: set[str],
+    message: str,
+):
+    """Run exactly one pipeline worker from an explicit workbook action."""
+    project = db_get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project.get("stage") not in allowed_stages:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Project is not ready for this action "
+                f"(stage={project.get('stage')})."
+            ),
+        )
+
+    with _lock:
+        if project_id in _in_flight:
+            raise HTTPException(
+                status_code=409,
+                detail="This project already has a workbook action running.",
+            )
+        _in_flight.add(project_id)
+
+    def _run():
+        try:
+            from workers import pipeline_worker
+            getattr(pipeline_worker, worker_name)(project_id)
+        except Exception as exc:
+            err_detail = traceback.format_exc()
+            logger.error(
+                "[Workbook] FAILED %s -> project %s:\n%s",
+                worker_name,
+                project_id,
+                err_detail,
+            )
+            db_update_project(project_id, stage="error", error_message=str(exc))
+        finally:
+            with _lock:
+                _in_flight.discard(project_id)
+
+    threading.Thread(
+        target=_run,
+        daemon=True,
+        name=f"workbook-{worker_name}",
+    ).start()
+    return {"message": message}
+
+
 # ── Treatment gate ────────────────────────────────────────────────────────────
+
+@router.post("/{project_id}/run-song-analysis")
+async def run_song_analysis(project_id: str):
+    return _start_manual_worker(
+        project_id,
+        "run_song_interpretation",
+        {"info_confirmed"},
+        "Song analysis started",
+    )
+
+
+@router.post("/{project_id}/generate-treatment")
+async def generate_treatment(project_id: str):
+    return _start_manual_worker(
+        project_id,
+        "run_treatment_generation",
+        {"analyzed"},
+        "Treatment generation started",
+    )
+
+
+@router.post("/{project_id}/generate-element-plan")
+async def generate_element_plan(project_id: str):
+    return _start_manual_worker(
+        project_id,
+        "run_element_extraction",
+        {"treatment_approved"},
+        "Element plan generation started",
+    )
+
+
+@router.post("/{project_id}/generate-element-images")
+async def generate_element_images(project_id: str):
+    return _start_manual_worker(
+        project_id,
+        "run_image_generation",
+        {"elements_ready"},
+        "Element image generation started",
+    )
+
+
+@router.post("/{project_id}/build-storyboard")
+async def build_storyboard(project_id: str):
+    return _start_manual_worker(
+        project_id,
+        "run_storyboard_build",
+        {"images_ready"},
+        "Storyboard image generation started",
+    )
+
+
+@router.post("/{project_id}/generate-manifest-images")
+async def generate_manifest_images(project_id: str):
+    return _start_manual_worker(
+        project_id,
+        "run_manifest_generation",
+        {"manifest_approved"},
+        "Manifest-driven storyboard image generation started",
+    )
+
+
+@router.post("/{project_id}/generate-base-video")
+async def generate_base_video(project_id: str):
+    return _start_manual_worker(
+        project_id,
+        "run_video_assembly",
+        {"storyboard_approved"},
+        "Base video generation started",
+    )
+
 
 @router.post("/{project_id}/approve-treatment")
 async def approve_treatment(project_id: str, body: TreatmentApproval = TreatmentApproval()):
     """
     Human approves the AI-generated treatment.
     Optionally pass an edited treatment dict to override before approval.
-    The orchestrator automatically picks up and runs element extraction.
+    The workbook pauses here until the user explicitly runs Element Plan.
     """
     project = db_get_project(project_id)
     if not project:
@@ -56,7 +197,7 @@ async def approve_treatment(project_id: str, body: TreatmentApproval = Treatment
         updates["treatment"] = body.treatment
 
     db_update_project(project_id, **updates)
-    return {"message": "Treatment approved — images generating soon"}
+    return {"message": "Treatment approved. Element Plan is ready to run."}
 
 
 @router.post("/{project_id}/revise-treatment")
@@ -83,7 +224,7 @@ async def revise_treatment(project_id: str, body: TreatmentRevision):
 async def approve_storyboard(project_id: str, body: StoryboardApproval):
     """
     Human approves the storyboard (optionally with a new panel order).
-    The orchestrator automatically picks up and runs video assembly.
+    The workbook pauses here until the user explicitly runs base video generation.
     """
     project = db_get_project(project_id)
     if not project:
@@ -94,7 +235,7 @@ async def approve_storyboard(project_id: str, body: StoryboardApproval):
         panel_order=body.panel_order,
         stage="storyboard_approved",
     )
-    return {"message": "Storyboard approved — video assembly starting soon"}
+    return {"message": "Storyboard approved. Base video generation is ready to run."}
 
 
 # ── Image regeneration ────────────────────────────────────────────────────────
@@ -199,8 +340,8 @@ async def get_shot_manifests(project_id: str):
 async def approve_manifests(project_id: str, body: ManifestApproval = ManifestApproval()):
     """
     Human approves all shot manifests for the project.
-    Marks all drafts as 'locked' and transitions project to building_storyboard.
-    The orchestrator picks it up from there.
+    Marks all drafts as 'locked'. The workbook pauses here until the user
+    explicitly generates storyboard images.
     """
     project = db_get_project(project_id)
     if not project:
@@ -221,7 +362,7 @@ async def approve_manifests(project_id: str, body: ManifestApproval = ManifestAp
         stage="manifest_approved",
         revision_notes=body.revision_notes,
     )
-    return {"message": "Shot manifests locked — generating shot frames"}
+    return {"message": "Shot manifests locked. Storyboard image generation is ready to run."}
 
 
 @router.post("/{project_id}/revise-manifests")

@@ -34,23 +34,28 @@ logger = logging.getLogger(__name__)
 
 POLL_INTERVAL = 3  # seconds between polls
 
-# Stages the orchestrator automatically dispatches workers for
+# Stages the orchestrator automatically dispatches workers for.
+#
+# Issue #20 moves the creative pipeline into a visible production workbook:
+# after audio prep, each major creative step should be triggered from the UI
+# exactly once, not pulled forward automatically by the background poller.
 STAGE_WORKERS: dict[str, str] = {
     "uploaded":            "run_audio_preprocessing",
-    "info_confirmed":      "run_song_interpretation",
-    "analyzed":            "run_treatment_generation",
-    "treatment_approved":  "run_element_extraction",
-    "elements_ready":      "run_image_generation",
-    "images_ready":        "run_storyboard_build",
-    "manifest_approved":   "run_manifest_generation",
-    "storyboard_approved": "run_video_assembly",
 }
 
-# Reverse of STAGE_WORKERS — given the task_type that failed, which stage do
-# we reset a project to so the orchestrator re-dispatches it? Used by the
-# /retry endpoint; computed here so it can never drift out of sync with the
-# forward mapping above.
-TASK_TYPE_TO_STAGE: dict[str, str] = {v: k for k, v in STAGE_WORKERS.items()}
+# Given the task_type that failed, which stage do we reset a project to for a
+# retry. Some stages are now manual workbook actions rather than poller actions,
+# so this map is intentionally broader than STAGE_WORKERS.
+TASK_TYPE_TO_STAGE: dict[str, str] = {
+    "run_audio_preprocessing": "uploaded",
+    "run_song_interpretation": "info_confirmed",
+    "run_treatment_generation": "analyzed",
+    "run_element_extraction": "treatment_approved",
+    "run_image_generation": "elements_ready",
+    "run_storyboard_build": "images_ready",
+    "run_manifest_generation": "manifest_approved",
+    "run_video_assembly": "storyboard_approved",
+}
 
 # Stages where a human must act — orchestrator skips them
 HUMAN_GATES = {

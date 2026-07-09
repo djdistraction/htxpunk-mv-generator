@@ -24,6 +24,18 @@ const nextConfig = {
       { protocol: "http", hostname: "localhost" },
     ]
   },
+  experimental: {
+    // Next's own proxy layer (which implements rewrites() below) caps
+    // request bodies at 10MB by default and silently truncates + resets the
+    // connection past that ("socket hang up" from the backend's point of
+    // view, with no useful error reaching the browser). Confirmed real
+    // failure: uploading a song alone (usually a few MB as compressed mp3)
+    // works, but adding a second file — e.g. an uncompressed WAV vocal
+    // stem — pushes the combined multipart body over 10MB and the upload
+    // fails every time. Raised generously since audio/video uploads
+    // (including uncompressed WAV and .mp4) routinely exceed the default.
+    proxyClientMaxBodySize: "2048mb",
+  },
   async rewrites() {
     // IMPORTANT: Next.js resolves rewrites() once, at build/config-load
     // time — it bakes the returned destination strings into the compiled
