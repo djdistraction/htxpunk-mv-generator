@@ -444,18 +444,26 @@ def install_dependencies(want_electron: bool) -> None:
     if backend_deps_installed():
         ok("Backend dependencies already installed")
     else:
-        # aeneas (lyric forced alignment) needs these set at install time —
-        # AENEAS_WITH_CEW=False skips its optional C extension (avoids
-        # needing espeak dev headers), SETUPTOOLS_USE_DISTUTILS=stdlib
-        # works around an install_layout error under current setuptools.
+        code = run_blocking([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"], cwd=BACKEND_DIR)
+        if code != 0:
+            fail("Backend dependency installation failed. See messages above.")
+            sys.exit(1)
+
+        # aeneas (lyric forced alignment) is installed as a separate step:
+        # its setup.py needs numpy (just installed above) importable, which
+        # pip's isolated build env otherwise hides — --no-build-isolation
+        # makes it see the real environment instead. AENEAS_WITH_CEW=False
+        # skips its optional C extension (avoids needing espeak dev
+        # headers), SETUPTOOLS_USE_DISTUTILS=stdlib works around an
+        # install_layout error under current setuptools.
         pip_env = {"AENEAS_WITH_CEW": "False", "SETUPTOOLS_USE_DISTUTILS": "stdlib"}
         code = run_blocking(
-            [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"],
+            [sys.executable, "-m", "pip", "install", "--no-build-isolation", "-r", "requirements-aeneas.txt"],
             cwd=BACKEND_DIR,
             extra_env=pip_env,
         )
         if code != 0:
-            fail("Backend dependency installation failed. See messages above.")
+            fail("Lyric alignment dependency installation failed. See messages above.")
             sys.exit(1)
         ok("Backend dependencies installed")
 

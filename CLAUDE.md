@@ -154,12 +154,17 @@ way you'd install `ffmpeg`:
 
 ```bash
 cd backend
-AENEAS_WITH_CEW=False SETUPTOOLS_USE_DISTUTILS=stdlib pip install -r requirements.txt
+pip install -r requirements.txt
+AENEAS_WITH_CEW=False SETUPTOOLS_USE_DISTUTILS=stdlib pip install --no-build-isolation -r requirements-aeneas.txt
 uvicorn main:app --reload --port 8000
 ```
-(The two env vars are only needed for the `pip install` step — they skip
-aeneas's optional C extension and work around a setuptools incompatibility
-in its packaging. They don't need to be set when running the server.)
+aeneas installs as a separate second step — see the comment at the top of
+`requirements-aeneas.txt` for why (short version: its setup.py needs numpy,
+just installed above, to be importable, which pip's isolated build
+environment hides unless `--no-build-isolation` is passed). The env vars
+are only needed for that step — they skip aeneas's optional C extension and
+work around a setuptools incompatibility in its packaging. Nothing here
+needs to be set when running the server.
 
 **4. Frontend**
 ```bash
@@ -484,8 +489,8 @@ per-shot timecodes. See `services/shot_prompt.py`.
 **Error:** `Lyric alignment requires espeak-ng (or espeak) and/or ffprobe on PATH`
 - **Fix:** Install `espeak-ng` (see Manual Setup step 3) and make sure `ffprobe` is on PATH — the bundled `imageio-ffmpeg` binary only ships `ffmpeg`, not `ffprobe`, so a system-wide FFmpeg install is required for this feature specifically.
 
-**Error:** `pip install` fails on `aeneas` with `AttributeError: install_layout` or a C compile error
-- **Fix:** Set `AENEAS_WITH_CEW=False SETUPTOOLS_USE_DISTUTILS=stdlib` before running `pip install -r requirements.txt` (see Manual Setup step 3) — `run.py` and the packaged Electron app already set these automatically.
+**Error:** `pip install` fails on `aeneas` with `AttributeError: install_layout`, a C compile error, or `[ERRO] You must install numpy before installing aeneas`
+- **Fix:** Install `requirements.txt` first, then install `aeneas` as its own step with `AENEAS_WITH_CEW=False SETUPTOOLS_USE_DISTUTILS=stdlib pip install --no-build-isolation -r requirements-aeneas.txt` (see Manual Setup step 3) — `run.py` and the packaged Electron app already do both automatically. The two-step install (and `--no-build-isolation`) matters: aeneas's setup.py needs numpy already importable, which pip's isolated build environment hides unless requirements.txt has installed it first and build isolation is disabled for this specific package.
 
 ---
 

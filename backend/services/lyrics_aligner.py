@@ -32,6 +32,13 @@ runtime — aeneas's algorithm synthesizes each text fragment via TTS and
 DTW-aligns it against the real audio, so espeak is central to how it works,
 not a side feature. ffprobe specifically has no bundled fallback in this
 app (imageio-ffmpeg only bundles ffmpeg) — see _check_prerequisites().
+
+aeneas defaults to the classic `espeak` binary (`ESPEAKTTSWrapper`), which
+most modern distros no longer ship (`espeak-ng` replaced it). That engine
+choice is a *runtime* config (`RuntimeConfiguration(tts=...)`), not a task
+config — passing `tts=espeak-ng` in the task's own config string is silently
+ignored, confirmed by hitting exactly that dead end. _tts_engine_config()
+below picks whichever binary is actually present.
 """
 import json
 import os
@@ -74,6 +81,17 @@ def _check_prerequisites():
         )
 
 
+def _tts_engine_config():
+    """aeneas's default TTS engine is classic `espeak`; explicitly select
+    `espeak-ng` when that's what's actually on PATH (the common case on
+    modern distros), otherwise leave the default in place."""
+    from aeneas.runtimeconfiguration import RuntimeConfiguration
+
+    if shutil.which("espeak-ng") and not shutil.which("espeak"):
+        return RuntimeConfiguration("tts=espeak-ng")
+    return RuntimeConfiguration()
+
+
 def align_lyrics(audio_path: str, lyrics_text: str, language: str = "eng") -> list[dict]:
     """Forced-align lyrics_text (one lyric line per line) against audio_path.
 
@@ -107,7 +125,7 @@ def align_lyrics(audio_path: str, lyrics_text: str, language: str = "eng") -> li
         task.text_file_path_absolute = text_path
         task.sync_map_file_path_absolute = sync_path
 
-        ExecuteTask(task).execute()
+        ExecuteTask(task, rconf=_tts_engine_config()).execute()
         task.output_sync_map_file()
 
         with open(sync_path, encoding="utf-8") as f:

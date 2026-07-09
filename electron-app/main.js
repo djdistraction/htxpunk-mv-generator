@@ -178,47 +178,64 @@ function pipeProcessOutput(proc, label) {
   return () => tail.trim();
 }
 
-function ensureBackendDependencies(pythonCmd, onProgress) {
+function runPipInstall(pythonCmd, args, env, label, failureContext) {
   return new Promise((resolve, reject) => {
-    const backendPath = getBackendPath();
-    const reqPath = path.join(backendPath, 'requirements.txt');
-    const markerPath = path.join(appDataPath, '.deps-installed');
-    let currentHash;
-    try {
-      currentHash = require('crypto').createHash('sha256').update(fs.readFileSync(reqPath)).digest('hex');
-    } catch (err) {
-      reject(new Error(`Could not read ${reqPath}: ${err.message}`));
-      return;
-    }
-    if (fs.existsSync(markerPath) && fs.readFileSync(markerPath, 'utf8').trim() === currentHash) {
-      resolve();
-      return;
-    }
-    if (onProgress) onProgress('Installing Python dependencies (first run only, this can take a few minutes)…');
-    const pipProcess = spawn(
-      pythonCmd,
-      ['-m', 'pip', 'install', '--user', '--disable-pip-version-check', '-r', reqPath],
-      {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        // aeneas (lyric forced alignment) needs these set at install time —
-        // AENEAS_WITH_CEW=False skips its optional C extension (avoids
-        // needing espeak dev headers), SETUPTOOLS_USE_DISTUTILS=stdlib
-        // works around an install_layout error under current setuptools.
-        env: { ...process.env, AENEAS_WITH_CEW: 'False', SETUPTOOLS_USE_DISTUTILS: 'stdlib' },
-      }
-    );
-    const getTail = pipeProcessOutput(pipProcess, 'pip-install');
+    const pipProcess = spawn(pythonCmd, args, { stdio: ['ignore', 'pipe', 'pipe'], env });
+    const getTail = pipeProcessOutput(pipProcess, label);
     pipProcess.on('error', (err) => reject(new Error(`Failed to run pip: ${err.message}`)));
     pipProcess.on('exit', (code) => {
       if (code === 0) {
-        fs.writeFileSync(markerPath, currentHash);
         resolve();
       } else {
         const tail = getTail();
-        reject(new Error(`Installing Python dependencies failed (exit code ${code}).\n\n${tail ? `Last output:\n${tail}` : ''}\n\nCheck your internet connection, then restart the app to retry.`));
+        reject(new Error(`${failureContext} failed (exit code ${code}).\n\n${tail ? `Last output:\n${tail}` : ''}\n\nCheck your internet connection, then restart the app to retry.`));
       }
     });
   });
+}
+
+async function ensureBackendDependencies(pythonCmd, onProgress) {
+  const backendPath = getBackendPath();
+  const reqPath = path.join(backendPath, 'requirements.txt');
+  const aeneasReqPath = path.join(backendPath, 'requirements-aeneas.txt');
+  const markerPath = path.join(appDataPath, '.deps-installed');
+  let currentHash;
+  try {
+    const hash = require('crypto').createHash('sha256');
+    hash.update(fs.readFileSync(reqPath));
+    hash.update(fs.readFileSync(aeneasReqPath));
+    currentHash = hash.digest('hex');
+  } catch (err) {
+    throw new Error(`Could not read requirements files: ${err.message}`);
+  }
+  if (fs.existsSync(markerPath) && fs.readFileSync(markerPath, 'utf8').trim() === currentHash) {
+    return;
+  }
+
+  if (onProgress) onProgress('Installing Python dependencies (first run only, this can take a few minutes)…');
+  await runPipInstall(
+    pythonCmd,
+    ['-m', 'pip', 'install', '--user', '--disable-pip-version-check', '-r', reqPath],
+    process.env,
+    'pip-install',
+    'Installing Python dependencies'
+  );
+
+  // aeneas (lyric forced alignment) is installed as a separate step: its
+  // setup.py needs numpy (just installed above) importable, which pip's
+  // isolated build env otherwise hides — --no-build-isolation makes it see
+  // the real environment instead. AENEAS_WITH_CEW=False skips its optional
+  // C extension (avoids needing espeak dev headers), SETUPTOOLS_USE_DISTUTILS=stdlib
+  // works around an install_layout error under current setuptools.
+  await runPipInstall(
+    pythonCmd,
+    ['-m', 'pip', 'install', '--user', '--disable-pip-version-check', '--no-build-isolation', '-r', aeneasReqPath],
+    { ...process.env, AENEAS_WITH_CEW: 'False', SETUPTOOLS_USE_DISTUTILS: 'stdlib' },
+    'pip-install-aeneas',
+    'Installing lyric alignment dependencies'
+  );
+
+  fs.writeFileSync(markerPath, currentHash);
 }
 
 function startBackend(config, pythonCmd) {

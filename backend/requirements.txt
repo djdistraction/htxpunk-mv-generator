@@ -44,18 +44,12 @@ pydub==0.25.1
 # Production guide import (Excel parsing)
 openpyxl==3.1.5
 
-# Lyric forced alignment — user-supplied lyrics timestamped against the
-# vocal stem via aeneas (DTW over espeak-synthesized audio), used when
-# Whisper transcription is wrong/incomplete. Install-time env vars are
-# required (set by run.py / electron-app's dependency install step, not
-# here): AENEAS_WITH_CEW=False (skip the optional C extension — it links
-# against classic espeak, not espeak-ng, so building it needs dev headers
-# most systems don't have; the pure-Python/subprocess fallback is plenty
-# fast for per-project alignment) and SETUPTOOLS_USE_DISTUTILS=stdlib
-# (its setup.py errors under current setuptools otherwise). Also requires
-# espeak-ng (or espeak) and ffprobe on PATH at runtime — see
-# services/lyrics_aligner.py.
-aeneas==1.7.3.0
+# NOTE: aeneas (lyric forced alignment) is intentionally NOT listed here —
+# its setup.py imports numpy directly during pip's metadata-build step,
+# which runs in an isolated build env that doesn't see this file's numpy
+# (a transitive dep of rembg/audio-separator/etc.) even though it'll be
+# installed a moment later. Install it as a separate step, after this file,
+# with build isolation disabled — see requirements-aeneas.txt.
 
 # Video assembly — bundled ffmpeg binary fallback when ffmpeg isn't on PATH
 imageio-ffmpeg==0.5.1
