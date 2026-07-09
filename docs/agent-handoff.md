@@ -47,6 +47,7 @@ Current slice:
 - Production path selection added for Lyric, Karaoke, Performance, Cinematic, or a hybrid of any two; the selection is stored on the project and included in AI creative context.
 - Persisted workbook section statuses added, with approve/reject controls for generated sections and upstream approval checks before expensive/manual pipeline actions.
 - Element and storyboard image review now supports per-asset approve/reject statuses; section approval requires every relevant image/frame to be approved.
+- Shot Manifest review now supports importing a guide, manually adding shots, editing shot fields, deleting mistakes, and approval preflight for required timing/action fields.
 
 ## Primary implementation brief
 

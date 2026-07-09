@@ -440,3 +440,10 @@ def db_update_shot_manifest(manifest_id: str, **kwargs):
         )
     conn.commit()
     conn.close()
+
+def db_delete_shot_manifest(manifest_id: str):
+    """Delete a shot manifest row."""
+    conn = _sync_db()
+    conn.execute("DELETE FROM shot_manifests WHERE id=?", (manifest_id,))
+    conn.commit()
+    conn.close()

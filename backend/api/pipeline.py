@@ -3,10 +3,11 @@ import threading
 import traceback
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from database import (
     db_get_project, db_update_project,
     db_list_shot_manifests, db_update_shot_manifest,
+    db_create_shot_manifest, db_delete_shot_manifest, db_get_shot_manifest,
     db_get_series, db_get_assets, db_update_asset,
 )
 from services.workbook_status import (
@@ -38,10 +39,19 @@ class ImageRegenRequest(BaseModel):
 
 # ── Shot Manifest models ──────────────────────────────────────────────────────
 
-class ShotManifestUpdate(BaseModel):
-    locked_prompts: dict | None = None  # frozen prompts after approval
-    status: str = "draft"               # draft | reviewing | approved | locked | rejected
-    revision_notes: str = ""            # feedback if rejected
+class ShotManifestPayload(BaseModel):
+    shot_number: str = ""
+    start_time: str = ""
+    end_time: str = ""
+    audio_cue: str = ""
+    location: str = ""
+    characters: list[str] = Field(default_factory=list)
+    camera: str = ""
+    action: str = ""
+    mood: str = ""
+    continuity_rules: list[str] = Field(default_factory=list)
+    negative_constraints: list[str] = Field(default_factory=list)
+    status: str = "draft"
 
 
 class ManifestApproval(BaseModel):
@@ -358,6 +368,97 @@ async def get_shot_manifests(project_id: str):
     }
 
 
+def _manifest_payload_updates(body: ShotManifestPayload) -> dict:
+    allowed_statuses = {"draft", "reviewing", "approved", "locked", "rejected"}
+    status = body.status.strip().lower() or "draft"
+    if status not in allowed_statuses:
+        raise HTTPException(status_code=400, detail=f"Unsupported shot status: {status}")
+    return {
+        "shot_number": body.shot_number.strip(),
+        "start_time": body.start_time.strip(),
+        "end_time": body.end_time.strip(),
+        "audio_cue": body.audio_cue.strip(),
+        "location": body.location.strip(),
+        "characters": body.characters,
+        "camera": body.camera.strip(),
+        "action": body.action.strip(),
+        "mood": body.mood.strip(),
+        "continuity_rules": body.continuity_rules,
+        "negative_constraints": body.negative_constraints,
+        "status": status,
+    }
+
+
+def _manifest_missing_required(manifest: dict) -> list[str]:
+    missing = []
+    for field in ("shot_number", "start_time", "end_time", "action"):
+        if not str(manifest.get(field) or "").strip():
+            missing.append(field)
+    return missing
+
+
+@router.post("/{project_id}/shot-manifests")
+async def create_shot_manifest(project_id: str, body: ShotManifestPayload):
+    project = db_get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    updates = _manifest_payload_updates(body)
+    if not updates["shot_number"]:
+        raise HTTPException(status_code=400, detail="Shot number is required.")
+
+    manifest_id = db_create_shot_manifest(
+        project_id,
+        shot_number=updates["shot_number"],
+        start_time=updates["start_time"],
+        end_time=updates["end_time"],
+        audio_cue=updates["audio_cue"],
+        location=updates["location"],
+        characters=updates["characters"],
+        camera=updates["camera"],
+        action=updates["action"],
+        mood=updates["mood"],
+        continuity_rules=updates["continuity_rules"],
+        negative_constraints=updates["negative_constraints"],
+    )
+    db_update_shot_manifest(manifest_id, status=updates["status"])
+    db_update_project(project_id, stage="awaiting_manifest_approval")
+    set_section_status(project_id, "shot_manifest", "generated", message="Shot manifest edited and ready for approval.")
+    return {"manifest": db_get_shot_manifest(manifest_id)}
+
+
+@router.put("/{project_id}/shot-manifests/{manifest_id}")
+async def update_shot_manifest(project_id: str, manifest_id: str, body: ShotManifestPayload):
+    project = db_get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    manifest = db_get_shot_manifest(manifest_id)
+    if not manifest or manifest.get("project_id") != project_id:
+        raise HTTPException(status_code=404, detail="Shot manifest not found")
+    updates = _manifest_payload_updates(body)
+    if not updates["shot_number"]:
+        raise HTTPException(status_code=400, detail="Shot number is required.")
+
+    db_update_shot_manifest(manifest_id, **updates, locked_prompts=None, asset_refs=[])
+    db_update_project(project_id, stage="awaiting_manifest_approval")
+    set_section_status(project_id, "shot_manifest", "generated", message="Shot manifest edited and ready for approval.")
+    return {"manifest": db_get_shot_manifest(manifest_id)}
+
+
+@router.delete("/{project_id}/shot-manifests/{manifest_id}")
+async def delete_shot_manifest(project_id: str, manifest_id: str):
+    project = db_get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    manifest = db_get_shot_manifest(manifest_id)
+    if not manifest or manifest.get("project_id") != project_id:
+        raise HTTPException(status_code=404, detail="Shot manifest not found")
+
+    db_delete_shot_manifest(manifest_id)
+    db_update_project(project_id, stage="awaiting_manifest_approval")
+    set_section_status(project_id, "shot_manifest", "generated", message="Shot manifest edited and ready for approval.")
+    return {"deleted": True}
+
+
 @router.post("/{project_id}/approve-manifests")
 async def approve_manifests(project_id: str, body: ManifestApproval = ManifestApproval()):
     """
@@ -371,6 +472,15 @@ async def approve_manifests(project_id: str, body: ManifestApproval = ManifestAp
 
     # Mark all draft manifests as locked
     manifests = db_list_shot_manifests(project_id)
+    if not manifests:
+        raise HTTPException(status_code=400, detail="Add or import at least one shot before approving the manifest.")
+    incomplete = [
+        f"shot {manifest.get('shot_number') or manifest.get('id')[:8]} missing {', '.join(_manifest_missing_required(manifest))}"
+        for manifest in manifests
+        if _manifest_missing_required(manifest)
+    ]
+    if incomplete:
+        raise HTTPException(status_code=400, detail="Complete required shot fields first: " + "; ".join(incomplete[:5]))
     for manifest in manifests:
         if manifest['status'] in ('draft', 'approved'):
             db_update_shot_manifest(

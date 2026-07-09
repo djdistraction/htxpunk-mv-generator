@@ -148,6 +148,18 @@ export const api = {
       const { data } = await client.get(`/api/pipeline/${id}/shot-manifests`)
       return data
     },
+    createShotManifest: async (id: string, payload: object) => {
+      const { data } = await client.post(`/api/pipeline/${id}/shot-manifests`, payload)
+      return data
+    },
+    updateShotManifest: async (id: string, manifestId: string, payload: object) => {
+      const { data } = await client.put(`/api/pipeline/${id}/shot-manifests/${manifestId}`, payload)
+      return data
+    },
+    deleteShotManifest: async (id: string, manifestId: string) => {
+      const { data } = await client.delete(`/api/pipeline/${id}/shot-manifests/${manifestId}`)
+      return data
+    },
     approveManifests: async (id: string, payload?: { revision_notes?: string }) => {
       const { data } = await client.post(`/api/pipeline/${id}/approve-manifests`, payload ?? {})
       return data
