@@ -59,6 +59,18 @@ class ManifestApproval(BaseModel):
 
 
 # ── Manual workbook worker dispatch ───────────────────────────────────────────
+#
+# Mirrors orchestrator.py's _in_flight guard. Without it, checking
+# project.stage and then starting a background thread leaves a window where
+# a second near-simultaneous request (double-click, two open tabs, a client
+# retry) for the same project passes the same stage check before the first
+# worker's own _set_stage() call has a chance to move the stage forward —
+# both requests then start a worker for the same project concurrently.
+# Confirmed real with a TestClient repro: two overlapping POSTs to the same
+# action both returned 200 and both invoked the worker.
+_in_flight: set[str] = set()
+_lock = threading.Lock()
+
 
 def _start_manual_worker(
     project_id: str,
@@ -89,6 +101,18 @@ def _start_manual_worker(
                 status_code=400,
                 detail=f"Approve these workbook sections first: {', '.join(missing)}.",
             )
+
+    # Claim the in-flight slot *before* writing any section status — a losing
+    # concurrent request must not be able to write "running" for a section
+    # it's about to be rejected from touching.
+    with _lock:
+        if project_id in _in_flight:
+            raise HTTPException(
+                status_code=409,
+                detail="This project already has a workbook action running.",
+            )
+        _in_flight.add(project_id)
+
     if target_section:
         set_section_status(project_id, target_section, "running", message=message)
 
@@ -107,6 +131,9 @@ def _start_manual_worker(
             db_update_project(project_id, stage="error", error_message=str(exc))
             if target_section:
                 set_section_status(project_id, target_section, "failed", error=str(exc))
+        finally:
+            with _lock:
+                _in_flight.discard(project_id)
 
     threading.Thread(
         target=_run,
@@ -202,6 +229,18 @@ async def generate_base_video(project_id: str):
     )
 
 
+@router.post("/{project_id}/run-lip-sync")
+async def run_lip_sync(project_id: str):
+    return _start_manual_worker(
+        project_id,
+        "run_lip_sync_generation",
+        {"complete", "base_video_ready", "lip_sync_ready"},
+        "Lip sync started",
+        target_section="lip_sync",
+        required_sections=("final_video",),
+    )
+
+
 @router.post("/{project_id}/approve-treatment")
 async def approve_treatment(project_id: str, body: TreatmentApproval = TreatmentApproval()):
     """
@@ -274,13 +313,26 @@ async def approve_storyboard(project_id: str, body: StoryboardApproval):
 async def regenerate_image(project_id: str, body: ImageRegenRequest):
     """Regenerate a single background or element image with a revised prompt."""
     from workers.pipeline_worker import regenerate_single_image
-    import threading
-    t = threading.Thread(
-        target=regenerate_single_image,
-        args=(project_id, body.asset_id, body.new_prompt),
-        daemon=True,
-    )
-    t.start()
+
+    # Same in-flight guard as _start_manual_worker — a single-image regen
+    # racing a project-wide manual action (or another regen call) had the
+    # identical unguarded double-dispatch gap.
+    with _lock:
+        if project_id in _in_flight:
+            raise HTTPException(
+                status_code=409,
+                detail="This project already has a workbook action running.",
+            )
+        _in_flight.add(project_id)
+
+    def _run():
+        try:
+            regenerate_single_image(project_id, body.asset_id, body.new_prompt)
+        finally:
+            with _lock:
+                _in_flight.discard(project_id)
+
+    threading.Thread(target=_run, daemon=True).start()
     return {"message": "Regeneration started"}
 
 

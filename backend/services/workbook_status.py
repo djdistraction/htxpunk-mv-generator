@@ -17,6 +17,7 @@ WORKBOOK_SECTIONS = {
     "shot_manifest",
     "storyboard_images",
     "final_video",
+    "lip_sync",
 }
 
 WORKBOOK_STATUSES = {

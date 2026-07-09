@@ -27,7 +27,7 @@ from database import (
     db_list_shot_manifests,
     db_update_shot_manifest,
 )
-from services.workbook_status import set_section_status
+from services.workbook_status import section_is_approved, set_section_status
 from utils.storage import url_to_local_path
 
 logger = logging.getLogger(__name__)
@@ -254,8 +254,12 @@ def run_element_extraction(project_id: str):
 
     analysis = project.get("analysis") or {}
     treatment = project.get("treatment") or {}
+    creative_brief, reference_notes = _collect_creative_context(project_id, project)
 
-    elements = extract_elements(treatment, analysis)
+    elements = extract_elements(
+        treatment, analysis,
+        creative_brief=creative_brief, reference_notes=reference_notes,
+    )
     db_update_project(project_id, elements=elements, stage="elements_ready")
     set_section_status(project_id, "element_plan", "generated", message="Element plan generated. Review and approve before image generation.")
     logger.info("[Worker] Elements extracted for %s (%d bg, %d chars, %d props)",
@@ -333,6 +337,7 @@ def run_storyboard_build(project_id: str):
     treatment = project.get("treatment") or {}
     elements_data = project.get("elements") or {}
     assets = db_get_assets(project_id)
+    creative_brief, reference_notes = _collect_creative_context(project_id, project)
 
     # Build lookup maps: elem_id → url for backgrounds, state_id → url for elements
     bg_map = {
@@ -344,7 +349,10 @@ def run_storyboard_build(project_id: str):
         for a in assets if a.get("asset_type") == "element"
     }
 
-    panels = build_scene_plan(treatment, elements_data, analysis)
+    panels = build_scene_plan(
+        treatment, elements_data, analysis,
+        creative_brief=creative_brief, reference_notes=reference_notes,
+    )
     # build_scene_plan(treatment, elements, analysis) — analysis contains transcript
     logger.info("[Worker] Building %d storyboard panels for %s", len(panels), project_id[:8])
 
@@ -403,6 +411,8 @@ def run_manifest_generation(project_id: str):
             continuity_bible = series.get("continuity_bible") or {}
             style_prompt = series.get("style_prompt") or ""
 
+    _, reference_notes = _collect_creative_context(project_id, project)
+
     logger.info("[Worker] Manifest generation: %d shots for %s",
                 len(manifests), project_id[:8])
 
@@ -411,7 +421,7 @@ def run_manifest_generation(project_id: str):
         db_update_asset(old["id"], asset_type="storyboard_panel_old")
 
     for i, shot in enumerate(manifests):
-        prompt = build_shot_prompt(shot, continuity_bible, style_prompt)
+        prompt = build_shot_prompt(shot, continuity_bible, style_prompt, reference_notes)
         negative = build_negative_prompt(shot, continuity_bible)
         duration = shot_duration_seconds(shot, default=settings_clip_default())
         style_suffix = f"Avoid: {negative}" if negative else ""
@@ -518,6 +528,47 @@ def run_video_assembly(project_id: str):
     )
     set_section_status(project_id, "final_video", "generated", message="Base video generated. Review before final approval.")
     logger.info("[Worker] Base video ready for %s → %s", project_id[:8], video_url)
+
+
+# ── Optional Lip Sync ────────────────────────────────────────────────────────
+
+def run_lip_sync_generation(project_id: str):
+    """Apply optional lip sync to an already approved base video.
+
+    This is intentionally post-approval work: base video generation must remain
+    reviewable and must not spend lip-sync compute unless the user asks for it.
+    """
+    from services.modal_pipeline import apply_lipsync_to_video
+    _set_stage(project_id, "lip_syncing")
+    project = _get_project(project_id)
+
+    if not section_is_approved(project, "final_video"):
+        raise ValueError("Approve the base video before running optional lip sync.")
+
+    base_video_url = project.get("base_video_url") or project.get("final_video_url") or project.get("video_url")
+    if not base_video_url:
+        raise ValueError("No approved base video is available for lip sync.")
+
+    audio_url = project.get("converted_audio_url") or project.get("audio_url")
+    if not audio_url:
+        raise ValueError("No project audio is available for lip sync.")
+
+    video_path = url_to_local_path(base_video_url)
+    audio_path = _resolve_local_audio(audio_url)
+    lipsynced_url = apply_lipsync_to_video(
+        project_id=project_id,
+        video_path=video_path,
+        audio_path=audio_path,
+    )
+
+    db_update_project(
+        project_id,
+        lipsynced_video_url=lipsynced_url,
+        stage="lip_sync_ready",
+        processing_step="Lip-synced video ready for review",
+    )
+    set_section_status(project_id, "lip_sync", "generated", message="Lip-synced video generated. Review before choosing it as final.")
+    logger.info("[Worker] Lip-synced candidate ready for %s -> %s", project_id[:8], lipsynced_url)
 
 
 # ── Utility: Regenerate a single image ───────────────────────────────────────

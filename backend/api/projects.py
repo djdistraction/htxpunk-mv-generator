@@ -12,7 +12,7 @@ from database import (
     db_list_series, db_create_series, db_get_series,
 )
 from utils.storage import upload_bytes, upload_file_path, url_to_local_path, delete_project_files
-from services.workbook_status import set_section_status, validate_section_key
+from services.workbook_status import get_section_statuses, set_section_status, validate_section_key
 
 router = APIRouter()
 
@@ -514,7 +514,7 @@ async def approve_workbook_section(project_id: str, section_key: str):
         if unapproved:
             raise HTTPException(status_code=400, detail=f"Approve every storyboard image first ({len(unapproved)} remaining).")
     if key == "final_video":
-        final_candidate = project.get("lipsynced_video_url") or project.get("base_video_url") or project.get("video_url")
+        final_candidate = project.get("base_video_url") or project.get("video_url")
         if not final_candidate:
             raise HTTPException(status_code=400, detail="Generate a base video before approving this section.")
         db_update_project(
@@ -524,9 +524,23 @@ async def approve_workbook_section(project_id: str, section_key: str):
             stage="complete",
             processing_step="Final video approved",
         )
+    if key == "lip_sync":
+        lipsynced_candidate = project.get("lipsynced_video_url")
+        if not lipsynced_candidate:
+            raise HTTPException(status_code=400, detail="Generate the lip-synced video before approving this section.")
+        if get_section_statuses(project).get("final_video", {}).get("status") != "approved":
+            raise HTTPException(status_code=400, detail="Approve the base video before choosing a lip-synced final.")
+        db_update_project(
+            project_id,
+            final_video_url=lipsynced_candidate,
+            video_url=lipsynced_candidate,
+            stage="complete",
+            processing_step="Lip-synced video approved as final",
+        )
     if key == "project_setup" and project.get("stage") == "awaiting_project_info_review":
         raise HTTPException(status_code=400, detail="Use the setup review form so title, brief, references, and lyrics are saved with the approval.")
-    return set_section_status(project_id, key, "approved", message="Section approved.")
+    message = "Lip-synced video approved as final." if key == "lip_sync" else "Section approved."
+    return set_section_status(project_id, key, "approved", message=message)
 
 
 @router.post("/{project_id}/sections/{section_key}/reject")

@@ -51,3 +51,6 @@ imageio-ffmpeg==0.5.1
 # requires `modal deploy backend/services/modal_video_worker.py` to have
 # been run at least once, plus MODAL_TOKEN_ID/MODAL_TOKEN_SECRET in .env
 modal>=0.65.0
+
+# Testing (CI only — not required to run the app)
+pytest==8.3.3

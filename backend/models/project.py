@@ -12,7 +12,8 @@ PipelineStage = Literal[
     "generating_backgrounds", "generating_elements", "generating_images", "images_ready",
     "awaiting_manifest_approval", "manifest_approved", "generating_manifest_images",
     "building_storyboard", "awaiting_storyboard_approval", "storyboard_approved",
-    "generating_clips", "assembling", "base_video_ready", "complete", "error"
+    "generating_clips", "assembling", "base_video_ready",
+    "lip_syncing", "lip_sync_ready", "complete", "error"
 ]
 
 

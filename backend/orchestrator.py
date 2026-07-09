@@ -55,6 +55,7 @@ TASK_TYPE_TO_STAGE: dict[str, str] = {
     "run_storyboard_build": "images_ready",
     "run_manifest_generation": "manifest_approved",
     "run_video_assembly": "storyboard_approved",
+    "run_lip_sync_generation": "complete",
 }
 
 # Stages where a human must act — orchestrator skips them
@@ -80,6 +81,7 @@ TRANSITIONAL_RESET: dict[str, str] = {
     "building_storyboard":        "images_ready",
     "generating_manifest_images": "manifest_approved",
     "assembling":                 "storyboard_approved",
+    "lip_syncing":                "complete",
 }
 
 # ── State ─────────────────────────────────────────────────────────────────────

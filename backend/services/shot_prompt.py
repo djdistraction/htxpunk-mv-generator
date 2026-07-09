@@ -10,12 +10,18 @@ from typing import Optional
 
 
 def build_shot_prompt(shot: dict, continuity_bible: Optional[dict] = None,
-                      style_prompt: str = "") -> str:
+                      style_prompt: str = "", reference_notes: str = "") -> str:
     """Compose a full-frame image prompt from a shot manifest.
 
     Order matters for diffusion models: subject/action first, then setting,
     then camera, then mood/style. Continuity-bible style is appended so every
     shot in a series shares a coherent look.
+
+    reference_notes: user-supplied reference material (same text threaded
+    through treatment/element/storyboard generation), appended after style so
+    a referenced character/prop/location can still surface per-shot even on
+    the manifest-driven path, which otherwise builds prompts purely from the
+    shot fields and never saw this context at all.
     """
     parts: list[str] = []
 
@@ -50,6 +56,9 @@ def build_shot_prompt(shot: dict, continuity_bible: Optional[dict] = None,
 
     if style_prompt:
         parts.append(style_prompt)
+
+    if reference_notes.strip():
+        parts.append(reference_notes.strip())
 
     # Per-shot continuity rules reinforce consistency
     for rule in (shot.get("continuity_rules") or [])[:4]:

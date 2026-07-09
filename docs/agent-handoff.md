@@ -6,57 +6,50 @@ Update this file when the active workflow, major branch, project direction, or n
 
 ## Current date
 
-2026-07-08
+2026-07-09
+
+## Project goal (read this first)
+
+The app is a music video production tool that guides the user through each
+step of a professional production, supporting both manual content injection
+and AI automation. Five production paths, chosen once at project creation:
+**Lyric Video**, **Karaoke Video**, **Performance Music Video** (AI-generated
+virtual performer, or user-uploaded real footage — both in scope), **Cinematic
+Music Video**, or a combination of any two. See `docs/decision-log.md`'s
+"2026-07-09" entries for the full detail and the proposed composable-module
+architecture. Tracked in issue #29.
+
+Everything built before 2026-07-09 (treatment → element plan → element
+images → storyboard → shot manifest → image-to-video) is the **Cinematic
+Music Video** path specifically — not "the" pipeline. Issue #20's workbook
+rebuild and issue #25's lyric-alignment work are foundational pieces this
+larger goal depends on, not separate side quests.
 
 ## Current major branch
 
-`guided-audio-steps`
+`main` — `guided-audio-steps` and `codex/issue-20-workbook-shell` merged and
+were deleted after PR #19 and PR #22 landed.
 
-## Current major PR
+## Current major issues
 
-PR #19: `Add guided step-by-step audio workflow`
+- Issue #20: `Build production-workbook pipeline interface with editable gated stages` — Phase 1 (workbook shell, explicit one-step actions) shipped via PR #22. PR #31 (Codex, `codex/issue-20-workbook-shell`) adds the rest of the list from PR #22's "still open" note: persisted workbook section statuses with approve/reject controls, per-asset (element/storyboard image) approve/reject gates, an editable shot-manifest workflow (import, add, edit, delete, preflight), and a base-video/final-export split (`base_video_url` stored separately, final approval selects `final_video_url`). Still open after #31: duplicate/timeline validation, token preflight checks, and the lip-sync half of the base/lip-sync split (see #27).
+- Issue #29: `Five production paths` — PR #31 implements the core of this: a production-path chooser (Lyric, Karaoke, Performance, Cinematic, or a hybrid of any two) at project creation, persisted and editable during Project Setup review, included in the creative context driving song analysis and downstream planning. The composable-module architecture proposed in `docs/decision-log.md` still needs validating against how the different paths actually render/assemble differently, not just how they're selected.
+- Issue #24: reference images/text were structurally invisible past the treatment stage. Part A (thread `reference_notes` through the whole pipeline) shipped in PR #28. Part B (vision-model captioning) not started.
+- Issue #25: lyrics upload + `aeneas` forced alignment. Feasibility proven (real working proof-of-concept). Not started. Load-bearing for the Lyric Video and Karaoke Video paths, not just a transcription-quality fix.
+- Issue #26: double-dispatch race in the workbook's manual worker endpoints (found in review on #22, merged unaddressed, fixed separately in PR #26, merged).
+- Issue #27 (assigned to Codex, in progress): split base video generation from optional lip-sync into separate approval-gated stages. PR #31 splits base video from final export; the optional-lip-sync-as-its-own-gate half is still in progress — Codex was mid-way through it (`Add optional lip sync review gate`) when the July 15 unavailability window started.
 
-Status: open
+## Codex unavailable until 2026-07-15
 
-Purpose:
-
-- Split the front audio-prep phase into guided, visible user-triggered steps.
-- Prevent silent Ken Burns fallback output.
-- Stop paid/API image generation when real video output is not configured.
-- Preserve an explicit $0 local smoke-test path when preview/slideshow mode is deliberately enabled.
-
-## Current major issue
-
-Issue #20: `Build production-workbook pipeline interface with editable gated stages`
-
-Purpose:
-
-- Replace hidden pipeline behavior with a visible production workbook.
-- Let the user edit, approve, retry, regenerate, or stop at each major stage.
-- Prevent wasted tokens by stopping before downstream work if upstream results are bad.
-
-## Active Codex branch
-
-`codex/issue-20-workbook-shell`
-
-Current slice:
-
-- Workbook shell on the project page.
-- Explicit one-step creative worker endpoints.
-- Creative stages paused until the workbook starts the next section.
-- Production path selection added for Lyric, Karaoke, Performance, Cinematic, or a hybrid of any two; the selection is stored on the project and included in AI creative context.
-- Persisted workbook section statuses added, with approve/reject controls for generated sections and upstream approval checks before expensive/manual pipeline actions.
-- Element and storyboard image review now supports per-asset approve/reject statuses; section approval requires every relevant image/frame to be approved.
-- Shot Manifest review now supports importing a guide, manually adding shots, editing shot fields, deleting mistakes, and approval preflight for required timing/action fields.
-- Base video generation now stores `base_video_url` and pauses at `base_video_ready`; final approval selects `final_video_url`, mirrors it to legacy `video_url`, and only then marks the project complete.
+Claude Code is driving repo work directly until then, including finishing PR #31's remaining scope. Do not assume Codex will pick up new work before that date.
 
 ## Primary implementation brief
 
 Read:
 
-`docs/production-workbook-implementation-plan.md`
+`docs/production-workbook-implementation-plan.md` for the workbook rebuild (issue #20).
 
-That document is the primary architecture and implementation plan for the production-workbook rebuild.
+`docs/decision-log.md`'s 2026-07-09 entries for the five-production-paths goal (issue #29) — no separate implementation-plan doc exists yet for this; write one before starting implementation, the same way `production-workbook-implementation-plan.md` anchored issue #20.
 
 ## Collaboration rules
 
@@ -166,18 +159,21 @@ py run.py --no-install --allow-preview-video
 
 ## Recommended next issues
 
-Break Issue #20 into smaller implementation issues before coding the full rebuild:
+Issue #20 breakdown, updated status:
 
-1. Add workbook shell UI.
-2. Add explicit section status model.
-3. Stop automatic creative progression after song review.
-4. Add Element Plan gate.
-5. Add Element Images review gate.
-6. Add Shot Manifest editor.
-7. Add Storyboard Images review gate.
-8. Split Base Video and Optional Lip Sync.
-9. Add token/compute preflight checks.
-10. Add duplicate/timeline validation warnings.
+1. Add workbook shell UI. — done (PR #22).
+2. Add explicit section status model. — not started.
+3. Stop automatic creative progression after song review. — done (PR #22).
+4. Add Element Plan gate. — done (PR #22, part of the manual-action shell).
+5. Add Element Images review gate. — done (PR #22).
+6. Add Shot Manifest editor. — not started (manifests are still import/seed-only, no LLM-generated manifest editor exists yet).
+7. Add Storyboard Images review gate. — done (PR #22).
+8. Split Base Video and Optional Lip Sync. — not started, tracked as issue #27 (assigned to Codex).
+9. Add token/compute preflight checks. — not started.
+10. Add duplicate/timeline validation warnings. — not started.
+
+Plus, new as of 2026-07-09: issue #29 (five production paths) needs its own
+file-by-file plan before any of it is implemented.
 
 ## Recommended next agent workflow
 
@@ -263,8 +259,8 @@ Use this only when the user/developer intentionally wants `$0` placeholder/ffmpe
 ```powershell
 cd "C:\Users\booki\HTXpunk LLC\htxpunk-mv-generator"
 git fetch origin --prune
-git switch guided-audio-steps
-git pull origin guided-audio-steps
+git switch main
+git pull origin main
 ```
 
 ## Warning

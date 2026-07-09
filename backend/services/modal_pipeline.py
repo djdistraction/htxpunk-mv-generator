@@ -48,12 +48,18 @@ def assemble_with_modal(
     audio_path: str,
     panels: list[dict],
     output_filename: str = "final.mp4",
+    run_lipsync: bool = False,
 ) -> str:
-    """Generate every panel's clip in parallel on Modal, concatenate, mux
-    audio, then lip-sync (unless disabled). Returns the final storage URL.
+    """Generate every panel's clip in parallel on Modal, concatenate and mux
+    audio. Returns the base video's storage URL.
 
-    Raises on failure at any stage — including lip-sync — rather than
-    silently shipping a lesser video and marking the project complete.
+    Lip sync is opt-in (run_lipsync=False by default) and applied separately
+    from base rendering — see apply_lipsync_to_video() — so base video
+    generation stays reviewable and never spends lip-sync compute unless the
+    user explicitly asks for it after approving the base render.
+
+    Raises on failure rather than silently shipping a lesser video and
+    marking the project complete.
     """
     if not panels:
         raise ValueError(f"No storyboard panels found for project {project_id}")
@@ -129,7 +135,7 @@ def assemble_with_modal(
             shutil.move(str(silent_video), str(synced_video))
 
         final_path = synced_video
-        if settings.lipsync_enabled and has_audio:
+        if run_lipsync and settings.lipsync_enabled and has_audio:
             logger.info("[modal-assemble] running Wav2Lip lip-sync pass on Modal…")
             lipsync_fn = _modal_function("apply_lipsync_remote")
             with open(synced_video, "rb") as f:
@@ -139,12 +145,50 @@ def assemble_with_modal(
             lipsynced_bytes = lipsync_fn.remote(video_bytes, audio_bytes)
             final_path = workdir / output_filename
             final_path.write_bytes(lipsynced_bytes)
-        elif not settings.lipsync_enabled:
+        elif run_lipsync and not settings.lipsync_enabled:
             logger.info("[modal-assemble] LIPSYNC_ENABLED=false — shipping without lip-sync")
 
         storage_key = f"projects/{project_id}/videos/{output_filename}"
         url = upload_file_path(str(final_path), storage_key, "video/mp4")
         logger.info("[modal-assemble] complete → %s", url)
+        return url
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+def apply_lipsync_to_video(
+    project_id: str,
+    video_path: str,
+    audio_path: str,
+    output_filename: str = "lipsynced.mp4",
+) -> str:
+    """Apply Wav2Lip to an already approved base video.
+
+    Deliberately separate from base rendering so failed lip-sync work never
+    overwrites the reviewed base video.
+    """
+    if not settings.lipsync_enabled:
+        raise RuntimeError("Lip sync is disabled. Set LIPSYNC_ENABLED=true before running this step.")
+    if not video_path or not os.path.exists(video_path):
+        raise RuntimeError("Base video file is missing; generate and approve the base video first.")
+    if not audio_path or not os.path.exists(audio_path):
+        raise RuntimeError("Audio file is missing; lip sync requires the project audio.")
+
+    logger.info("[modal-lipsync] running Wav2Lip for %s", project_id[:8])
+    lipsync_fn = _modal_function("apply_lipsync_remote")
+    with open(video_path, "rb") as f:
+        video_bytes = f.read()
+    with open(audio_path, "rb") as f:
+        audio_bytes = f.read()
+    lipsynced_bytes = lipsync_fn.remote(video_bytes, audio_bytes)
+
+    workdir = Path(tempfile.mkdtemp(prefix=f"mv_lipsync_{project_id[:8]}_"))
+    try:
+        out_path = workdir / output_filename
+        out_path.write_bytes(lipsynced_bytes)
+        storage_key = f"projects/{project_id}/videos/{output_filename}"
+        url = upload_file_path(str(out_path), storage_key, "video/mp4")
+        logger.info("[modal-lipsync] complete → %s", url)
         return url
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
