@@ -16,6 +16,7 @@ from utils.storage import upload_bytes, upload_file_path, url_to_local_path, del
 router = APIRouter()
 
 ALLOWED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".mp4"}
+ALLOWED_PRODUCTION_PATHS = {"lyric", "karaoke", "performance", "cinematic"}
 _WINDOWS_ILLEGAL_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
@@ -32,6 +33,41 @@ def _validate_audio_file(filename: str | None):
             status_code=400,
             detail=f"Unsupported file type '{ext or '(none)'}' — only .wav, .mp3, and .mp4 are accepted.",
         )
+
+
+def _normalize_production_paths(raw) -> list[str]:
+    """Validate the selected music-video path.
+
+    A project can use one base path or a hybrid of any two:
+    lyric, karaoke, performance, cinematic.
+    """
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw) if raw.strip() else []
+        except json.JSONDecodeError:
+            raw = [p.strip() for p in raw.split(",") if p.strip()]
+    if raw is None:
+        raw = []
+    if not isinstance(raw, list):
+        raise HTTPException(status_code=400, detail="production_paths must be a list.")
+
+    paths: list[str] = []
+    for item in raw:
+        key = str(item).strip().lower()
+        if key and key not in paths:
+            paths.append(key)
+
+    invalid = [p for p in paths if p not in ALLOWED_PRODUCTION_PATHS]
+    if invalid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported production path: {', '.join(invalid)}.",
+        )
+    if not paths:
+        raise HTTPException(status_code=400, detail="Select at least one production path.")
+    if len(paths) > 2:
+        raise HTTPException(status_code=400, detail="Select one path or a hybrid of any two paths.")
+    return paths
 
 
 def _get_project_or_404(project_id: str) -> dict:
@@ -138,12 +174,14 @@ async def list_projects():
 @router.post("")
 async def create_project(data: ProjectCreate):
     project_id = str(uuid.uuid4())
-    return db_create_project(project_id, data.title, data.artist)
+    production_paths = _normalize_production_paths(data.production_paths or ["cinematic"])
+    return db_create_project(project_id, data.title, data.artist, production_paths=production_paths)
 
 
 @router.post("/upload-audio")
 async def create_and_upload(
     title: str = Form(...),
+    production_paths: str = Form('["cinematic"]'),
     bpm: str = Form(""),
     musical_key: str = Form(""),
     beat_grid: str = Form("[]"),
@@ -159,9 +197,10 @@ async def create_and_upload(
     _validate_audio_file(file.filename)
     if vocals_file is not None and vocals_file.filename:
         _validate_audio_file(vocals_file.filename)
+    selected_paths = _normalize_production_paths(production_paths)
 
     project_id = str(uuid.uuid4())
-    db_create_project(project_id, title, "")
+    db_create_project(project_id, title, "", production_paths=selected_paths)
 
     contents = await file.read()
     key = f"projects/{project_id}/audio/{_sanitize_filename(file.filename)}"
@@ -396,6 +435,8 @@ async def confirm_project_info(project_id: str, payload: ProjectInfoConfirm):
     updates = payload.model_dump(exclude_unset=True)
     if "brief" in updates:
         updates["user_brief"] = updates.pop("brief")
+    if "production_paths" in updates:
+        updates["production_paths"] = _normalize_production_paths(updates["production_paths"])
     if updates:
         db_update_project(project_id, **updates)
         project = db_get_project(project_id)

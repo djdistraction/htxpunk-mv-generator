@@ -4,11 +4,13 @@ from datetime import datetime
 import uuid
 
 PipelineStage = Literal[
-    "uploaded", "preprocessing_audio", "awaiting_project_info_review",
+    "uploaded", "audio_uploaded", "rhythm_key_analyzed", "audio_prepared",
+    "metadata_ready", "vocals_ready", "preprocessing_audio", "awaiting_project_info_review",
     "info_confirmed", "interpreting_song", "analyzed",
     "treatment_pending", "awaiting_treatment_approval", "treatment_approved",
     "extracting_elements", "elements_ready",
-    "generating_backgrounds", "generating_elements",
+    "generating_backgrounds", "generating_elements", "generating_images", "images_ready",
+    "awaiting_manifest_approval", "manifest_approved", "generating_manifest_images",
     "building_storyboard", "awaiting_storyboard_approval", "storyboard_approved",
     "generating_clips", "assembling", "complete", "error"
 ]
@@ -21,6 +23,7 @@ class Project(BaseModel):
     stage: PipelineStage = "uploaded"
     audio_url: Optional[str] = None
     video_url: Optional[str] = None
+    production_paths: list[str] = Field(default_factory=list)
     analysis: Optional[dict] = None
     treatment: Optional[dict] = None
     elements: Optional[dict] = None
@@ -31,6 +34,7 @@ class Project(BaseModel):
 class ProjectCreate(BaseModel):
     title: str
     artist: str
+    production_paths: list[str] = Field(default_factory=list)
 
 
 class ProjectInfoConfirm(BaseModel):
@@ -50,3 +54,4 @@ class ProjectInfoConfirm(BaseModel):
     transcript: Optional[dict] = None
     series_id: Optional[str] = None
     brief: Optional[str] = None
+    production_paths: Optional[list[str]] = None

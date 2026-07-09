@@ -7,6 +7,13 @@ import ReferenceUploader, { ReferenceItem, appendReferences } from '@/components
 
 type Segment = { start: number; end?: number; text: string }
 
+const PRODUCTION_PATHS = [
+  { key: 'lyric', label: 'Lyric Video' },
+  { key: 'karaoke', label: 'Karaoke Video' },
+  { key: 'performance', label: 'Performance Music Video' },
+  { key: 'cinematic', label: 'Cinematic Music Video' },
+]
+
 export default function ReviewDetail({ id }: { id: string }) {
   const router = useRouter()
   const [project, setProject] = useState<any>(null)
@@ -19,6 +26,7 @@ export default function ReviewDetail({ id }: { id: string }) {
   const [composer, setComposer] = useState('')
   const [album, setAlbum] = useState('')
   const [segments, setSegments] = useState<Segment[]>([])
+  const [productionPaths, setProductionPaths] = useState<string[]>([])
 
   const [seriesList, setSeriesList] = useState<any[]>([])
   const [seriesId, setSeriesId] = useState('')
@@ -47,6 +55,7 @@ export default function ReviewDetail({ id }: { id: string }) {
           setComposer(data.composer || '')
           setAlbum(data.album || '')
           setSegments(data.transcript?.segments || [])
+          setProductionPaths(Array.isArray(data.production_paths) && data.production_paths.length > 0 ? data.production_paths : ['cinematic'])
           setSeriesId(data.series_id || '')
           setBrief(data.user_brief || '')
         }
@@ -76,6 +85,10 @@ export default function ReviewDetail({ id }: { id: string }) {
   }
 
   const handleSave = async () => {
+    if (productionPaths.length < 1 || productionPaths.length > 2) {
+      alert('Choose one production path, or a hybrid of any two.')
+      return
+    }
     setWorking(true)
     try {
       if (references.length > 0) {
@@ -90,6 +103,7 @@ export default function ReviewDetail({ id }: { id: string }) {
         composer: composer.trim(),
         album: album.trim(),
         transcript: { ...(project.transcript || {}), segments },
+        production_paths: productionPaths,
         series_id: seriesId || undefined,
         brief: brief.trim(),
       })
@@ -98,6 +112,14 @@ export default function ReviewDetail({ id }: { id: string }) {
       alert('Could not save — is the backend running?')
       setWorking(false)
     }
+  }
+
+  const toggleProductionPath = (path: string) => {
+    setProductionPaths(current => {
+      if (current.includes(path)) return current.filter(item => item !== path)
+      if (current.length >= 2) return current
+      return [...current, path]
+    })
   }
 
   if (loading) return (
@@ -151,6 +173,39 @@ export default function ReviewDetail({ id }: { id: string }) {
               <Locked label="Length" value={project.song_length ? `${project.song_length}s` : '—'} />
               <Locked label="BPM" value={project.bpm || 'Not measured'} />
               <Locked label="Key" value={project.musical_key || 'Not measured'} />
+            </div>
+          </div>
+
+          <div className="bg-gray-900 rounded-xl p-5 border border-gray-800">
+            <div className="flex items-center justify-between gap-4 mb-3">
+              <h2 className="text-xs text-gray-500 uppercase tracking-widest">Production Path</h2>
+              <span className="text-gray-500 text-xs">Choose one, or combine any two</span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              {PRODUCTION_PATHS.map(path => {
+                const selected = productionPaths.includes(path.key)
+                const disabled = !selected && productionPaths.length >= 2
+                return (
+                  <label
+                    key={path.key}
+                    className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
+                      selected
+                        ? 'border-purple-600 bg-purple-950/40 text-white'
+                        : disabled
+                          ? 'border-gray-800 bg-gray-950/30 text-gray-600 cursor-not-allowed'
+                          : 'border-gray-700 bg-gray-800 text-gray-300 hover:border-purple-500 cursor-pointer'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      disabled={disabled}
+                      onChange={() => toggleProductionPath(path.key)}
+                    />
+                    {path.label}
+                  </label>
+                )
+              })}
             </div>
           </div>
 

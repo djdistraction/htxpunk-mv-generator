@@ -44,6 +44,7 @@ Current slice:
 - Workbook shell on the project page.
 - Explicit one-step creative worker endpoints.
 - Creative stages paused until the workbook starts the next section.
+- Production path selection added for Lyric, Karaoke, Performance, Cinematic, or a hybrid of any two; the selection is stored on the project and included in AI creative context.
 
 ## Primary implementation brief
 

@@ -4,18 +4,54 @@ import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { api } from '@/lib/api'
 
+const PRODUCTION_PATHS = [
+  {
+    key: 'lyric',
+    label: 'Lyric Video',
+    description: 'Typography, lyric moments, graphic rhythm, and visual hooks around the words.',
+  },
+  {
+    key: 'karaoke',
+    label: 'Karaoke Video',
+    description: 'Sing-along timing, readable lyric highlighting, and performance-friendly pacing.',
+  },
+  {
+    key: 'performance',
+    label: 'Performance Music Video',
+    description: 'Artist, band, character, or staged performance coverage driven by the song.',
+  },
+  {
+    key: 'cinematic',
+    label: 'Cinematic Music Video',
+    description: 'Narrative scenes, locations, characters, motifs, and shot-driven storytelling.',
+  },
+]
+
 export default function NewProjectPage() {
   const router = useRouter()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const vocalsInputRef = useRef<HTMLInputElement>(null)
   const [title, setTitle] = useState('')
+  const [productionPaths, setProductionPaths] = useState<string[]>(['cinematic'])
   const [file, setFile] = useState<File | null>(null)
   const [hasVocalStems, setHasVocalStems] = useState(false)
   const [vocalsFile, setVocalsFile] = useState<File | null>(null)
   const [error, setError] = useState('')
   const [uploading, setUploading] = useState(false)
 
-  const canSubmit = Boolean(file && title.trim() && (!hasVocalStems || vocalsFile))
+  const canSubmit = Boolean(file && title.trim() && productionPaths.length >= 1 && productionPaths.length <= 2 && (!hasVocalStems || vocalsFile))
+
+  const toggleProductionPath = (path: string) => {
+    setProductionPaths(current => {
+      if (current.includes(path)) {
+        return current.filter(item => item !== path)
+      }
+      if (current.length >= 2) {
+        return current
+      }
+      return [...current, path]
+    })
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -25,6 +61,7 @@ export default function NewProjectPage() {
     try {
       const formData = new FormData()
       formData.append('title', title.trim())
+      formData.append('production_paths', JSON.stringify(productionPaths))
       formData.append('file', file)
       if (hasVocalStems && vocalsFile) {
         formData.append('vocals_file', vocalsFile)
@@ -46,7 +83,7 @@ export default function NewProjectPage() {
             <div className="h-full bg-purple-600 transition-all duration-500 ease-out" style={{ width: '50%' }} />
           </div>
           <p className="text-gray-600 text-sm mt-4">
-            The app is only saving the original file. Rhythm, key, metadata, vocals, and lyrics will run as separate steps on the project page.
+            The app is saving the original file and selected production path. Rhythm, key, metadata, vocals, and lyrics will run as separate steps on the project page.
           </p>
           {error && (
             <div className="mt-6 bg-red-900/30 border border-red-700 rounded-lg p-3 text-red-300 text-sm">
@@ -65,7 +102,7 @@ export default function NewProjectPage() {
 
         <h1 className="text-3xl font-bold mt-6 mb-2">New Music Video</h1>
         <p className="text-gray-400 mb-8">
-          Start by uploading the song. The project page will walk through each processing step one at a time with its own result and retry point.
+          Start by choosing the production path and uploading the song. The project page will walk through each processing step one at a time with its own result and retry point.
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-6">
@@ -79,6 +116,50 @@ export default function NewProjectPage() {
               placeholder="e.g. Midnight Run"
               className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
             />
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between gap-4 mb-2">
+              <label className="block text-sm font-medium text-gray-300">Production Path *</label>
+              <span className={`text-xs ${productionPaths.length === 2 ? 'text-yellow-300' : 'text-gray-500'}`}>
+                Choose one, or combine any two
+              </span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {PRODUCTION_PATHS.map(path => {
+                const selected = productionPaths.includes(path.key)
+                const disabled = !selected && productionPaths.length >= 2
+                return (
+                  <label
+                    key={path.key}
+                    className={`block border rounded-lg p-4 transition-colors ${
+                      selected
+                        ? 'bg-purple-950/50 border-purple-600'
+                        : disabled
+                          ? 'bg-gray-900/40 border-gray-800 opacity-50 cursor-not-allowed'
+                          : 'bg-gray-900 border-gray-700 hover:border-purple-500 cursor-pointer'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        disabled={disabled}
+                        onChange={() => toggleProductionPath(path.key)}
+                        className="mt-1"
+                      />
+                      <div>
+                        <div className="font-semibold text-white">{path.label}</div>
+                        <p className="text-gray-500 text-sm mt-1 leading-relaxed">{path.description}</p>
+                      </div>
+                    </div>
+                  </label>
+                )
+              })}
+            </div>
+            {productionPaths.length === 0 && (
+              <p className="text-red-300 text-sm mt-2">Select at least one production path.</p>
+            )}
           </div>
 
           <div>

@@ -27,6 +27,7 @@ class ProjectRow(Base):
     converted_audio_url = Column(String)  # canonical mp3, produced by audio_preprocessor.convert_to_mp3
     user_vocals_url = Column(String)      # user-supplied pre-isolated vocal stem — skips separate_vocals() when set
     user_brief = Column(Text)            # user's free-text creative vision (optional)
+    production_paths = Column(Text)       # JSON list: lyric | karaoke | performance | cinematic; max 2 selections
     analysis = Column(Text)              # JSON
     treatment = Column(Text)             # JSON
     elements = Column(Text)              # JSON
@@ -116,6 +117,7 @@ def _migrate_db():
     _add_column_if_missing(conn, "projects", "revision_notes", "TEXT")
     _add_column_if_missing(conn, "projects", "panel_order", "TEXT")
     _add_column_if_missing(conn, "projects", "user_brief", "TEXT")
+    _add_column_if_missing(conn, "projects", "production_paths", "TEXT")
     _add_column_if_missing(conn, "projects", "composer", "TEXT")
     _add_column_if_missing(conn, "projects", "album", "TEXT")
     _add_column_if_missing(conn, "projects", "song_length", "TEXT")
@@ -159,18 +161,18 @@ def db_list_projects() -> list[dict]:
     result = []
     for row in rows:
         d = dict(row)
-        for field in ("analysis", "treatment", "elements", "panel_order", "beat_grid", "transcript"):
+        for field in ("analysis", "treatment", "elements", "panel_order", "beat_grid", "transcript", "production_paths"):
             if d.get(field):
                 d[field] = json.loads(d[field])
         result.append(d)
     return result
 
-def db_create_project(project_id: str, title: str, artist: str) -> dict:
+def db_create_project(project_id: str, title: str, artist: str, production_paths: list[str] | None = None) -> dict:
     conn = _sync_db()
     now = datetime.utcnow().isoformat()
     conn.execute(
-        "INSERT INTO projects (id, title, artist, stage, created_at, updated_at) VALUES (?,?,?,?,?,?)",
-        (project_id, title, artist, "uploaded", now, now)
+        "INSERT INTO projects (id, title, artist, stage, production_paths, created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
+        (project_id, title, artist, "uploaded", json.dumps(production_paths or []), now, now)
     )
     conn.commit()
     conn.close()
@@ -184,7 +186,7 @@ def db_get_project(project_id: str) -> dict | None:
     if not row:
         return None
     d = dict(row)
-    for field in ("analysis", "treatment", "elements", "panel_order", "beat_grid", "transcript"):
+    for field in ("analysis", "treatment", "elements", "panel_order", "beat_grid", "transcript", "production_paths"):
         if d.get(field):
             d[field] = json.loads(d[field])
     return d

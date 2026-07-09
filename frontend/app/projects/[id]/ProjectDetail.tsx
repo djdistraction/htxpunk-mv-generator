@@ -29,6 +29,13 @@ type WorkbookSection = {
   }
 }
 
+const PRODUCTION_PATH_LABELS: Record<string, string> = {
+  lyric: 'Lyric Video',
+  karaoke: 'Karaoke Video',
+  performance: 'Performance Music Video',
+  cinematic: 'Cinematic Music Video',
+}
+
 const STAGE_LABELS: Record<string, string> = {
   audio_uploaded: 'Song uploaded',
   rhythm_key_analyzed: 'Rhythm and key analyzed',
@@ -131,6 +138,13 @@ function countElements(project: any): number {
   )
 }
 
+function productionPathSummary(project: any): string {
+  const paths = Array.isArray(project?.production_paths) ? project.production_paths : []
+  if (paths.length === 0) return 'No production path selected.'
+  const labels = paths.map((path: string) => PRODUCTION_PATH_LABELS[path] || path)
+  return labels.length === 1 ? labels[0] : `Hybrid: ${labels.join(' + ')}`
+}
+
 function statusClass(status: SectionStatus): string {
   switch (status) {
     case 'approved':
@@ -196,8 +210,10 @@ function buildWorkbookSections(project: any): WorkbookSection[] {
       title: 'Project Setup',
       purpose: 'Confirm title, artist, creative brief, references, and series context.',
       status: infoApproved ? 'approved' : project.stage === 'awaiting_project_info_review' ? 'ready' : project.audio_url ? 'locked' : 'empty',
-      required: ['title', 'artist or intentional blank', 'creative direction'],
-      output: infoApproved ? 'Project setup approved.' : project.stage === 'awaiting_project_info_review' ? 'Extracted info is ready to review.' : 'Waiting for audio preparation and transcript.',
+      required: ['title', 'production path', 'artist or intentional blank', 'creative direction'],
+      output: `${productionPathSummary(project)} | ${
+        infoApproved ? 'Project setup approved.' : project.stage === 'awaiting_project_info_review' ? 'Extracted info is ready to review.' : 'Waiting for audio preparation and transcript.'
+      }`,
       needs: project.stage === 'awaiting_project_info_review' ? undefined : 'Lyrics and metadata ready for review',
       primaryAction: project.stage === 'awaiting_project_info_review'
         ? { label: 'Review setup', href: 'review' }

@@ -31,6 +31,13 @@ from utils.storage import url_to_local_path
 
 logger = logging.getLogger(__name__)
 
+PRODUCTION_PATH_LABELS = {
+    "lyric": "Lyric Video",
+    "karaoke": "Karaoke Video",
+    "performance": "Performance Music Video",
+    "cinematic": "Cinematic Music Video",
+}
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -55,6 +62,12 @@ def _collect_creative_context(project_id: str, project: dict) -> tuple[str, str]
     builds on the user's vision instead of starting from scratch.
     """
     creative_brief = (project.get("user_brief") or "").strip()
+    production_paths = project.get("production_paths") or []
+    if production_paths:
+        labels = [PRODUCTION_PATH_LABELS.get(path, str(path)) for path in production_paths]
+        mode = "Hybrid production path" if len(labels) > 1 else "Production path"
+        path_brief = f"{mode}: {' + '.join(labels)}."
+        creative_brief = f"{path_brief}\n\n{creative_brief}".strip()
 
     refs = db_get_assets(project_id, asset_type="reference")
     lines: list[str] = []

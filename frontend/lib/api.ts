@@ -104,7 +104,7 @@ export const api = {
     confirmInfo: async (id: string, payload: {
       title?: string; artist?: string; composer?: string; album?: string
       bpm?: string; musical_key?: string; beat_grid?: number[]
-      transcript?: object; series_id?: string; brief?: string
+      transcript?: object; series_id?: string; brief?: string; production_paths?: string[]
     }) => {
       const { data } = await client.post(`/api/projects/${id}/confirm-info`, payload)
       return data
