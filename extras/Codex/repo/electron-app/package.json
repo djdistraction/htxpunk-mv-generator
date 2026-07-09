@@ -1,0 +1,74 @@
+{
+  "name": "htxpunk-mv-generator",
+  "version": "1.0.0",
+  "description": "HTXpunk Music Video Generator - Desktop App",
+  "main": "main.js",
+  "author": "HTXpunk Productions",
+  "license": "Proprietary",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build:frontend": "node scripts/build-frontend.js",
+    "predist": "npm run build:frontend",
+    "predist:win": "npm run build:frontend",
+    "predist:mac": "npm run build:frontend",
+    "predist:linux": "npm run build:frontend",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux"
+  },
+  "dependencies": {
+    "electron-is-dev": "^2.0.0"
+  },
+  "devDependencies": {
+    "electron": "^27.0.0",
+    "electron-builder": "^24.6.4"
+  },
+  "build": {
+    "appId": "tv.thevoodoohut.mvgenerator",
+    "productName": "HTXpunk MV Generator",
+    "files": [
+      "main.js",
+      "preload.js",
+      "setup.html",
+      "splash.html",
+      "public/**/*",
+      "assets/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../backend",
+        "to": "backend",
+        "filter": ["**/*", "!storage/**/*", "!**/__pycache__/**/*", "!**/*.pyc", "!*.db"]
+      },
+      {
+        "from": "../frontend/.next/standalone",
+        "to": "frontend"
+      }
+    ],
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "HTXpunk MV Generator"
+    },
+    "mac": {
+      "icon": "assets/icon.png",
+      "target": ["dmg", "zip"]
+    },
+    "linux": {
+      "icon": "assets/icon.png",
+      "target": ["AppImage"]
+    }
+  }
+}

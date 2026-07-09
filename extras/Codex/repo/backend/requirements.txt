@@ -1,0 +1,53 @@
+# API framework
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-multipart==0.0.9
+
+# Task queue (memory broker — no Redis needed for local dev)
+
+# LLM — Groq is OpenAI-compatible, free tier
+openai==1.51.0
+groq==0.11.0
+
+# Audio transcription — faster-whisper: Python 3.13 compatible, faster than openai-whisper
+faster-whisper==1.1.1
+
+# Vocal isolation before transcription — gives Whisper a clean vocal stem
+# instead of the full instrumental mix (confirmed root cause of a real
+# empty-transcript failure). Pulls in torch; accepted cost for quality-first.
+audio-separator[cpu]>=0.24.0
+
+# Audio file tag reading/writing (title/artist/composer/album, ID3 tags)
+mutagen==1.48.1
+
+# Image generation — Gemini 2.5 Flash Image (free tier, 500 images/day)
+requests>=2.31.0
+Pillow>=12.1.0
+
+# Background removal — for element cutouts
+rembg==2.0.76
+onnxruntime==1.20.1
+
+# Database — SQLite, no server needed
+aiosqlite==0.20.0
+sqlalchemy==2.0.35
+
+# Storage — local filesystem for now, swap to S3/R2 later
+aiofiles==24.1.0
+
+# Utilities
+pydantic-settings==2.5.2
+httpx==0.27.2
+python-dotenv==1.0.1
+pydub==0.25.1
+
+# Production guide import (Excel parsing)
+openpyxl==3.1.5
+
+# Video assembly — bundled ffmpeg binary fallback when ffmpeg isn't on PATH
+imageio-ffmpeg==0.5.1
+
+# Video assembly (modal backend) — calls the deployed Modal app by name;
+# requires `modal deploy backend/services/modal_video_worker.py` to have
+# been run at least once, plus MODAL_TOKEN_ID/MODAL_TOKEN_SECRET in .env
+modal>=0.65.0
