@@ -16,8 +16,10 @@ jobs:
           python-version: "3.11"
           cache: "pip"
           cache-dependency-path: backend/requirements.txt
-      - name: Install espeak-ng (lyric forced alignment)
-        run: sudo apt-get update && sudo apt-get install -y espeak-ng
+      - name: Install espeak-ng and ffmpeg (lyric forced alignment)
+        # ffmpeg provides ffprobe — not guaranteed present on the runner
+        # image, and the bundled imageio-ffmpeg package only ships ffmpeg.
+        run: sudo apt-get update && sudo apt-get install -y espeak-ng ffmpeg
       - name: Install dependencies
         working-directory: backend
         run: pip install -r requirements.txt
