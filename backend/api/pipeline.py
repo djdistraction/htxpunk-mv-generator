@@ -9,6 +9,11 @@ from database import (
     db_list_shot_manifests, db_update_shot_manifest,
     db_get_series, db_get_assets, db_update_asset,
 )
+from services.workbook_status import (
+    get_section_statuses,
+    section_is_approved,
+    set_section_status,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -50,6 +55,9 @@ def _start_manual_worker(
     worker_name: str,
     allowed_stages: set[str],
     message: str,
+    *,
+    target_section: str | None = None,
+    required_sections: tuple[str, ...] = (),
 ):
     """Run exactly one pipeline worker from an explicit workbook action."""
     project = db_get_project(project_id)
@@ -63,6 +71,16 @@ def _start_manual_worker(
                 f"(stage={project.get('stage')})."
             ),
         )
+    statuses = get_section_statuses(project)
+    if statuses:
+        missing = [section for section in required_sections if not section_is_approved(project, section)]
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Approve these workbook sections first: {', '.join(missing)}.",
+            )
+    if target_section:
+        set_section_status(project_id, target_section, "running", message=message)
 
     def _run():
         try:
@@ -77,6 +95,8 @@ def _start_manual_worker(
                 err_detail,
             )
             db_update_project(project_id, stage="error", error_message=str(exc))
+            if target_section:
+                set_section_status(project_id, target_section, "failed", error=str(exc))
 
     threading.Thread(
         target=_run,
@@ -95,6 +115,8 @@ async def run_song_analysis(project_id: str):
         "run_song_interpretation",
         {"info_confirmed"},
         "Song analysis started",
+        target_section="song_analysis",
+        required_sections=("project_setup", "song_file", "rhythm_key", "lyrics"),
     )
 
 
@@ -105,6 +127,8 @@ async def generate_treatment(project_id: str):
         "run_treatment_generation",
         {"analyzed"},
         "Treatment generation started",
+        target_section="treatment",
+        required_sections=("song_analysis",),
     )
 
 
@@ -115,6 +139,8 @@ async def generate_element_plan(project_id: str):
         "run_element_extraction",
         {"treatment_approved"},
         "Element plan generation started",
+        target_section="element_plan",
+        required_sections=("treatment",),
     )
 
 
@@ -125,6 +151,8 @@ async def generate_element_images(project_id: str):
         "run_image_generation",
         {"elements_ready"},
         "Element image generation started",
+        target_section="element_images",
+        required_sections=("element_plan",),
     )
 
 
@@ -135,6 +163,8 @@ async def build_storyboard(project_id: str):
         "run_storyboard_build",
         {"images_ready"},
         "Storyboard image generation started",
+        target_section="storyboard_images",
+        required_sections=("element_images",),
     )
 
 
@@ -145,6 +175,8 @@ async def generate_manifest_images(project_id: str):
         "run_manifest_generation",
         {"manifest_approved"},
         "Manifest-driven storyboard image generation started",
+        target_section="storyboard_images",
+        required_sections=("shot_manifest",),
     )
 
 
@@ -155,6 +187,8 @@ async def generate_base_video(project_id: str):
         "run_video_assembly",
         {"storyboard_approved"},
         "Base video generation started",
+        target_section="final_video",
+        required_sections=("storyboard_images",),
     )
 
 
@@ -174,6 +208,7 @@ async def approve_treatment(project_id: str, body: TreatmentApproval = Treatment
         updates["treatment"] = body.treatment
 
     db_update_project(project_id, **updates)
+    set_section_status(project_id, "treatment", "approved", message="Treatment approved.")
     return {"message": "Treatment approved. Element Plan is ready to run."}
 
 
@@ -192,6 +227,7 @@ async def revise_treatment(project_id: str, body: TreatmentRevision):
         revision_notes=body.feedback,
         stage="analyzed",   # orchestrator will re-run treatment generation
     )
+    set_section_status(project_id, "treatment", "rejected", message=body.feedback)
     return {"message": "Revision noted — regenerating treatment"}
 
 
@@ -212,6 +248,7 @@ async def approve_storyboard(project_id: str, body: StoryboardApproval):
         panel_order=body.panel_order,
         stage="storyboard_approved",
     )
+    set_section_status(project_id, "storyboard_images", "approved", message="Storyboard images approved.")
     return {"message": "Storyboard approved. Base video generation is ready to run."}
 
 
@@ -339,6 +376,7 @@ async def approve_manifests(project_id: str, body: ManifestApproval = ManifestAp
         stage="manifest_approved",
         revision_notes=body.revision_notes,
     )
+    set_section_status(project_id, "shot_manifest", "approved", message="Shot manifest approved.")
     return {"message": "Shot manifests locked. Storyboard image generation is ready to run."}
 
 
@@ -357,6 +395,7 @@ async def revise_manifests(project_id: str, body: ManifestApproval):
         revision_notes=body.revision_notes,
         stage="analyzed",
     )
+    set_section_status(project_id, "shot_manifest", "rejected", message=body.revision_notes)
     return {"message": "Manifest revision noted — regenerating treatment"}
 
 
@@ -394,6 +433,7 @@ async def import_production_guide(project_id: str, file: UploadFile = File(...))
             stage="awaiting_manifest_approval",
             revision_notes=f"Imported {len(manifest_ids)} shot manifests from production guide",
         )
+        set_section_status(project_id, "shot_manifest", "generated", message=f"Imported {len(manifest_ids)} shot manifests.")
 
         return {
             "message": f"Imported {len(manifest_ids)} shot manifests",

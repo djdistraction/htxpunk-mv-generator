@@ -12,6 +12,7 @@ from database import (
     db_list_series, db_create_series, db_get_series,
 )
 from utils.storage import upload_bytes, upload_file_path, url_to_local_path, delete_project_files
+from services.workbook_status import set_section_status, validate_section_key
 
 router = APIRouter()
 
@@ -93,6 +94,10 @@ def _local_audio_path(url: str | None, suffix: str = ".audio") -> str:
 
 def _set_guided_failure(project_id: str, step: str, exc: Exception):
     db_update_project(project_id, processing_step=f"Failed: {step}", error_message=str(exc))
+
+
+def _mark_generated(project_id: str, section_key: str, message: str):
+    set_section_status(project_id, section_key, "generated", message=message)
 
 
 _TEXT_EXTENSIONS = {".txt", ".md", ".markdown", ".rtf", ".csv"}
@@ -231,6 +236,9 @@ async def create_and_upload(
         )
 
     db_update_project(project_id, **updates)
+    _mark_generated(project_id, "song_file", "Song file uploaded and ready for review.")
+    if updates.get("bpm") or updates.get("musical_key") or updates.get("beat_grid"):
+        _mark_generated(project_id, "rhythm_key", "Browser rhythm/key analysis was supplied during upload.")
     return db_get_project(project_id)
 
 
@@ -297,6 +305,7 @@ async def guided_analyze_rhythm_key(project_id: str, payload: dict):
         processing_step="Analyze Rhythm & Key complete",
         error_message="",
     )
+    _mark_generated(project_id, "rhythm_key", "Rhythm/key analysis generated. Review and approve before song analysis.")
     return db_get_project(project_id)
 
 
@@ -314,6 +323,7 @@ async def guided_prepare_audio(project_id: str):
 
         action = "Source was already MP3. Conversion skipped; file copied." if original_ext == ".mp3" else "Source converted to MP3."
         db_update_project(project_id, converted_audio_url=converted_url, stage="audio_prepared", processing_step=action, error_message="")
+        _mark_generated(project_id, "song_file", "Prepared audio is ready.")
         return {"project": db_get_project(project_id), "result": {"action": action, "converted_audio_url": converted_url}}
     except Exception as exc:
         _set_guided_failure(project_id, "Prepare Project Audio", exc)
@@ -338,6 +348,7 @@ async def guided_read_metadata(project_id: str):
             processing_step="Metadata tags read",
             error_message="",
         )
+        _mark_generated(project_id, "project_setup", "Metadata was read and is ready for setup review.")
         return {"project": db_get_project(project_id), "result": tags}
     except Exception as exc:
         _set_guided_failure(project_id, "Read Metadata Tags", exc)
@@ -351,11 +362,13 @@ async def guided_isolate_vocals(project_id: str):
         existing = db_get_assets(project_id, asset_type="vocal_stem")
         if existing:
             db_update_project(project_id, stage="vocals_ready", processing_step="Vocal stem already available", error_message="")
+            _mark_generated(project_id, "song_file", "Vocal stem is ready.")
             return {"project": db_get_project(project_id), "result": {"action": "Existing vocal stem reused."}}
 
         if project.get("user_vocals_url"):
             db_create_asset(project_id, "vocal_stem", "User-provided vocal stem", project["user_vocals_url"], "", source="user")
             db_update_project(project_id, stage="vocals_ready", processing_step="Using user-provided vocal stem", error_message="")
+            _mark_generated(project_id, "song_file", "User-provided vocal stem is ready.")
             return {"project": db_get_project(project_id), "result": {"action": "User-provided vocal stem used."}}
 
         from services.audio_preprocessor import separate_vocals
@@ -368,6 +381,7 @@ async def guided_isolate_vocals(project_id: str):
 
         db_create_asset(project_id, "vocal_stem", "Generated vocal stem", vocals_url, "", source="generated")
         db_update_project(project_id, stage="vocals_ready", processing_step="Vocal stem isolated", error_message="")
+        _mark_generated(project_id, "song_file", "Generated vocal stem is ready.")
         return {"project": db_get_project(project_id), "result": {"action": "Vocal stem isolated.", "url": vocals_url}}
     except Exception as exc:
         _set_guided_failure(project_id, "Isolate Vocal Stem", exc)
@@ -390,6 +404,7 @@ async def guided_transcribe_lyrics(project_id: str):
         transcript = transcribe_audio(vocals_path)
         segment_count = len(transcript.get("segments", [])) if isinstance(transcript, dict) else 0
         db_update_project(project_id, transcript=transcript, stage="awaiting_project_info_review", processing_step="Transcription complete", error_message="")
+        _mark_generated(project_id, "lyrics", "Timestamped lyrics generated. Review and approve before song analysis.")
         return {"project": db_get_project(project_id), "result": {"segments": segment_count}}
     except Exception as exc:
         _set_guided_failure(project_id, "Transcribe & Timestamp Lyrics", exc)
@@ -421,6 +436,7 @@ async def upload_audio(project_id: str, file: UploadFile = File(...)):
     key = f"projects/{project_id}/audio/{_sanitize_filename(file.filename)}"
     audio_url = upload_bytes(contents, key, file.content_type or "audio/mpeg")
     db_update_project(project_id, audio_url=audio_url, stage="audio_uploaded", error_message="", processing_step="Upload complete")
+    _mark_generated(project_id, "song_file", "Song file uploaded and ready for review.")
     return {"audio_url": audio_url, "message": "Audio uploaded. Continue with Analyze Rhythm & Key."}
 
 
@@ -461,7 +477,49 @@ async def confirm_project_info(project_id: str, payload: ProjectInfoConfirm):
         },
     )
     db_update_project(project_id, project_folder=folder, stage="info_confirmed")
+    set_section_status(project_id, "project_setup", "approved", message="Project setup approved.")
+    if project.get("transcript"):
+        set_section_status(project_id, "lyrics", "approved", message="Timestamped lyrics approved.")
+    if project.get("bpm") or project.get("musical_key") or project.get("beat_grid"):
+        set_section_status(project_id, "rhythm_key", "approved", message="Rhythm/key analysis approved.")
     return db_get_project(project_id)
+
+
+@router.post("/{project_id}/sections/{section_key}/approve")
+async def approve_workbook_section(project_id: str, section_key: str):
+    project = _get_project_or_404(project_id)
+    key = validate_section_key(section_key)
+    if key == "song_file" and not project.get("audio_url"):
+        raise HTTPException(status_code=400, detail="Upload a song file before approving this section.")
+    if key == "rhythm_key" and not (project.get("bpm") or project.get("musical_key") or project.get("beat_grid")):
+        raise HTTPException(status_code=400, detail="Run or enter rhythm/key data before approving this section.")
+    if key == "lyrics" and not project.get("transcript"):
+        raise HTTPException(status_code=400, detail="Transcribe or enter timestamped lyrics before approving this section.")
+    if key == "song_analysis" and not project.get("analysis"):
+        raise HTTPException(status_code=400, detail="Run song analysis before approving this section.")
+    if key == "element_plan" and not project.get("elements"):
+        raise HTTPException(status_code=400, detail="Generate or enter an element plan before approving this section.")
+    if key == "element_images":
+        image_assets = db_get_assets(project_id, asset_type="background") + db_get_assets(project_id, asset_type="element")
+        if not image_assets:
+            raise HTTPException(status_code=400, detail="Generate or upload element images before approving this section.")
+    if key == "storyboard_images" and not db_get_assets(project_id, asset_type="storyboard_panel"):
+        raise HTTPException(status_code=400, detail="Generate or upload storyboard images before approving this section.")
+    if key == "final_video" and not project.get("video_url"):
+        raise HTTPException(status_code=400, detail="Generate a base video before approving this section.")
+    if key == "project_setup" and project.get("stage") == "awaiting_project_info_review":
+        raise HTTPException(status_code=400, detail="Use the setup review form so title, brief, references, and lyrics are saved with the approval.")
+    return set_section_status(project_id, key, "approved", message="Section approved.")
+
+
+@router.post("/{project_id}/sections/{section_key}/reject")
+async def reject_workbook_section(project_id: str, section_key: str, payload: dict | None = None):
+    _get_project_or_404(project_id)
+    key = validate_section_key(section_key)
+    note = ""
+    if isinstance(payload, dict):
+        note = str(payload.get("note") or payload.get("message") or "").strip()
+    return set_section_status(project_id, key, "rejected", message=note or "Section rejected.")
 
 
 @router.get("/series/list")

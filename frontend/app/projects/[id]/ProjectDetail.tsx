@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { api, mediaUrl } from '@/lib/api'
 import { analyzeAudioFile } from '@/lib/audioAnalysis'
 
-type SectionStatus = 'empty' | 'locked' | 'ready' | 'running' | 'generated' | 'approved' | 'failed'
+type SectionStatus = 'empty' | 'locked' | 'ready' | 'running' | 'generated' | 'approved' | 'rejected' | 'failed' | 'skipped'
 
 type WorkbookSection = {
   key: string
@@ -17,6 +17,8 @@ type WorkbookSection = {
   output: string
   needs?: string
   warning?: string
+  canApprove?: boolean
+  canReject?: boolean
   primaryAction?: {
     label: string
     href?: string
@@ -157,6 +159,8 @@ function statusClass(status: SectionStatus): string {
       return 'bg-purple-950 text-purple-300 border-purple-800'
     case 'failed':
       return 'bg-red-950 text-red-300 border-red-800'
+    case 'rejected':
+      return 'bg-orange-950 text-orange-300 border-orange-800'
     case 'locked':
       return 'bg-gray-900 text-gray-500 border-gray-800'
     default:
@@ -166,6 +170,21 @@ function statusClass(status: SectionStatus): string {
 
 function prettyStatus(status: SectionStatus): string {
   return status[0].toUpperCase() + status.slice(1)
+}
+
+function explicitSectionStatus(project: any, key: string): SectionStatus | undefined {
+  const raw = project?.section_statuses?.[key]?.status
+  const allowed: SectionStatus[] = ['empty', 'locked', 'ready', 'running', 'generated', 'approved', 'rejected', 'failed', 'skipped']
+  return allowed.includes(raw) ? raw : undefined
+}
+
+function workbookStatus(project: any, key: string, inferred: SectionStatus): SectionStatus {
+  return explicitSectionStatus(project, key) || inferred
+}
+
+function workbookApproved(project: any, key: string, legacyApproved: boolean): boolean {
+  const explicit = explicitSectionStatus(project, key)
+  return explicit ? explicit === 'approved' : legacyApproved
 }
 
 function isGuidedStepReady(project: any, stepKey: string): boolean {
@@ -191,16 +210,22 @@ function buildWorkbookSections(project: any): WorkbookSection[] {
   const metadataReady = Boolean(project.song_length || project.composer || project.album || isAtOrAfter(project, 'metadata_ready'))
   const vocalsReady = Boolean(project.user_vocals_url || isAtOrAfter(project, 'vocals_ready'))
   const lyricsReady = hasTranscript(project)
-  const infoApproved = isAtOrAfter(project, 'info_confirmed')
+  const infoApproved = workbookApproved(project, 'project_setup', isAtOrAfter(project, 'info_confirmed'))
+  const songFileApproved = workbookApproved(project, 'song_file', Boolean(project.audio_url))
+  const rhythmApproved = workbookApproved(project, 'rhythm_key', rhythmReady)
+  const lyricsApproved = workbookApproved(project, 'lyrics', lyricsReady)
   const analysisReady = Boolean(project.analysis || isAtOrAfter(project, 'analyzed'))
+  const analysisApproved = workbookApproved(project, 'song_analysis', analysisReady)
   const treatmentReady = Boolean(project.treatment)
-  const treatmentApproved = isAtOrAfter(project, 'treatment_approved')
+  const treatmentApproved = workbookApproved(project, 'treatment', isAtOrAfter(project, 'treatment_approved'))
   const elementPlanReady = countElements(project) > 0 || isAtOrAfter(project, 'elements_ready')
+  const elementPlanApproved = workbookApproved(project, 'element_plan', elementPlanReady)
   const elementImagesReady = isAtOrAfter(project, 'images_ready')
+  const elementImagesApproved = workbookApproved(project, 'element_images', elementImagesReady)
   const manifestReady = isAtOrAfter(project, 'awaiting_manifest_approval') || isAtOrAfter(project, 'manifest_approved')
-  const manifestApproved = isAtOrAfter(project, 'manifest_approved')
+  const manifestApproved = workbookApproved(project, 'shot_manifest', isAtOrAfter(project, 'manifest_approved'))
   const storyboardReady = isAtOrAfter(project, 'awaiting_storyboard_approval')
-  const storyboardApproved = isAtOrAfter(project, 'storyboard_approved')
+  const storyboardApproved = workbookApproved(project, 'storyboard_images', isAtOrAfter(project, 'storyboard_approved'))
   const videoReady = Boolean(project.video_url) || project.stage === 'complete'
 
   return [
@@ -209,7 +234,7 @@ function buildWorkbookSections(project: any): WorkbookSection[] {
       number: 1,
       title: 'Project Setup',
       purpose: 'Confirm title, artist, creative brief, references, and series context.',
-      status: infoApproved ? 'approved' : project.stage === 'awaiting_project_info_review' ? 'ready' : project.audio_url ? 'locked' : 'empty',
+      status: workbookStatus(project, 'project_setup', infoApproved ? 'approved' : project.stage === 'awaiting_project_info_review' ? 'ready' : project.audio_url ? 'locked' : 'empty'),
       required: ['title', 'production path', 'artist or intentional blank', 'creative direction'],
       output: `${productionPathSummary(project)} | ${
         infoApproved ? 'Project setup approved.' : project.stage === 'awaiting_project_info_review' ? 'Extracted info is ready to review.' : 'Waiting for audio preparation and transcript.'
@@ -224,9 +249,11 @@ function buildWorkbookSections(project: any): WorkbookSection[] {
       number: 2,
       title: 'Song File',
       purpose: 'Store the original song and optional vocal stem.',
-      status: project.audio_url ? 'approved' : 'empty',
+      status: workbookStatus(project, 'song_file', project.audio_url ? 'approved' : 'empty'),
       required: ['original audio file', 'optional isolated vocal stem'],
       output: project.audio_url ? project.audio_url.split('/').pop() || 'Song file uploaded.' : 'No song file uploaded.',
+      canApprove: Boolean(project.audio_url) && !songFileApproved,
+      canReject: Boolean(project.audio_url) && !songFileApproved,
       secondaryAction: { label: 'Replace from new-project flow', href: '/projects/new' },
     },
     {
@@ -234,10 +261,12 @@ function buildWorkbookSections(project: any): WorkbookSection[] {
       number: 3,
       title: 'Rhythm / Key Analysis',
       purpose: 'Detect BPM, beat-grid timestamps, and musical key.',
-      status: rhythmReady ? 'approved' : project.audio_url ? 'ready' : 'locked',
+      status: workbookStatus(project, 'rhythm_key', rhythmReady ? 'approved' : project.audio_url ? 'ready' : 'locked'),
       required: ['song file'],
       output: rhythmReady ? `BPM: ${project.bpm || 'unknown'} | Key: ${project.musical_key || 'unknown'} | Beats: ${beatCount(project)}` : 'No rhythm/key result yet.',
       needs: project.audio_url ? undefined : 'Song File',
+      canApprove: rhythmReady && !rhythmApproved,
+      canReject: rhythmReady && !rhythmApproved,
       primaryAction: isGuidedStepReady(project, 'analyze-rhythm-key')
         ? { label: GUIDED_RUN_STEPS.rhythm_key.runLabel, run: 'analyze-rhythm-key' }
         : undefined,
@@ -247,10 +276,12 @@ function buildWorkbookSections(project: any): WorkbookSection[] {
       number: 4,
       title: 'Lyrics Transcription & Timestamping',
       purpose: 'Create lyric timing anchors that downstream shots must follow.',
-      status: lyricsReady ? 'approved' : vocalsReady ? 'ready' : audioReady ? 'locked' : 'locked',
+      status: workbookStatus(project, 'lyrics', lyricsReady ? 'approved' : vocalsReady ? 'ready' : audioReady ? 'locked' : 'locked'),
       required: ['prepared audio', 'vocal stem or full mix'],
       output: lyricsReady ? `Transcript ready | Segments: ${transcriptSegments(project)}` : 'No timestamped lyrics yet.',
       needs: lyricsReady || vocalsReady ? undefined : 'Prepared audio and vocal stem',
+      canApprove: lyricsReady && !lyricsApproved,
+      canReject: lyricsReady && !lyricsApproved,
       primaryAction: isGuidedStepReady(project, 'prepare-audio')
         ? { label: GUIDED_RUN_STEPS.audio_prepare.runLabel, run: 'prepare-audio' }
         : isGuidedStepReady(project, 'read-metadata')
@@ -269,11 +300,13 @@ function buildWorkbookSections(project: any): WorkbookSection[] {
       number: 5,
       title: 'Song Analysis',
       purpose: 'Use approved lyrics, rhythm, brief, and references to define sections, themes, emotional arc, and visual needs.',
-      status: project.stage === 'interpreting_song' ? 'running' : analysisReady ? 'approved' : infoApproved ? 'ready' : 'locked',
+      status: workbookStatus(project, 'song_analysis', project.stage === 'interpreting_song' ? 'running' : analysisReady ? 'approved' : (infoApproved && songFileApproved && rhythmApproved && lyricsApproved) ? 'ready' : 'locked'),
       required: ['approved project setup', 'approved rhythm/key', 'approved timestamped lyrics'],
       output: analysisReady ? 'Song analysis generated and available for downstream creative work.' : 'No song analysis generated yet.',
-      needs: infoApproved ? undefined : 'Approved Project Setup and Lyrics',
-      primaryAction: project.stage === 'info_confirmed'
+      needs: (infoApproved && songFileApproved && rhythmApproved && lyricsApproved) ? undefined : 'Approved Project Setup, Song File, Rhythm/Key, and Lyrics',
+      canApprove: analysisReady && !analysisApproved,
+      canReject: analysisReady && !analysisApproved,
+      primaryAction: project.stage === 'info_confirmed' && infoApproved && songFileApproved && rhythmApproved && lyricsApproved
         ? { label: 'Run song analysis', run: 'run-song-analysis' }
         : undefined,
     },
@@ -282,11 +315,11 @@ function buildWorkbookSections(project: any): WorkbookSection[] {
       number: 6,
       title: 'Treatment',
       purpose: 'Define the creative direction, visual rules, motifs, palette, and narrative structure.',
-      status: project.stage === 'treatment_pending' ? 'running' : treatmentApproved ? 'approved' : treatmentReady ? 'generated' : analysisReady ? 'ready' : 'locked',
+      status: workbookStatus(project, 'treatment', project.stage === 'treatment_pending' ? 'running' : treatmentApproved ? 'approved' : treatmentReady ? 'generated' : analysisApproved ? 'ready' : 'locked'),
       required: ['approved song analysis', 'creative brief', 'references'],
       output: treatmentReady ? project.treatment?.logline || 'Treatment generated.' : 'No treatment generated yet.',
-      needs: analysisReady ? undefined : 'Song Analysis',
-      primaryAction: project.stage === 'analyzed'
+      needs: analysisApproved ? undefined : 'Approved Song Analysis',
+      primaryAction: project.stage === 'analyzed' && analysisApproved
         ? { label: 'Generate treatment', run: 'generate-treatment' }
         : project.stage === 'awaiting_treatment_approval'
           ? { label: 'Review treatment', href: 'treatment' }
@@ -298,11 +331,13 @@ function buildWorkbookSections(project: any): WorkbookSection[] {
       number: 7,
       title: 'Element Plan',
       purpose: 'Plan backgrounds, characters, props, motifs, and states before image tokens are spent.',
-      status: project.stage === 'extracting_elements' ? 'running' : elementPlanReady ? 'approved' : treatmentApproved ? 'ready' : 'locked',
+      status: workbookStatus(project, 'element_plan', project.stage === 'extracting_elements' ? 'running' : elementPlanReady ? 'approved' : treatmentApproved ? 'ready' : 'locked'),
       required: ['approved song analysis', 'approved treatment'],
       output: elementPlanReady ? `${countElements(project)} planned element groups.` : 'No element plan generated yet.',
       needs: treatmentApproved ? undefined : 'Approved Treatment',
       warning: 'This step should only spend LLM tokens. It must not generate images.',
+      canApprove: elementPlanReady && !elementPlanApproved,
+      canReject: elementPlanReady && !elementPlanApproved,
       primaryAction: project.stage === 'treatment_approved'
         ? { label: 'Generate element plan', run: 'generate-element-plan' }
         : undefined,
@@ -312,12 +347,14 @@ function buildWorkbookSections(project: any): WorkbookSection[] {
       number: 8,
       title: 'Element Images',
       purpose: 'Generate and review backgrounds, characters, props, and state images.',
-      status: project.stage === 'generating_images' ? 'running' : elementImagesReady ? 'generated' : elementPlanReady ? 'ready' : 'locked',
+      status: workbookStatus(project, 'element_images', project.stage === 'generating_images' ? 'running' : elementImagesReady ? 'generated' : elementPlanApproved ? 'ready' : 'locked'),
       required: ['approved element plan'],
       output: elementImagesReady ? 'Element images generated. Review before storyboard planning.' : 'No element images generated yet.',
-      needs: elementPlanReady ? undefined : 'Element Plan',
+      needs: elementPlanApproved ? undefined : 'Approved Element Plan',
       warning: 'Token-cost warning: this will call the configured image backend. Stop here if the element plan is not right.',
-      primaryAction: project.stage === 'elements_ready'
+      canApprove: elementImagesReady && !elementImagesApproved,
+      canReject: elementImagesReady && !elementImagesApproved,
+      primaryAction: project.stage === 'elements_ready' && elementPlanApproved
         ? {
             label: 'Generate element images',
             run: 'generate-element-images',
@@ -333,10 +370,10 @@ function buildWorkbookSections(project: any): WorkbookSection[] {
       number: 9,
       title: 'Shot Manifest / Storyboard Plan',
       purpose: 'Create the shot-by-shot plan: timestamps, lyrics, action, camera, prompts, and negative prompts.',
-      status: manifestApproved ? 'approved' : manifestReady ? 'generated' : elementImagesReady ? 'ready' : 'locked',
+      status: workbookStatus(project, 'shot_manifest', manifestApproved ? 'approved' : manifestReady ? 'generated' : elementImagesApproved ? 'ready' : 'locked'),
       required: ['approved lyrics', 'approved song analysis', 'approved treatment', 'approved elements'],
       output: manifestReady ? 'Shot manifest exists and can be reviewed.' : 'No shot manifest yet.',
-      needs: elementImagesReady ? undefined : 'Element Images',
+      needs: elementImagesApproved ? undefined : 'Approved Element Images',
       primaryAction: manifestReady && !manifestApproved
         ? { label: 'Review shot manifest', href: 'manifest' }
         : undefined,
@@ -347,7 +384,7 @@ function buildWorkbookSections(project: any): WorkbookSection[] {
       number: 10,
       title: 'Storyboard Images',
       purpose: 'Generate one full-frame image per approved shot-specific prompt.',
-      status: project.stage === 'generating_manifest_images' || project.stage === 'building_storyboard' ? 'running' : storyboardApproved ? 'approved' : storyboardReady ? 'generated' : (manifestApproved || elementImagesReady) ? 'ready' : 'locked',
+      status: workbookStatus(project, 'storyboard_images', project.stage === 'generating_manifest_images' || project.stage === 'building_storyboard' ? 'running' : storyboardApproved ? 'approved' : storyboardReady ? 'generated' : (manifestApproved || elementImagesApproved) ? 'ready' : 'locked'),
       required: ['approved shot manifest', 'shot-specific prompts'],
       output: storyboardReady ? 'Storyboard images are ready for review.' : 'No storyboard images generated yet.',
       needs: manifestApproved ? undefined : 'Approved Shot Manifest',
@@ -358,7 +395,7 @@ function buildWorkbookSections(project: any): WorkbookSection[] {
             run: 'generate-manifest-images',
             confirm: 'Generate storyboard images from the approved shot manifest now? This may spend image-generation tokens.',
           }
-        : project.stage === 'images_ready'
+        : project.stage === 'images_ready' && elementImagesApproved
           ? {
               label: 'Build legacy storyboard',
               run: 'build-storyboard',
@@ -374,11 +411,13 @@ function buildWorkbookSections(project: any): WorkbookSection[] {
       number: 11,
       title: 'Final Real Video Generation',
       purpose: 'Generate a base real video, review it, optionally run lip sync, and choose the final approved export.',
-      status: project.stage === 'assembling' ? 'running' : videoReady ? 'generated' : storyboardApproved ? 'ready' : 'locked',
+      status: workbookStatus(project, 'final_video', project.stage === 'assembling' ? 'running' : videoReady ? 'generated' : storyboardApproved ? 'ready' : 'locked'),
       required: ['approved storyboard images', 'approved audio', 'real video backend'],
       output: videoReady ? 'A video output exists. Base/lip-sync/final selection will be split in the next slice.' : 'No base video generated yet.',
       needs: storyboardApproved ? undefined : 'Approved Storyboard Images',
       warning: 'Compute-cost warning: ffmpeg/Ken Burns is preview-only and should fail unless preview mode was explicitly enabled.',
+      canApprove: videoReady && explicitSectionStatus(project, 'final_video') !== 'approved',
+      canReject: videoReady && explicitSectionStatus(project, 'final_video') !== 'approved',
       primaryAction: project.stage === 'storyboard_approved'
         ? {
             label: 'Generate base video',
@@ -479,6 +518,35 @@ export default function ProjectDetail({ id }: { id: string }) {
     }
   }
 
+  const approveSection = async (sectionKey: string) => {
+    if (runningAction) return
+    setLocalError('')
+    setRunningAction(`approve-${sectionKey}`)
+    try {
+      await refreshFromResponse(await api.projects.approveSection(id, sectionKey))
+    } catch (err: any) {
+      setLocalError(err?.response?.data?.detail || err?.message || 'Approval failed.')
+      await fetchProject()
+    } finally {
+      setRunningAction(null)
+    }
+  }
+
+  const rejectSection = async (sectionKey: string) => {
+    if (runningAction) return
+    const note = window.prompt('What needs to change before this section is approved?') || ''
+    setLocalError('')
+    setRunningAction(`reject-${sectionKey}`)
+    try {
+      await refreshFromResponse(await api.projects.rejectSection(id, sectionKey, note))
+    } catch (err: any) {
+      setLocalError(err?.response?.data?.detail || err?.message || 'Rejection failed.')
+      await fetchProject()
+    } finally {
+      setRunningAction(null)
+    }
+  }
+
   if (loading) return (
     <div className="min-h-screen bg-black text-white flex items-center justify-center">
       Loading...
@@ -569,6 +637,8 @@ export default function ProjectDetail({ id }: { id: string }) {
                 projectId={id}
                 runningAction={runningAction}
                 onRun={runAction}
+                onApprove={approveSection}
+                onReject={rejectSection}
               />
             ))}
           </div>
@@ -605,13 +675,19 @@ function WorkbookCard({
   projectId,
   runningAction,
   onRun,
+  onApprove,
+  onReject,
 }: {
   section: WorkbookSection
   projectId: string
   runningAction: string | null
   onRun: (action: string, confirmMessage?: string) => void
+  onApprove: (sectionKey: string) => void
+  onReject: (sectionKey: string) => void
 }) {
   const actionRunning = section.primaryAction?.run && runningAction === section.primaryAction.run
+  const approving = runningAction === `approve-${section.key}`
+  const rejecting = runningAction === `reject-${section.key}`
 
   return (
     <section id={section.key} className="bg-gray-950 border border-gray-800 rounded-lg p-5 scroll-mt-6">
@@ -627,7 +703,7 @@ function WorkbookCard({
           <p className="text-gray-400 text-sm leading-relaxed">{section.purpose}</p>
         </div>
 
-        {(section.primaryAction || section.secondaryAction) && (
+        {(section.primaryAction || section.secondaryAction || section.canApprove || section.canReject) && (
           <div className="flex flex-wrap gap-2 md:justify-end">
             {section.primaryAction?.href && (
               <Link
@@ -644,6 +720,24 @@ function WorkbookCard({
                 className="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 disabled:bg-gray-800 disabled:text-gray-500 text-sm font-semibold transition-colors"
               >
                 {actionRunning ? 'Starting...' : section.primaryAction.label}
+              </button>
+            )}
+            {section.canApprove && (
+              <button
+                onClick={() => onApprove(section.key)}
+                disabled={Boolean(runningAction)}
+                className="px-4 py-2 rounded-lg bg-green-700 hover:bg-green-600 disabled:bg-gray-800 disabled:text-gray-500 text-sm font-semibold transition-colors"
+              >
+                {approving ? 'Approving...' : 'Approve'}
+              </button>
+            )}
+            {section.canReject && (
+              <button
+                onClick={() => onReject(section.key)}
+                disabled={Boolean(runningAction)}
+                className="px-4 py-2 rounded-lg border border-orange-800 text-orange-300 hover:border-orange-600 disabled:border-gray-800 disabled:text-gray-600 text-sm transition-colors"
+              >
+                {rejecting ? 'Rejecting...' : 'Reject'}
               </button>
             )}
             {section.secondaryAction && section.secondaryAction.href !== section.primaryAction?.href && (

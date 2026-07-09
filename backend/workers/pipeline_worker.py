@@ -27,6 +27,7 @@ from database import (
     db_list_shot_manifests,
     db_update_shot_manifest,
 )
+from services.workbook_status import set_section_status
 from utils.storage import url_to_local_path
 
 logger = logging.getLogger(__name__)
@@ -197,6 +198,7 @@ def run_song_interpretation(project_id: str):
         artist=project.get("artist") or "",
     )
     db_update_project(project_id, stage="analyzed", analysis=result)
+    set_section_status(project_id, "song_analysis", "generated", message="Song analysis generated. Review and approve before treatment.")
     logger.info("[Worker] Song interpretation complete for %s", project_id[:8])
 
 
@@ -237,6 +239,7 @@ def run_treatment_generation(project_id: str):
         revision_notes="",
         stage="awaiting_treatment_approval",
     )
+    set_section_status(project_id, "treatment", "generated", message="Treatment generated. Review and approve before element planning.")
     logger.info("[Worker] Treatment generated for %s — awaiting approval", project_id[:8])
     # ⏸ Orchestrator pauses here until human calls /approve-treatment
 
@@ -254,6 +257,7 @@ def run_element_extraction(project_id: str):
 
     elements = extract_elements(treatment, analysis)
     db_update_project(project_id, elements=elements, stage="elements_ready")
+    set_section_status(project_id, "element_plan", "generated", message="Element plan generated. Review and approve before image generation.")
     logger.info("[Worker] Elements extracted for %s (%d bg, %d chars, %d props)",
                 project_id[:8],
                 len(elements.get("backgrounds", [])),
@@ -312,6 +316,7 @@ def run_image_generation(project_id: str):
             )
 
     db_update_project(project_id, stage="images_ready")
+    set_section_status(project_id, "element_images", "generated", message="Element images generated. Review and approve before storyboarding.")
     logger.info("[Worker] All images generated for %s", project_id[:8])
 
 
@@ -363,6 +368,7 @@ def run_storyboard_build(project_id: str):
         )
 
     _set_stage(project_id, "awaiting_storyboard_approval")
+    set_section_status(project_id, "storyboard_images", "generated", message="Storyboard images generated. Review and approve before video generation.")
     logger.info("[Worker] Storyboard built for %s — awaiting approval", project_id[:8])
     # ⏸ Orchestrator pauses here until human calls /approve-storyboard
 
@@ -438,6 +444,7 @@ def run_manifest_generation(project_id: str):
         )
 
     _set_stage(project_id, "awaiting_storyboard_approval")
+    set_section_status(project_id, "storyboard_images", "generated", message="Storyboard images generated from the approved shot manifest.")
     logger.info("[Worker] Manifest frames generated for %s — awaiting approval",
                 project_id[:8])
     # ⏸ Orchestrator pauses here until human calls /approve-storyboard
@@ -504,6 +511,7 @@ def run_video_assembly(project_id: str):
     )
 
     db_update_project(project_id, stage="complete", video_url=video_url)
+    set_section_status(project_id, "final_video", "generated", message="Base video generated. Review before final approval.")
     logger.info("[Worker] Project %s complete → %s", project_id[:8], video_url)
 
 

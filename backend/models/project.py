@@ -24,6 +24,7 @@ class Project(BaseModel):
     audio_url: Optional[str] = None
     video_url: Optional[str] = None
     production_paths: list[str] = Field(default_factory=list)
+    section_statuses: dict = Field(default_factory=dict)
     analysis: Optional[dict] = None
     treatment: Optional[dict] = None
     elements: Optional[dict] = None

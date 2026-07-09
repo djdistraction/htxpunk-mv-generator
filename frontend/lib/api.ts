@@ -109,6 +109,14 @@ export const api = {
       const { data } = await client.post(`/api/projects/${id}/confirm-info`, payload)
       return data
     },
+    approveSection: async (id: string, section: string) => {
+      const { data } = await client.post(`/api/projects/${id}/sections/${section}/approve`)
+      return data
+    },
+    rejectSection: async (id: string, section: string, note: string = '') => {
+      const { data } = await client.post(`/api/projects/${id}/sections/${section}/reject`, { note })
+      return data
+    },
   },
 
   pipeline: {
