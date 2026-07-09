@@ -14,10 +14,23 @@ def _groq_client():
     return OpenAI(api_key=settings.groq_api_key, base_url="https://api.groq.com/openai/v1")
 
 
-def extract_elements(treatment: dict, analysis: dict) -> dict:
+def extract_elements(
+    treatment: dict,
+    analysis: dict,
+    creative_brief: str = "",
+    reference_notes: str = "",
+) -> dict:
     """
     Returns a structured element registry with backgrounds, characters, and props.
     Each element includes all required image generation prompts.
+
+    - creative_brief / reference_notes: the same user-supplied context already
+      fed into song analysis and treatment generation. Previously this stopped
+      after the treatment stage — a reference character/prop the artist
+      described could shape the treatment's narrative but the element registry
+      (what actually gets generated as images) never saw it, so the asset
+      never showed up. Threading it through here keeps it in scope for exactly
+      what this stage decides: which backgrounds/characters/props to generate.
     """
     client = _groq_client()
     style_suffix = treatment.get("image_gen_style_prompt", "")
@@ -28,6 +41,20 @@ def extract_elements(treatment: dict, analysis: dict) -> dict:
         "asset registry — every image that needs to be generated. "
         "Be specific and production-ready. Return JSON only."
     )
+
+    reference_block = ""
+    if creative_brief.strip():
+        reference_block += (
+            f"\n\nARTIST'S CREATIVE VISION:\n\"{creative_brief.strip()}\""
+        )
+    if reference_notes.strip():
+        reference_block += (
+            f"\n\nREFERENCE MATERIAL the artist supplied. If a background, "
+            f"character, or prop is described here, use it — reuse the names "
+            f"and descriptions given rather than inventing replacements:\n"
+            f"{reference_notes.strip()}"
+        )
+
     user_prompt = f"""Create a complete visual asset registry for this music video.
 
 APPROVED TREATMENT:
@@ -35,6 +62,7 @@ APPROVED TREATMENT:
 
 SONG SECTIONS:
 {json.dumps(analysis.get("sections", []), indent=2)}
+{reference_block}
 
 Return JSON with this exact structure:
 {{
