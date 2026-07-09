@@ -256,3 +256,104 @@ Use agents according to their strengths:
 Reason:
 
 This keeps agents from stepping on each other and reduces uncontrolled rewrites.
+
+## 2026-07-09: Project goal — five production paths
+
+Decision:
+
+The project's stated top-level goal, from Randall, verbatim:
+
+> My goal for this project is to create an application that serves as a music
+> video production tool, guiding the user through each step of a professional
+> production. It should allow for both manual content injection and
+> artificial intelligence automation. I'd like for there to be 5 main music
+> video paths that the production can use as base points; Lyric Video,
+> Karaoke Video, Performance Music Video, Cinematic Music Video, or a
+> combination of any 2 of those choices. The user should be able to upload
+> their song with the end result being a professional quality music video.
+
+This supersedes any prior assumption that the app has one implicit production
+style. Everything built so far (treatment → element plan → element images →
+storyboard → shot manifest → image-to-video) is the **Cinematic Music Video**
+path specifically, not "the" pipeline.
+
+Reason:
+
+No overall product goal had been written down before this. Individual
+features (guided audio steps, the workbook shell, reference handling, lyric
+alignment) were being built without an agreed frame for how they fit
+together or what else the app needs to become.
+
+## 2026-07-09: Production path is chosen once, at project creation
+
+Decision:
+
+The user selects a production path (one of the four named paths, or a
+combination of two) when creating a project, alongside title and audio
+upload — not mid-project.
+
+Reason:
+
+Randall's explicit choice. Matches how the app is already structured (one
+linear guided flow per project, per issue #20) with the least disruption.
+Changing paths mid-project (treating paths as toggleable layers over
+already-generated assets) was considered and explicitly not chosen for now —
+revisit only if Randall asks for it later.
+
+## 2026-07-09: Performance Music Video supports both AI performer and uploaded footage
+
+Decision:
+
+"Performance Music Video" is not one pipeline — Randall confirmed both of the
+following are in scope, user's choice per project:
+
+- **AI-generated virtual performer**: no user footage. A consistent AI
+  character, generated once, lip-synced to the vocal track for the song's
+  full duration. Extends the base-video/lip-sync split work in issue #27
+  almost directly — same Modal lip-sync machinery, applied continuously to
+  one performer instead of split across a varied narrative cast.
+- **User-uploaded real performance footage**: the user uploads real video of
+  themselves (or a performer) and the app edits/syncs/cuts that footage to
+  the song. This is a genuinely different capability — video ingestion,
+  storage of larger user video uploads (the multi-file upload body-size fix
+  from PR #23 is now load-bearing infrastructure for this, not just audio),
+  shot/cut-point selection, beat-synced trimming — not an extension of the
+  existing AI-image-generation stack.
+
+Reason:
+
+Randall's explicit choice — deliberately bigger scope than the single-mode
+default that was proposed. Both modes are real product requirements, not a
+future nice-to-have.
+
+## 2026-07-09: Proposed architecture — composable generation modules, not five pipelines
+
+Proposal (not yet implemented — flagging the intended shape before Codex/Claude
+carve out implementation issues, so nobody builds five duplicate pipelines):
+
+"A combination of any 2" only makes sense if the five paths share underlying
+machinery instead of being five independent, mutually-exclusive builds. The
+proposed shape is a small set of composable modules, where a project's chosen
+path(s) determine which modules run:
+
+- **Narrative/character visual generation** — the existing treatment → element
+  plan → element images → storyboard → shot manifest → image-to-video stack.
+  Full version for Cinematic Music Video; a lighter version (few/no character
+  elements, simpler backgrounds) when only providing a backdrop for a
+  Lyric/Karaoke project.
+- **Lyric-overlay rendering** — new, built on issue #25's forced-alignment
+  work. Lyric Video and Karaoke Video are the same module with different
+  typography/precision presets (line-level display vs. word-level
+  highlight-as-sung), not two separate systems.
+- **Performer generation** — extends issue #27's base-video/lip-sync split,
+  plus a new uploaded-footage ingestion path for the second Performance mode
+  above.
+
+A project's `production_path` selection(s) (max 2, chosen at creation per the
+decision above) toggle which of these modules run and which guided-workflow
+stages from issue #20 are even shown — e.g. a pure Lyric Video project should
+not need the full element/character extraction machinery a Cinematic project
+does.
+
+This needs its own tracking issue and file-by-file plan before implementation
+starts, the same way issue #20 anchored the workbook rebuild. See issue #29.
