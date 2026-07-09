@@ -64,7 +64,8 @@ const STAGE_LABELS: Record<string, string> = {
   awaiting_storyboard_approval: 'Storyboard images ready for review',
   storyboard_approved: 'Storyboard approved',
   assembling: 'Generating base video',
-  complete: 'Video output generated',
+  base_video_ready: 'Base video ready for review',
+  complete: 'Final video approved',
   error: 'Something went wrong',
 }
 
@@ -92,6 +93,7 @@ const STAGE_ORDER = [
   'awaiting_storyboard_approval',
   'storyboard_approved',
   'assembling',
+  'base_video_ready',
   'complete',
 ]
 
@@ -226,7 +228,8 @@ function buildWorkbookSections(project: any): WorkbookSection[] {
   const manifestApproved = workbookApproved(project, 'shot_manifest', isAtOrAfter(project, 'manifest_approved'))
   const storyboardReady = isAtOrAfter(project, 'awaiting_storyboard_approval')
   const storyboardApproved = workbookApproved(project, 'storyboard_images', isAtOrAfter(project, 'storyboard_approved'))
-  const videoReady = Boolean(project.video_url) || project.stage === 'complete'
+  const baseVideoReady = Boolean(project.base_video_url || project.video_url) || project.stage === 'base_video_ready' || project.stage === 'complete'
+  const finalVideoApproved = workbookApproved(project, 'final_video', Boolean(project.final_video_url) || project.stage === 'complete')
 
   return [
     {
@@ -411,23 +414,23 @@ function buildWorkbookSections(project: any): WorkbookSection[] {
       number: 11,
       title: 'Final Real Video Generation',
       purpose: 'Generate a base real video, review it, optionally run lip sync, and choose the final approved export.',
-      status: workbookStatus(project, 'final_video', project.stage === 'assembling' ? 'running' : videoReady ? 'generated' : storyboardApproved ? 'ready' : 'locked'),
+      status: workbookStatus(project, 'final_video', project.stage === 'assembling' ? 'running' : finalVideoApproved ? 'approved' : baseVideoReady ? 'generated' : storyboardApproved ? 'ready' : 'locked'),
       required: ['approved storyboard images', 'approved audio', 'real video backend'],
-      output: videoReady ? 'A video output exists. Base/lip-sync/final selection will be split in the next slice.' : 'No base video generated yet.',
+      output: finalVideoApproved ? 'Final video approved for export.' : baseVideoReady ? 'Base video generated. Review it before final approval.' : 'No base video generated yet.',
       needs: storyboardApproved ? undefined : 'Approved Storyboard Images',
       warning: 'Compute-cost warning: ffmpeg/Ken Burns is preview-only and should fail unless preview mode was explicitly enabled.',
-      canApprove: videoReady && explicitSectionStatus(project, 'final_video') !== 'approved',
-      canReject: videoReady && explicitSectionStatus(project, 'final_video') !== 'approved',
+      canApprove: baseVideoReady && !finalVideoApproved,
+      canReject: baseVideoReady && !finalVideoApproved,
       primaryAction: project.stage === 'storyboard_approved'
         ? {
             label: 'Generate base video',
             run: 'generate-base-video',
             confirm: 'Generate the base video now? This requires a real video backend unless preview slideshow mode is explicitly enabled.',
           }
-        : videoReady
+        : baseVideoReady
           ? { label: 'Open production output', href: 'production' }
           : undefined,
-      secondaryAction: videoReady ? { label: 'Open production', href: 'production' } : undefined,
+      secondaryAction: baseVideoReady ? { label: 'Open production', href: 'production' } : undefined,
     },
   ]
 }

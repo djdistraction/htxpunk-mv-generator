@@ -24,7 +24,8 @@ const STAGE_LABELS: Record<string, string> = {
   awaiting_storyboard_approval: "Review storyboard",
   storyboard_approved: "Storyboard approved",
   assembling: "Assembling video",
-  complete: "Complete",
+  base_video_ready: "Review base video",
+  complete: "Final approved",
   error: "Error",
 }
 
@@ -32,6 +33,7 @@ type StageCategory = "review" | "progress" | "complete" | "error"
 
 function stageCategory(stage: string): StageCategory {
   if (stage === "complete") return "complete"
+  if (stage === "base_video_ready") return "review"
   if (stage === "error") return "error"
   if (stage?.includes("awaiting")) return "review"
   return "progress"

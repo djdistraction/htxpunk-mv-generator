@@ -34,6 +34,9 @@ class ProjectRow(Base):
     elements = Column(Text)              # JSON
     panel_order = Column(Text)           # JSON list of asset IDs
     video_url = Column(String)
+    base_video_url = Column(String)      # generated base render, reviewed before final selection
+    lipsynced_video_url = Column(String) # optional post-processing output, never overwrites base render
+    final_video_url = Column(String)     # user-approved final export
     composer = Column(String)            # optional, from file tags or user entry
     album = Column(String)               # optional, from file tags or user entry
     song_length = Column(String)         # seconds, measured — locked/read-only once set
@@ -131,6 +134,9 @@ def _migrate_db():
     _add_column_if_missing(conn, "projects", "converted_audio_url", "TEXT")
     _add_column_if_missing(conn, "projects", "processing_step", "TEXT")
     _add_column_if_missing(conn, "projects", "user_vocals_url", "TEXT")
+    _add_column_if_missing(conn, "projects", "base_video_url", "TEXT")
+    _add_column_if_missing(conn, "projects", "lipsynced_video_url", "TEXT")
+    _add_column_if_missing(conn, "projects", "final_video_url", "TEXT")
     _add_column_if_missing(conn, "series", "continuity_bible", "TEXT")
     conn.commit()
     conn.close()

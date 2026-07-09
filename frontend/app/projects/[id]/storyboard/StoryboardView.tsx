@@ -161,7 +161,7 @@ export default function StoryboardView({ id }: { id: string }) {
     </div>
   )
 
-  const VIEWABLE_STAGES = ['awaiting_storyboard_approval', 'storyboard_approved', 'assembling', 'complete']
+  const VIEWABLE_STAGES = ['awaiting_storyboard_approval', 'storyboard_approved', 'assembling', 'base_video_ready', 'complete']
   const canApprove = project?.stage === 'awaiting_storyboard_approval'
   const approvedCount = panels.filter(panel => panel.asset_status === 'approved').length
   const rejectedCount = panels.filter(panel => panel.asset_status === 'rejected').length

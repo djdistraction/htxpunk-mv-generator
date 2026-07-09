@@ -458,7 +458,7 @@ def settings_clip_default() -> float:
 # ── Stage 6: Video Assembly ──────────────────────────────────────────────────
 
 def run_video_assembly(project_id: str):
-    """Assemble final music video → sets stage='complete'."""
+    """Render the base music video and pause for final review."""
     from services.video_assembler import assemble_music_video
     _set_stage(project_id, "assembling")
     project = _get_project(project_id)
@@ -510,9 +510,14 @@ def run_video_assembly(project_id: str):
         word_timestamps=word_timestamps,
     )
 
-    db_update_project(project_id, stage="complete", video_url=video_url)
+    db_update_project(
+        project_id,
+        stage="base_video_ready",
+        base_video_url=video_url,
+        video_url=video_url,  # legacy compatibility: production page and older exports still resolve this.
+    )
     set_section_status(project_id, "final_video", "generated", message="Base video generated. Review before final approval.")
-    logger.info("[Worker] Project %s complete → %s", project_id[:8], video_url)
+    logger.info("[Worker] Base video ready for %s → %s", project_id[:8], video_url)
 
 
 # ── Utility: Regenerate a single image ───────────────────────────────────────

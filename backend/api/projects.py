@@ -513,8 +513,17 @@ async def approve_workbook_section(project_id: str, section_key: str):
         unapproved = [asset for asset in panels if asset.get("asset_status") != "approved"]
         if unapproved:
             raise HTTPException(status_code=400, detail=f"Approve every storyboard image first ({len(unapproved)} remaining).")
-    if key == "final_video" and not project.get("video_url"):
-        raise HTTPException(status_code=400, detail="Generate a base video before approving this section.")
+    if key == "final_video":
+        final_candidate = project.get("lipsynced_video_url") or project.get("base_video_url") or project.get("video_url")
+        if not final_candidate:
+            raise HTTPException(status_code=400, detail="Generate a base video before approving this section.")
+        db_update_project(
+            project_id,
+            final_video_url=final_candidate,
+            video_url=final_candidate,
+            stage="complete",
+            processing_step="Final video approved",
+        )
     if key == "project_setup" and project.get("stage") == "awaiting_project_info_review":
         raise HTTPException(status_code=400, detail="Use the setup review form so title, brief, references, and lyrics are saved with the approval.")
     return set_section_status(project_id, key, "approved", message="Section approved.")

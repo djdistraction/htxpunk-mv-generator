@@ -67,7 +67,9 @@ def export_bible(project_id: str) -> str:
             f"| {p.get('panel_index', '')} | — | {str(p.get('scene_description', ''))[:50]} | {p.get('url', '')} |"
         )
 
-    if project.get("video_url"):
-        lines += ["", "---", "", "## ✅ Final Video", "", f"**{project['video_url']}**"]
+    if project.get("final_video_url"):
+        lines += ["", "---", "", "## Approved Final Video", "", f"**{project['final_video_url']}**"]
+    elif project.get("base_video_url") or project.get("video_url"):
+        lines += ["", "---", "", "## Base Video Pending Approval", "", f"**{project.get('base_video_url') or project['video_url']}**"]
 
     return "\n".join(lines)

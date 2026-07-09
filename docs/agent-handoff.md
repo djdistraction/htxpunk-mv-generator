@@ -48,6 +48,7 @@ Current slice:
 - Persisted workbook section statuses added, with approve/reject controls for generated sections and upstream approval checks before expensive/manual pipeline actions.
 - Element and storyboard image review now supports per-asset approve/reject statuses; section approval requires every relevant image/frame to be approved.
 - Shot Manifest review now supports importing a guide, manually adding shots, editing shot fields, deleting mistakes, and approval preflight for required timing/action fields.
+- Base video generation now stores `base_video_url` and pauses at `base_video_ready`; final approval selects `final_video_url`, mirrors it to legacy `video_url`, and only then marks the project complete.
 
 ## Primary implementation brief
 

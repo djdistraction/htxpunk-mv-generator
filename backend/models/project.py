@@ -12,7 +12,7 @@ PipelineStage = Literal[
     "generating_backgrounds", "generating_elements", "generating_images", "images_ready",
     "awaiting_manifest_approval", "manifest_approved", "generating_manifest_images",
     "building_storyboard", "awaiting_storyboard_approval", "storyboard_approved",
-    "generating_clips", "assembling", "complete", "error"
+    "generating_clips", "assembling", "base_video_ready", "complete", "error"
 ]
 
 
@@ -23,6 +23,9 @@ class Project(BaseModel):
     stage: PipelineStage = "uploaded"
     audio_url: Optional[str] = None
     video_url: Optional[str] = None
+    base_video_url: Optional[str] = None
+    lipsynced_video_url: Optional[str] = None
+    final_video_url: Optional[str] = None
     production_paths: list[str] = Field(default_factory=list)
     section_statuses: dict = Field(default_factory=dict)
     analysis: Optional[dict] = None
