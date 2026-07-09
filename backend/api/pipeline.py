@@ -44,6 +44,18 @@ class ManifestApproval(BaseModel):
 
 
 # ── Manual workbook worker dispatch ───────────────────────────────────────────
+#
+# Mirrors orchestrator.py's _in_flight guard. Without it, checking
+# project.stage and then starting a background thread leaves a window where
+# a second near-simultaneous request (double-click, two open tabs, a client
+# retry) for the same project passes the same stage check before the first
+# worker's own _set_stage() call has a chance to move the stage forward —
+# both requests then start a worker for the same project concurrently.
+# Confirmed real with a TestClient repro: two overlapping POSTs to the same
+# action both returned 200 and both invoked the worker.
+_in_flight: set[str] = set()
+_lock = threading.Lock()
+
 
 def _start_manual_worker(
     project_id: str,
@@ -64,6 +76,14 @@ def _start_manual_worker(
             ),
         )
 
+    with _lock:
+        if project_id in _in_flight:
+            raise HTTPException(
+                status_code=409,
+                detail="This project already has a workbook action running.",
+            )
+        _in_flight.add(project_id)
+
     def _run():
         try:
             from workers import pipeline_worker
@@ -77,6 +97,9 @@ def _start_manual_worker(
                 err_detail,
             )
             db_update_project(project_id, stage="error", error_message=str(exc))
+        finally:
+            with _lock:
+                _in_flight.discard(project_id)
 
     threading.Thread(
         target=_run,
