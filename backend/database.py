@@ -26,6 +26,7 @@ class ProjectRow(Base):
     audio_url = Column(String)
     converted_audio_url = Column(String)  # canonical mp3, produced by audio_preprocessor.convert_to_mp3
     user_vocals_url = Column(String)      # user-supplied pre-isolated vocal stem — skips separate_vocals() when set
+    user_lyrics_text = Column(Text)       # user-supplied lyrics — drives forced alignment instead of Whisper transcription when set
     user_brief = Column(Text)            # user's free-text creative vision (optional)
     production_paths = Column(Text)       # JSON list: lyric | karaoke | performance | cinematic; max 2 selections
     section_statuses = Column(Text)       # JSON map of production-workbook section -> status/details
@@ -134,6 +135,7 @@ def _migrate_db():
     _add_column_if_missing(conn, "projects", "converted_audio_url", "TEXT")
     _add_column_if_missing(conn, "projects", "processing_step", "TEXT")
     _add_column_if_missing(conn, "projects", "user_vocals_url", "TEXT")
+    _add_column_if_missing(conn, "projects", "user_lyrics_text", "TEXT")
     _add_column_if_missing(conn, "projects", "base_video_url", "TEXT")
     _add_column_if_missing(conn, "projects", "lipsynced_video_url", "TEXT")
     _add_column_if_missing(conn, "projects", "final_video_url", "TEXT")

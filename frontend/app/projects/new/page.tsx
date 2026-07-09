@@ -31,15 +31,28 @@ export default function NewProjectPage() {
   const router = useRouter()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const vocalsInputRef = useRef<HTMLInputElement>(null)
+  const lyricsInputRef = useRef<HTMLInputElement>(null)
   const [title, setTitle] = useState('')
   const [productionPaths, setProductionPaths] = useState<string[]>(['cinematic'])
   const [file, setFile] = useState<File | null>(null)
   const [hasVocalStems, setHasVocalStems] = useState(false)
   const [vocalsFile, setVocalsFile] = useState<File | null>(null)
+  const [hasLyrics, setHasLyrics] = useState(false)
+  const [lyricsText, setLyricsText] = useState('')
   const [error, setError] = useState('')
   const [uploading, setUploading] = useState(false)
 
-  const canSubmit = Boolean(file && title.trim() && productionPaths.length >= 1 && productionPaths.length <= 2 && (!hasVocalStems || vocalsFile))
+  const canSubmit = Boolean(
+    file && title.trim() && productionPaths.length >= 1 && productionPaths.length <= 2 &&
+    (!hasVocalStems || vocalsFile) && (!hasLyrics || lyricsText.trim())
+  )
+
+  const handleLyricsFile = (selected: File | null) => {
+    if (!selected) return
+    const reader = new FileReader()
+    reader.onload = () => setLyricsText(String(reader.result || ''))
+    reader.readAsText(selected)
+  }
 
   const toggleProductionPath = (path: string) => {
     setProductionPaths(current => {
@@ -65,6 +78,9 @@ export default function NewProjectPage() {
       formData.append('file', file)
       if (hasVocalStems && vocalsFile) {
         formData.append('vocals_file', vocalsFile)
+      }
+      if (hasLyrics && lyricsText.trim()) {
+        formData.append('lyrics_text', lyricsText.trim())
       }
       const project = await api.projects.uploadAudio(formData)
       router.push(`/projects/${project.id}`)
@@ -237,6 +253,49 @@ export default function NewProjectPage() {
             )}
           </div>
 
+          <div>
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={hasLyrics}
+                onChange={e => { setHasLyrics(e.target.checked); if (!e.target.checked) setLyricsText('') }}
+                className="mt-1"
+              />
+              <span className="text-sm text-gray-300">
+                I have the exact lyrics
+                <span className="text-gray-500 font-normal block text-xs mt-0.5">
+                  The guided workflow will time-align this text against the vocal stem instead of transcribing with Whisper — more accurate than auto-transcription.
+                </span>
+              </span>
+            </label>
+
+            {hasLyrics && (
+              <div className="mt-3 space-y-2">
+                <textarea
+                  value={lyricsText}
+                  onChange={e => setLyricsText(e.target.value)}
+                  placeholder={'Paste lyrics here, one line per line...'}
+                  rows={6}
+                  className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 font-mono text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => lyricsInputRef.current?.click()}
+                  className="text-purple-400 text-sm hover:underline"
+                >
+                  Or upload a .txt file
+                </button>
+                <input
+                  ref={lyricsInputRef}
+                  type="file"
+                  accept=".txt,text/plain"
+                  className="hidden"
+                  onChange={e => handleLyricsFile(e.target.files?.[0] || null)}
+                />
+              </div>
+            )}
+          </div>
+
           {error && (
             <div className="bg-red-900/30 border border-red-700 rounded-lg p-3 text-red-300 text-sm">
               {error}
@@ -260,7 +319,7 @@ export default function NewProjectPage() {
             <li>Prepare project audio</li>
             <li>Read metadata tags</li>
             <li>Isolate vocal stem</li>
-            <li>Transcribe and timestamp lyrics</li>
+            <li>Transcribe and timestamp lyrics (or align your provided lyrics)</li>
             <li>Review song info and continue to creative generation</li>
           </ol>
         </div>

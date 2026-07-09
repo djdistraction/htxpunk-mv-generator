@@ -1,0 +1,29 @@
+# Lyric forced alignment — user-supplied lyrics timestamped against the
+# vocal stem via aeneas (DTW over espeak-synthesized audio), used when
+# Whisper transcription is wrong/incomplete.
+#
+# Installed as a separate step, after requirements.txt, with build isolation
+# disabled:
+#
+#   pip install -r requirements.txt
+#   pip install --no-build-isolation -r requirements-aeneas.txt
+#
+# Both are required:
+# - `--no-build-isolation`: aeneas's setup.py imports numpy directly to
+#   locate its headers. With pip's default build isolation, that import runs
+#   in a throwaway env that doesn't have numpy yet — this makes pip use the
+#   real environment instead, where requirements.txt already installed it
+#   (numpy is a transitive dep of rembg/audio-separator/etc., not something
+#   this file needs to declare itself).
+# - AENEAS_WITH_CEW=False and SETUPTOOLS_USE_DISTUTILS=stdlib env vars at
+#   install time (set by run.py / electron-app's dependency install step,
+#   and by CI — not read from this file): AENEAS_WITH_CEW=False skips the
+#   optional C extension (it links against classic espeak, not espeak-ng,
+#   so building it needs dev headers most systems don't have; the
+#   pure-Python/subprocess fallback is plenty fast for per-project
+#   alignment), SETUPTOOLS_USE_DISTUTILS=stdlib works around its setup.py
+#   erroring under current setuptools otherwise.
+#
+# Also requires espeak-ng (or espeak) and ffprobe on PATH at runtime — see
+# services/lyrics_aligner.py.
+aeneas==1.7.3.0

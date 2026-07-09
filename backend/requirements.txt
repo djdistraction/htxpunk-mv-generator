@@ -44,6 +44,13 @@ pydub==0.25.1
 # Production guide import (Excel parsing)
 openpyxl==3.1.5
 
+# NOTE: aeneas (lyric forced alignment) is intentionally NOT listed here —
+# its setup.py imports numpy directly during pip's metadata-build step,
+# which runs in an isolated build env that doesn't see this file's numpy
+# (a transitive dep of rembg/audio-separator/etc.) even though it'll be
+# installed a moment later. Install it as a separate step, after this file,
+# with build isolation disabled — see requirements-aeneas.txt.
+
 # Video assembly — bundled ffmpeg binary fallback when ffmpeg isn't on PATH
 imageio-ffmpeg==0.5.1
 

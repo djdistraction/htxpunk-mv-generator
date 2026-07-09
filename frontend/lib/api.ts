@@ -91,6 +91,10 @@ export const api = {
       const { data } = await client.post(`/api/projects/${id}/guided/transcribe-lyrics`)
       return data
     },
+    alignLyrics: async (id: string, lyricsText?: string) => {
+      const { data } = await client.post(`/api/projects/${id}/guided/align-lyrics`, lyricsText ? { lyrics_text: lyricsText } : {})
+      return data
+    },
     listReferences: async (id: string) => {
       const { data } = await client.get(`/api/projects/${id}/references`)
       return data

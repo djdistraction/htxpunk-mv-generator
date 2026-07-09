@@ -69,9 +69,12 @@ def stream_output(proc: subprocess.Popen, prefix: str) -> None:
     proc.stdout.close()
 
 
-def run_blocking(cmd, cwd: Path, shell: bool = False) -> int:
+def run_blocking(cmd, cwd: Path, shell: bool = False, extra_env: dict | None = None) -> int:
     printable = cmd if isinstance(cmd, str) else " ".join(cmd)
     print(f"  $ {printable}", flush=True)
+    env = os.environ.copy()
+    if extra_env:
+        env.update(extra_env)
     proc = subprocess.Popen(
         cmd,
         cwd=str(cwd),
@@ -80,6 +83,7 @@ def run_blocking(cmd, cwd: Path, shell: bool = False) -> int:
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
+        env=env,
     )
     for line in iter(proc.stdout.readline, ""):
         if line:
@@ -443,6 +447,23 @@ def install_dependencies(want_electron: bool) -> None:
         code = run_blocking([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"], cwd=BACKEND_DIR)
         if code != 0:
             fail("Backend dependency installation failed. See messages above.")
+            sys.exit(1)
+
+        # aeneas (lyric forced alignment) is installed as a separate step:
+        # its setup.py needs numpy (just installed above) importable, which
+        # pip's isolated build env otherwise hides — --no-build-isolation
+        # makes it see the real environment instead. AENEAS_WITH_CEW=False
+        # skips its optional C extension (avoids needing espeak dev
+        # headers), SETUPTOOLS_USE_DISTUTILS=stdlib works around an
+        # install_layout error under current setuptools.
+        pip_env = {"AENEAS_WITH_CEW": "False", "SETUPTOOLS_USE_DISTUTILS": "stdlib"}
+        code = run_blocking(
+            [sys.executable, "-m", "pip", "install", "--no-build-isolation", "-r", "requirements-aeneas.txt"],
+            cwd=BACKEND_DIR,
+            extra_env=pip_env,
+        )
+        if code != 0:
+            fail("Lyric alignment dependency installation failed. See messages above.")
             sys.exit(1)
         ok("Backend dependencies installed")
 

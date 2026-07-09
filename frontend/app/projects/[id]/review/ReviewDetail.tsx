@@ -27,6 +27,10 @@ export default function ReviewDetail({ id }: { id: string }) {
   const [album, setAlbum] = useState('')
   const [segments, setSegments] = useState<Segment[]>([])
   const [productionPaths, setProductionPaths] = useState<string[]>([])
+  const [showRealign, setShowRealign] = useState(false)
+  const [realignText, setRealignText] = useState('')
+  const [realigning, setRealigning] = useState(false)
+  const [realignError, setRealignError] = useState('')
 
   const [seriesList, setSeriesList] = useState<any[]>([])
   const [seriesId, setSeriesId] = useState('')
@@ -111,6 +115,22 @@ export default function ReviewDetail({ id }: { id: string }) {
     } catch {
       alert('Could not save — is the backend running?')
       setWorking(false)
+    }
+  }
+
+  const handleRealign = async () => {
+    if (!realignText.trim()) return
+    setRealigning(true)
+    setRealignError('')
+    try {
+      const { project: updated } = await api.projects.alignLyrics(id, realignText.trim())
+      setSegments(updated?.transcript?.segments || [])
+      setShowRealign(false)
+      setRealignText('')
+    } catch (err: any) {
+      setRealignError(err?.response?.data?.detail || err?.message || 'Alignment failed — check that a vocal stem is available.')
+    } finally {
+      setRealigning(false)
     }
   }
 
@@ -210,9 +230,43 @@ export default function ReviewDetail({ id }: { id: string }) {
           </div>
 
           <div className="bg-gray-900 rounded-xl p-5 border border-gray-800">
-            <h2 className="text-xs text-gray-500 uppercase tracking-widest mb-3">
-              Transcript ({segments.length} lines)
-            </h2>
+            <div className="flex items-center justify-between gap-4 mb-3">
+              <h2 className="text-xs text-gray-500 uppercase tracking-widest">
+                Transcript ({segments.length} lines)
+              </h2>
+              <button
+                type="button"
+                onClick={() => setShowRealign(v => !v)}
+                className="text-purple-400 text-xs hover:underline"
+              >
+                {showRealign ? 'Cancel' : 'Transcript wrong? Paste correct lyrics'}
+              </button>
+            </div>
+
+            {showRealign && (
+              <div className="mb-4 p-3 bg-gray-800/60 border border-gray-700 rounded-lg space-y-2">
+                <p className="text-gray-500 text-xs">
+                  Paste the exact lyrics and we&rsquo;ll time-align them against the vocal stem instead of using Whisper&rsquo;s transcription.
+                </p>
+                <textarea
+                  value={realignText}
+                  onChange={e => setRealignText(e.target.value)}
+                  rows={6}
+                  placeholder={'One lyric line per line...'}
+                  className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-purple-500 font-mono"
+                />
+                {realignError && <p className="text-red-300 text-xs">{realignError}</p>}
+                <button
+                  type="button"
+                  onClick={handleRealign}
+                  disabled={realigning || !realignText.trim()}
+                  className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                >
+                  {realigning ? 'Aligning…' : 'Re-align lyrics'}
+                </button>
+              </div>
+            )}
+
             {segments.length === 0 ? (
               <p className="text-gray-600 text-sm italic">No transcript captured.</p>
             ) : (
