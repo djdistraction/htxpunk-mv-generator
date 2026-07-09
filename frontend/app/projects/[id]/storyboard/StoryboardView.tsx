@@ -166,7 +166,7 @@ export default function StoryboardView({ id }: { id: string }) {
             <h1 className="text-3xl font-bold">Storyboard Review</h1>
             <p className="text-gray-500 mt-1">
               {project.stage === 'awaiting_storyboard_approval'
-                ? `${panels.length} frames · Review each image, ↻ redo any you don't like, reorder with ← →. Approve only when you're ready to generate video.`
+                ? `${panels.length} frames · Review each image, redo any you don't like, reorder as needed. Approval unlocks base video generation on the workbook page.`
                 : `${panels.length} frames · Storyboard locked after approval.`}
             </p>
           </div>
@@ -176,7 +176,7 @@ export default function StoryboardView({ id }: { id: string }) {
               disabled={approving}
               className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 text-white font-semibold px-6 py-3 rounded-lg transition-colors"
             >
-              {approving ? 'Starting generation…' : '✓ Approve & Generate Video'}
+              {approving ? 'Approving...' : 'Approve storyboard'}
             </button>
           )}
         </div>

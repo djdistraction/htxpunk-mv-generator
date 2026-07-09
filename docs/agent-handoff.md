@@ -35,6 +35,16 @@ Purpose:
 - Let the user edit, approve, retry, regenerate, or stop at each major stage.
 - Prevent wasted tokens by stopping before downstream work if upstream results are bad.
 
+## Active Codex branch
+
+`codex/issue-20-workbook-shell`
+
+Current slice:
+
+- Workbook shell on the project page.
+- Explicit one-step creative worker endpoints.
+- Creative stages paused until the workbook starts the next section.
+
 ## Primary implementation brief
 
 Read:

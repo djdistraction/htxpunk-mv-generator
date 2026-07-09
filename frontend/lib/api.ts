@@ -112,12 +112,28 @@ export const api = {
   },
 
   pipeline: {
+    runSongAnalysis: async (id: string) => {
+      const { data } = await client.post(`/api/pipeline/${id}/run-song-analysis`)
+      return data
+    },
+    generateTreatment: async (id: string) => {
+      const { data } = await client.post(`/api/pipeline/${id}/generate-treatment`)
+      return data
+    },
     approveTreatment: async (id: string, payload?: { treatment?: object; notes?: string }) => {
       const { data } = await client.post(`/api/pipeline/${id}/approve-treatment`, payload ?? {})
       return data
     },
     reviseTreatment: async (id: string, feedback: string) => {
       const { data } = await client.post(`/api/pipeline/${id}/revise-treatment`, { feedback })
+      return data
+    },
+    generateElementPlan: async (id: string) => {
+      const { data } = await client.post(`/api/pipeline/${id}/generate-element-plan`)
+      return data
+    },
+    generateElementImages: async (id: string) => {
+      const { data } = await client.post(`/api/pipeline/${id}/generate-element-images`)
       return data
     },
     getShotManifests: async (id: string) => {
@@ -140,8 +156,20 @@ export const api = {
       })
       return data
     },
+    buildStoryboard: async (id: string) => {
+      const { data } = await client.post(`/api/pipeline/${id}/build-storyboard`)
+      return data
+    },
+    generateManifestImages: async (id: string) => {
+      const { data } = await client.post(`/api/pipeline/${id}/generate-manifest-images`)
+      return data
+    },
     approveStoryboard: async (id: string, payload: { panel_order: string[] }) => {
       const { data } = await client.post(`/api/pipeline/${id}/approve-storyboard`, payload)
+      return data
+    },
+    generateBaseVideo: async (id: string) => {
+      const { data } = await client.post(`/api/pipeline/${id}/generate-base-video`)
       return data
     },
     regenerateImage: async (id: string, payload: { asset_id: string; new_prompt: string }) => {
