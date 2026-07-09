@@ -10,24 +10,31 @@ export default function StoryboardView({ id }: { id: string }) {
   const [panels, setPanels] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [approving, setApproving] = useState(false)
+  const [reviewing, setReviewing] = useState<string | null>(null)
+
+  const load = async () => {
+    const [proj, assets] = await Promise.all([
+      api.projects.get(id),
+      api.assets.list(id),
+    ])
+    setProject(proj)
+    const storyboardPanels = assets
+      .filter((a: any) => a.asset_type === 'storyboard_panel' || a.asset_type === 'panel')
+      .sort((a: any, b: any) => (a.panel_index ?? 0) - (b.panel_index ?? 0))
+    setPanels(storyboardPanels)
+    setLoading(false)
+  }
 
   useEffect(() => {
-    const load = async () => {
-      const [proj, assets] = await Promise.all([
-        api.projects.get(id),
-        api.assets.list(id),
-      ])
-      setProject(proj)
-      const storyboardPanels = assets
-        .filter((a: any) => a.asset_type === 'storyboard_panel' || a.asset_type === 'panel')
-        .sort((a: any, b: any) => (a.panel_index ?? 0) - (b.panel_index ?? 0))
-      setPanels(storyboardPanels)
-      setLoading(false)
-    }
     load()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
   const handleApprove = async () => {
+    if (!allApproved) {
+      alert('Approve every storyboard image before approving the storyboard.')
+      return
+    }
     setApproving(true)
     try {
       const panel_order = panels.map(p => p.id)
@@ -65,6 +72,19 @@ export default function StoryboardView({ id }: { id: string }) {
   }, [])
 
   const [uploading, setUploading] = useState<Record<string, boolean>>({})
+
+  const reviewPanel = async (panelId: string, status: 'approved' | 'rejected') => {
+    const note = status === 'rejected' ? window.prompt('What needs to change for this frame?') || '' : ''
+    setReviewing(panelId)
+    try {
+      await api.assets.review(id, panelId, { status, note })
+      await load()
+    } catch (err: any) {
+      alert(err?.response?.data?.detail || 'Could not save frame review.')
+    } finally {
+      setReviewing(null)
+    }
+  }
 
   const uploadPanelImage = async (panel: any, file: File) => {
     setUploading(u => ({ ...u, [panel.id]: true }))
@@ -143,6 +163,9 @@ export default function StoryboardView({ id }: { id: string }) {
 
   const VIEWABLE_STAGES = ['awaiting_storyboard_approval', 'storyboard_approved', 'assembling', 'complete']
   const canApprove = project?.stage === 'awaiting_storyboard_approval'
+  const approvedCount = panels.filter(panel => panel.asset_status === 'approved').length
+  const rejectedCount = panels.filter(panel => panel.asset_status === 'rejected').length
+  const allApproved = panels.length > 0 && approvedCount === panels.length
 
   if (!project || !VIEWABLE_STAGES.includes(project.stage)) return (
     <div className="min-h-screen bg-black text-white flex items-center justify-center p-8">
@@ -173,12 +196,27 @@ export default function StoryboardView({ id }: { id: string }) {
           {canApprove && (
             <button
               onClick={handleApprove}
-              disabled={approving}
+              disabled={approving || !allApproved}
               className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 text-white font-semibold px-6 py-3 rounded-lg transition-colors"
             >
               {approving ? 'Approving...' : 'Approve storyboard'}
             </button>
           )}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+          <div className="bg-gray-950 border border-gray-800 rounded-lg p-3">
+            <p className="text-xs uppercase tracking-widest text-gray-600">Approved</p>
+            <p className="text-xl font-semibold text-green-300">{approvedCount}/{panels.length}</p>
+          </div>
+          <div className="bg-gray-950 border border-gray-800 rounded-lg p-3">
+            <p className="text-xs uppercase tracking-widest text-gray-600">Rejected</p>
+            <p className="text-xl font-semibold text-orange-300">{rejectedCount}</p>
+          </div>
+          <div className="bg-gray-950 border border-gray-800 rounded-lg p-3">
+            <p className="text-xs uppercase tracking-widest text-gray-600">Remaining</p>
+            <p className="text-xl font-semibold text-yellow-300">{Math.max(panels.length - approvedCount, 0)}</p>
+          </div>
         </div>
 
         {panels.length === 0 ? (
@@ -201,6 +239,15 @@ export default function StoryboardView({ id }: { id: string }) {
                   <div className="absolute top-1 left-1 bg-black/70 text-white text-xs px-1.5 py-0.5 rounded">
                     {i + 1}
                   </div>
+                  <div className={`absolute bottom-1 right-1 text-xs px-1.5 py-0.5 rounded border ${
+                    panel.asset_status === 'approved'
+                      ? 'bg-green-950/90 text-green-300 border-green-800'
+                      : panel.asset_status === 'rejected'
+                        ? 'bg-orange-950/90 text-orange-300 border-orange-800'
+                        : 'bg-black/80 text-gray-300 border-gray-700'
+                  }`}>
+                    {panel.asset_status || 'generated'}
+                  </div>
                   {panel.source === 'manual' && (
                     <div className="absolute bottom-1 left-1 bg-green-900/80 text-green-300 text-xs px-1.5 py-0.5 rounded">
                       manual
@@ -217,6 +264,25 @@ export default function StoryboardView({ id }: { id: string }) {
                 <div className="p-2">
                   {(panel.lyric_at_this_moment || panel.lyric) && (
                     <p className="text-gray-400 text-xs italic truncate">&ldquo;{panel.lyric_at_this_moment || panel.lyric}&rdquo;</p>
+                  )}
+                  {panel.review_note && <p className="text-orange-300 text-xs mt-1 line-clamp-2">{panel.review_note}</p>}
+                  {canApprove && (
+                    <div className="flex gap-2 mt-2">
+                      <button
+                        onClick={() => reviewPanel(panel.id, 'approved')}
+                        disabled={reviewing === panel.id || panel.asset_status === 'approved'}
+                        className="flex-1 text-xs px-2 py-1 rounded bg-green-800 text-green-100 hover:bg-green-700 disabled:bg-gray-800 disabled:text-gray-600"
+                      >
+                        Approve
+                      </button>
+                      <button
+                        onClick={() => reviewPanel(panel.id, 'rejected')}
+                        disabled={reviewing === panel.id}
+                        className="flex-1 text-xs px-2 py-1 rounded border border-orange-800 text-orange-300 hover:border-orange-600 disabled:border-gray-800 disabled:text-gray-600"
+                      >
+                        Reject
+                      </button>
+                    </div>
                   )}
                   <div className="flex items-center justify-between mt-2">
                     <button

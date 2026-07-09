@@ -563,5 +563,9 @@ def regenerate_single_image(project_id: str, asset_id: str, new_prompt: str):
             project_id, asset_id, new_prompt, style_suffix, remove_bg=remove_bg
         )
 
-    db_update_asset(asset_id, url=new_url, prompt=new_prompt)
+    import json as _json
+    metadata = _json.loads(asset.get("metadata") or "{}")
+    metadata["asset_status"] = "generated"
+    metadata["review_note"] = ""
+    db_update_asset(asset_id, url=new_url, prompt=new_prompt, metadata=metadata)
     logger.info("[Worker] Regenerated asset %s (%s)", asset_id[:8], asset_type)

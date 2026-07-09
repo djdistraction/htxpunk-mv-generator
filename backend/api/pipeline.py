@@ -242,6 +242,12 @@ async def approve_storyboard(project_id: str, body: StoryboardApproval):
     project = db_get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    panels = db_get_assets(project_id, asset_type="storyboard_panel") + db_get_assets(project_id, asset_type="panel")
+    unapproved = [asset for asset in panels if asset.get("asset_status") != "approved"]
+    if not panels:
+        raise HTTPException(status_code=400, detail="Generate storyboard images before approving the storyboard.")
+    if unapproved:
+        raise HTTPException(status_code=400, detail=f"Approve every storyboard image first ({len(unapproved)} remaining).")
 
     db_update_project(
         project_id,
@@ -329,6 +335,8 @@ async def upload_shot_image(
     # column-only kwargs.
     metadata = _json.loads(asset.get("metadata") or "{}")
     metadata["source"] = "manual"
+    metadata["asset_status"] = "generated"
+    metadata["review_note"] = ""
     db_update_asset(asset_id, url=url, prompt="(manually uploaded)", metadata=metadata)
     return {"message": "Image uploaded", "url": url}
 

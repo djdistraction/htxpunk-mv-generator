@@ -503,8 +503,16 @@ async def approve_workbook_section(project_id: str, section_key: str):
         image_assets = db_get_assets(project_id, asset_type="background") + db_get_assets(project_id, asset_type="element")
         if not image_assets:
             raise HTTPException(status_code=400, detail="Generate or upload element images before approving this section.")
-    if key == "storyboard_images" and not db_get_assets(project_id, asset_type="storyboard_panel"):
-        raise HTTPException(status_code=400, detail="Generate or upload storyboard images before approving this section.")
+        unapproved = [asset for asset in image_assets if asset.get("asset_status") != "approved"]
+        if unapproved:
+            raise HTTPException(status_code=400, detail=f"Approve every element image first ({len(unapproved)} remaining).")
+    if key == "storyboard_images":
+        panels = db_get_assets(project_id, asset_type="storyboard_panel") + db_get_assets(project_id, asset_type="panel")
+        if not panels:
+            raise HTTPException(status_code=400, detail="Generate or upload storyboard images before approving this section.")
+        unapproved = [asset for asset in panels if asset.get("asset_status") != "approved"]
+        if unapproved:
+            raise HTTPException(status_code=400, detail=f"Approve every storyboard image first ({len(unapproved)} remaining).")
     if key == "final_video" and not project.get("video_url"):
         raise HTTPException(status_code=400, detail="Generate a base video before approving this section.")
     if key == "project_setup" and project.get("stage") == "awaiting_project_info_review":

@@ -201,6 +201,10 @@ export const api = {
       const { data } = await client.get(`/api/assets/${projectId}`, { params })
       return data
     },
+    review: async (projectId: string, assetId: string, payload: { status: string; note?: string }) => {
+      const { data } = await client.post(`/api/assets/${projectId}/${assetId}/review`, payload)
+      return data
+    },
   },
 
   series: {
