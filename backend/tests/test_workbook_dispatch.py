@@ -11,6 +11,7 @@ import time
 import uuid
 
 from database import db_create_project, db_update_project
+from services.workbook_status import set_section_status
 from workers import pipeline_worker
 
 
@@ -18,6 +19,15 @@ def test_concurrent_requests_do_not_double_dispatch(client):
     project_id = str(uuid.uuid4())
     db_create_project(project_id, "Race Test", "Artist")
     db_update_project(project_id, stage="analyzed", analysis={"themes": ["test"]})
+    # Realistic pre-state: a real project reaches "generate-treatment" only
+    # after song_analysis is approved. Leaving section_statuses empty here
+    # would race PR #31's required-upstream-sections check against the
+    # in-flight guard itself (the first winning request's own "running"
+    # write flips section-gating on for the second request), which is a
+    # separate, real design question about legacy vs. gated projects — not
+    # what this test is verifying. Approving upstream first isolates the
+    # double-dispatch guard as the only thing under test.
+    set_section_status(project_id, "song_analysis", "approved", message="test setup")
 
     call_count = {"n": 0}
     original = pipeline_worker.run_treatment_generation

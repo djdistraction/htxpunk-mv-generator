@@ -32,12 +32,16 @@ were deleted after PR #19 and PR #22 landed.
 
 ## Current major issues
 
-- Issue #20: `Build production-workbook pipeline interface with editable gated stages` — Phase 1 (workbook shell, explicit one-step actions) shipped via PR #22. Still open: section-status data model, duplicate/timeline validation, token preflight checks, base/lip-sync split, completion-gating on explicit final selection.
-- Issue #29: `Five production paths` (new) — the project goal above, needs a file-by-file plan before implementation starts, the same way issue #20 anchored the workbook rebuild.
+- Issue #20: `Build production-workbook pipeline interface with editable gated stages` — Phase 1 (workbook shell, explicit one-step actions) shipped via PR #22. PR #31 (Codex, `codex/issue-20-workbook-shell`) adds the rest of the list from PR #22's "still open" note: persisted workbook section statuses with approve/reject controls, per-asset (element/storyboard image) approve/reject gates, an editable shot-manifest workflow (import, add, edit, delete, preflight), and a base-video/final-export split (`base_video_url` stored separately, final approval selects `final_video_url`). Still open after #31: duplicate/timeline validation, token preflight checks, and the lip-sync half of the base/lip-sync split (see #27).
+- Issue #29: `Five production paths` — PR #31 implements the core of this: a production-path chooser (Lyric, Karaoke, Performance, Cinematic, or a hybrid of any two) at project creation, persisted and editable during Project Setup review, included in the creative context driving song analysis and downstream planning. The composable-module architecture proposed in `docs/decision-log.md` still needs validating against how the different paths actually render/assemble differently, not just how they're selected.
 - Issue #24: reference images/text were structurally invisible past the treatment stage. Part A (thread `reference_notes` through the whole pipeline) shipped in PR #28. Part B (vision-model captioning) not started.
-- Issue #25: lyrics upload + `aeneas` forced alignment. Feasibility proven (real working proof-of-concept). Not started. Now load-bearing for the Lyric Video and Karaoke Video paths, not just a transcription-quality fix.
-- Issue #26: double-dispatch race in the workbook's manual worker endpoints (found in review on #22, merged unaddressed, fixed separately). PR #26 open.
-- Issue #27 (assigned to Codex): split base video generation from optional lip-sync into separate approval-gated stages, per the already-decided design in `docs/decision-log.md`. Now also foundational for the AI-performer mode of Performance Music Video.
+- Issue #25: lyrics upload + `aeneas` forced alignment. Feasibility proven (real working proof-of-concept). Not started. Load-bearing for the Lyric Video and Karaoke Video paths, not just a transcription-quality fix.
+- Issue #26: double-dispatch race in the workbook's manual worker endpoints (found in review on #22, merged unaddressed, fixed separately in PR #26, merged).
+- Issue #27 (assigned to Codex, in progress): split base video generation from optional lip-sync into separate approval-gated stages. PR #31 splits base video from final export; the optional-lip-sync-as-its-own-gate half is still in progress — Codex was mid-way through it (`Add optional lip sync review gate`) when the July 15 unavailability window started.
+
+## Codex unavailable until 2026-07-15
+
+Claude Code is driving repo work directly until then, including finishing PR #31's remaining scope. Do not assume Codex will pick up new work before that date.
 
 ## Primary implementation brief
 

@@ -104,9 +104,17 @@ export const api = {
     confirmInfo: async (id: string, payload: {
       title?: string; artist?: string; composer?: string; album?: string
       bpm?: string; musical_key?: string; beat_grid?: number[]
-      transcript?: object; series_id?: string; brief?: string
+      transcript?: object; series_id?: string; brief?: string; production_paths?: string[]
     }) => {
       const { data } = await client.post(`/api/projects/${id}/confirm-info`, payload)
+      return data
+    },
+    approveSection: async (id: string, section: string) => {
+      const { data } = await client.post(`/api/projects/${id}/sections/${section}/approve`)
+      return data
+    },
+    rejectSection: async (id: string, section: string, note: string = '') => {
+      const { data } = await client.post(`/api/projects/${id}/sections/${section}/reject`, { note })
       return data
     },
   },
@@ -138,6 +146,18 @@ export const api = {
     },
     getShotManifests: async (id: string) => {
       const { data } = await client.get(`/api/pipeline/${id}/shot-manifests`)
+      return data
+    },
+    createShotManifest: async (id: string, payload: object) => {
+      const { data } = await client.post(`/api/pipeline/${id}/shot-manifests`, payload)
+      return data
+    },
+    updateShotManifest: async (id: string, manifestId: string, payload: object) => {
+      const { data } = await client.put(`/api/pipeline/${id}/shot-manifests/${manifestId}`, payload)
+      return data
+    },
+    deleteShotManifest: async (id: string, manifestId: string) => {
+      const { data } = await client.delete(`/api/pipeline/${id}/shot-manifests/${manifestId}`)
       return data
     },
     approveManifests: async (id: string, payload?: { revision_notes?: string }) => {
@@ -191,6 +211,10 @@ export const api = {
     list: async (projectId: string, assetType?: string) => {
       const params = assetType ? { asset_type: assetType } : {}
       const { data } = await client.get(`/api/assets/${projectId}`, { params })
+      return data
+    },
+    review: async (projectId: string, assetId: string, payload: { status: string; note?: string }) => {
+      const { data } = await client.post(`/api/assets/${projectId}/${assetId}/review`, payload)
       return data
     },
   },

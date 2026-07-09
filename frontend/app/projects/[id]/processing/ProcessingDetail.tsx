@@ -14,7 +14,7 @@ const PAST_PREPROCESSING = new Set([
   'treatment_pending', 'awaiting_treatment_approval', 'treatment_approved',
   'extracting_elements', 'elements_ready', 'generating_images', 'images_ready',
   'building_storyboard', 'awaiting_storyboard_approval', 'storyboard_approved',
-  'assembling', 'complete',
+  'assembling', 'base_video_ready', 'complete',
 ])
 
 export default function ProcessingDetail({ id }: { id: string }) {

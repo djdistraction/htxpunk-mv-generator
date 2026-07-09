@@ -27,11 +27,16 @@ class ProjectRow(Base):
     converted_audio_url = Column(String)  # canonical mp3, produced by audio_preprocessor.convert_to_mp3
     user_vocals_url = Column(String)      # user-supplied pre-isolated vocal stem — skips separate_vocals() when set
     user_brief = Column(Text)            # user's free-text creative vision (optional)
+    production_paths = Column(Text)       # JSON list: lyric | karaoke | performance | cinematic; max 2 selections
+    section_statuses = Column(Text)       # JSON map of production-workbook section -> status/details
     analysis = Column(Text)              # JSON
     treatment = Column(Text)             # JSON
     elements = Column(Text)              # JSON
     panel_order = Column(Text)           # JSON list of asset IDs
     video_url = Column(String)
+    base_video_url = Column(String)      # generated base render, reviewed before final selection
+    lipsynced_video_url = Column(String) # optional post-processing output, never overwrites base render
+    final_video_url = Column(String)     # user-approved final export
     composer = Column(String)            # optional, from file tags or user entry
     album = Column(String)               # optional, from file tags or user entry
     song_length = Column(String)         # seconds, measured — locked/read-only once set
@@ -116,6 +121,8 @@ def _migrate_db():
     _add_column_if_missing(conn, "projects", "revision_notes", "TEXT")
     _add_column_if_missing(conn, "projects", "panel_order", "TEXT")
     _add_column_if_missing(conn, "projects", "user_brief", "TEXT")
+    _add_column_if_missing(conn, "projects", "production_paths", "TEXT")
+    _add_column_if_missing(conn, "projects", "section_statuses", "TEXT")
     _add_column_if_missing(conn, "projects", "composer", "TEXT")
     _add_column_if_missing(conn, "projects", "album", "TEXT")
     _add_column_if_missing(conn, "projects", "song_length", "TEXT")
@@ -127,6 +134,9 @@ def _migrate_db():
     _add_column_if_missing(conn, "projects", "converted_audio_url", "TEXT")
     _add_column_if_missing(conn, "projects", "processing_step", "TEXT")
     _add_column_if_missing(conn, "projects", "user_vocals_url", "TEXT")
+    _add_column_if_missing(conn, "projects", "base_video_url", "TEXT")
+    _add_column_if_missing(conn, "projects", "lipsynced_video_url", "TEXT")
+    _add_column_if_missing(conn, "projects", "final_video_url", "TEXT")
     _add_column_if_missing(conn, "series", "continuity_bible", "TEXT")
     conn.commit()
     conn.close()
@@ -159,18 +169,18 @@ def db_list_projects() -> list[dict]:
     result = []
     for row in rows:
         d = dict(row)
-        for field in ("analysis", "treatment", "elements", "panel_order", "beat_grid", "transcript"):
+        for field in ("analysis", "treatment", "elements", "panel_order", "beat_grid", "transcript", "production_paths", "section_statuses"):
             if d.get(field):
                 d[field] = json.loads(d[field])
         result.append(d)
     return result
 
-def db_create_project(project_id: str, title: str, artist: str) -> dict:
+def db_create_project(project_id: str, title: str, artist: str, production_paths: list[str] | None = None) -> dict:
     conn = _sync_db()
     now = datetime.utcnow().isoformat()
     conn.execute(
-        "INSERT INTO projects (id, title, artist, stage, created_at, updated_at) VALUES (?,?,?,?,?,?)",
-        (project_id, title, artist, "uploaded", now, now)
+        "INSERT INTO projects (id, title, artist, stage, production_paths, section_statuses, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+        (project_id, title, artist, "uploaded", json.dumps(production_paths or []), json.dumps({}), now, now)
     )
     conn.commit()
     conn.close()
@@ -184,7 +194,7 @@ def db_get_project(project_id: str) -> dict | None:
     if not row:
         return None
     d = dict(row)
-    for field in ("analysis", "treatment", "elements", "panel_order", "beat_grid", "transcript"):
+    for field in ("analysis", "treatment", "elements", "panel_order", "beat_grid", "transcript", "production_paths", "section_statuses"):
         if d.get(field):
             d[field] = json.loads(d[field])
     return d
@@ -434,5 +444,12 @@ def db_update_shot_manifest(manifest_id: str, **kwargs):
             f"UPDATE shot_manifests SET {key}=?, updated_at=? WHERE id=?",
             (value, datetime.utcnow().isoformat(), manifest_id)
         )
+    conn.commit()
+    conn.close()
+
+def db_delete_shot_manifest(manifest_id: str):
+    """Delete a shot manifest row."""
+    conn = _sync_db()
+    conn.execute("DELETE FROM shot_manifests WHERE id=?", (manifest_id,))
     conn.commit()
     conn.close()
