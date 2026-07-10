@@ -194,6 +194,22 @@ function runPipInstall(pythonCmd, args, env, label, failureContext) {
   });
 }
 
+function runPythonScript(pythonCmd, scriptPath, cwd, label, failureContext) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(pythonCmd, [scriptPath], { stdio: ['ignore', 'pipe', 'pipe'], cwd });
+    const getTail = pipeProcessOutput(proc, label);
+    proc.on('error', (err) => reject(new Error(`Failed to run python: ${err.message}`)));
+    proc.on('exit', (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        const tail = getTail();
+        reject(new Error(`${failureContext} failed (exit code ${code}).\n\n${tail ? `Last output:\n${tail}` : ''}`));
+      }
+    });
+  });
+}
+
 async function ensureBackendDependencies(pythonCmd, onProgress) {
   const backendPath = getBackendPath();
   const reqPath = path.join(backendPath, 'requirements.txt');
@@ -224,13 +240,23 @@ async function ensureBackendDependencies(pythonCmd, onProgress) {
   // aeneas (lyric forced alignment) is installed as a separate step: its
   // setup.py needs numpy (just installed above) importable, which pip's
   // isolated build env otherwise hides — --no-build-isolation makes it see
-  // the real environment instead. AENEAS_WITH_CEW=False skips its optional
-  // C extension (avoids needing espeak dev headers), SETUPTOOLS_USE_DISTUTILS=stdlib
-  // works around an install_layout error under current setuptools.
+  // the real environment instead. It also needs numpy.distutils, which
+  // NumPy removed entirely on Python >= 3.12; prepare_aeneas_install.py
+  // shims that in (no-op on Python < 3.12). AENEAS_WITH_CEW/CDTW/CMFCC=False
+  // skip all of aeneas's optional C extensions, so this never needs a C/C++
+  // compiler — confirmed a real blocker on Windows without Visual C++
+  // Build Tools installed (users shouldn't need those for a desktop app).
+  await runPythonScript(
+    pythonCmd,
+    path.join(backendPath, 'scripts', 'prepare_aeneas_install.py'),
+    backendPath,
+    'prepare-aeneas',
+    'Preparing the environment for lyric alignment'
+  );
   await runPipInstall(
     pythonCmd,
     ['-m', 'pip', 'install', '--user', '--disable-pip-version-check', '--no-build-isolation', '-r', aeneasReqPath],
-    { ...process.env, AENEAS_WITH_CEW: 'False', SETUPTOOLS_USE_DISTUTILS: 'stdlib' },
+    { ...process.env, AENEAS_WITH_CEW: 'False', AENEAS_WITH_CDTW: 'False', AENEAS_WITH_CMFCC: 'False' },
     'pip-install-aeneas',
     'Installing lyric alignment dependencies'
   );

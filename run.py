@@ -424,10 +424,10 @@ def ensure_env(allow_preview_video: bool = False) -> None:
         ok(f"Saved .env using IMAGE_BACKEND={image_backend}")
 
 
-def backend_deps_installed() -> bool:
+def _imports_cleanly(module_names: str) -> bool:
     try:
         subprocess.run(
-            [sys.executable, "-c", "import uvicorn, fastapi, faster_whisper"],
+            [sys.executable, "-c", f"import {module_names}"],
             cwd=str(BACKEND_DIR),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -436,6 +436,14 @@ def backend_deps_installed() -> bool:
         return True
     except Exception:
         return False
+
+
+def backend_deps_installed() -> bool:
+    return _imports_cleanly("uvicorn, fastapi, faster_whisper")
+
+
+def aeneas_installed() -> bool:
+    return _imports_cleanly("aeneas")
 
 
 def install_dependencies(want_electron: bool) -> None:
@@ -448,15 +456,32 @@ def install_dependencies(want_electron: bool) -> None:
         if code != 0:
             fail("Backend dependency installation failed. See messages above.")
             sys.exit(1)
+        ok("Backend dependencies installed")
 
-        # aeneas (lyric forced alignment) is installed as a separate step:
-        # its setup.py needs numpy (just installed above) importable, which
+    # Checked independently of the core deps above: an install from before
+    # aeneas was added would otherwise report "already installed" and skip
+    # it forever, since it never touches requirements.txt's hash/imports.
+    if aeneas_installed():
+        ok("Lyric alignment dependencies already installed")
+    else:
+        # aeneas's setup.py needs numpy (installed above) importable, which
         # pip's isolated build env otherwise hides — --no-build-isolation
-        # makes it see the real environment instead. AENEAS_WITH_CEW=False
-        # skips its optional C extension (avoids needing espeak dev
-        # headers), SETUPTOOLS_USE_DISTUTILS=stdlib works around an
-        # install_layout error under current setuptools.
-        pip_env = {"AENEAS_WITH_CEW": "False", "SETUPTOOLS_USE_DISTUTILS": "stdlib"}
+        # makes it see the real environment instead. It also needs
+        # numpy.distutils, which NumPy removed entirely on Python >= 3.12;
+        # prepare_aeneas_install.py shims that in (no-op on Python < 3.12).
+        # AENEAS_WITH_CEW/CDTW/CMFCC=False skip all of aeneas's optional C
+        # extensions, so this never needs a C/C++ compiler on any platform
+        # (confirmed a real blocker on Windows without Visual C++ Build
+        # Tools installed — see requirements-aeneas.txt for the details).
+        code = run_blocking(
+            [sys.executable, str(BACKEND_DIR / "scripts" / "prepare_aeneas_install.py")],
+            cwd=BACKEND_DIR,
+        )
+        if code != 0:
+            fail("Preparing the environment for aeneas failed. See messages above.")
+            sys.exit(1)
+
+        pip_env = {"AENEAS_WITH_CEW": "False", "AENEAS_WITH_CDTW": "False", "AENEAS_WITH_CMFCC": "False"}
         code = run_blocking(
             [sys.executable, "-m", "pip", "install", "--no-build-isolation", "-r", "requirements-aeneas.txt"],
             cwd=BACKEND_DIR,
@@ -465,7 +490,7 @@ def install_dependencies(want_electron: bool) -> None:
         if code != 0:
             fail("Lyric alignment dependency installation failed. See messages above.")
             sys.exit(1)
-        ok("Backend dependencies installed")
+        ok("Lyric alignment dependencies installed")
 
     if (FRONTEND_DIR / "node_modules").exists():
         ok("Frontend dependencies already installed")

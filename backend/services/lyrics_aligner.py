@@ -10,19 +10,25 @@ transcribed in the first place. If the user already knows the real lyrics,
 forced alignment gives exact timestamps for that exact text instead of
 asking the model to guess again.
 
-aeneas (last released 2018) needs two things to work on a modern stack,
-confirmed by real end-to-end testing, not just installing it:
+aeneas (last released 2018) needs several things to work on a modern stack,
+each confirmed by real end-to-end testing (including hitting the failure
+first, not just installing it and assuming success):
 
-1. Build time: `AENEAS_WITH_CEW=False` (skip its optional fast C extension —
-   it links against classic `-lespeak`, not `-lespeak-ng`, so building it
-   requires either classic espeak's dev headers or a symlink hack; skipping
-   it entirely is far more portable across Linux/Windows/Mac, and the
-   fallback path below is fast enough at the scale of a handful of alignment
-   calls per project) and `SETUPTOOLS_USE_DISTUTILS=stdlib` (its setup.py
-   hits `AttributeError: install_layout` under current setuptools
-   otherwise). Both are set by run.py / electron-app's dependency install
-   step, not here — this module only needs them to have been set at install
-   time.
+1. Build time: `AENEAS_WITH_CEW=False`, `AENEAS_WITH_CDTW=False`,
+   `AENEAS_WITH_CMFCC=False` skip ALL of its optional C extensions, so
+   installing it never needs a C/C++ compiler on any platform — confirmed a
+   real blocker on Windows without Visual C++ Build Tools installed. The
+   pure-Python/subprocess fallback for all three is plenty fast at this
+   scale (benchmarked: ~5s wall time to align 30 lines against 94s of
+   audio). Also needs `python scripts/prepare_aeneas_install.py` run first
+   (same Python, right before installing requirements-aeneas.txt): its
+   setup.py unconditionally imports `numpy.distutils`, which NumPy removed
+   entirely on Python >= 3.12 (no numpy version restores it there) — that
+   script shims in the one function aeneas actually needs from it, a no-op
+   on Python < 3.12. All of this is set by run.py / electron-app's
+   dependency install step and by CI, not here — this module only needs it
+   to have already happened at install time. See requirements-aeneas.txt
+   for the full rationale on each piece.
 2. Runtime: its vendored wavfile.py calls `numpy.fromstring(data,
    dtype=...)` in binary mode, removed in current NumPy. Patched below,
    scoped to aeneas's own call pattern only.
