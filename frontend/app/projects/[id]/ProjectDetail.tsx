@@ -108,6 +108,16 @@ const GUIDED_RUN_STEPS: Record<string, GuidedStep> = {
   metadata: { key: 'read-metadata', runLabel: 'Read metadata' },
   vocals: { key: 'isolate-vocals', runLabel: 'Prepare vocal stem' },
   lyrics: { key: 'transcribe-lyrics', runLabel: 'Transcribe lyrics' },
+  lyrics_align: { key: 'align-lyrics', runLabel: 'Align provided lyrics' },
+}
+
+// Projects created with pasted/uploaded lyrics (user_lyrics_text) should be
+// forced-aligned against the vocal stem instead of transcribed with
+// Whisper — more accurate since the exact words are already known. Both
+// produce the same transcript shape, so everything downstream is unaffected
+// by which one ran.
+function lyricsGuidedStep(project: any): GuidedStep {
+  return project?.user_lyrics_text ? GUIDED_RUN_STEPS.lyrics_align : GUIDED_RUN_STEPS.lyrics
 }
 
 function stageIndex(stage: string): number {
@@ -200,6 +210,7 @@ function isGuidedStepReady(project: any, stepKey: string): boolean {
     case 'isolate-vocals':
       return Boolean(project.converted_audio_url) && !isAtOrAfter(project, 'vocals_ready')
     case 'transcribe-lyrics':
+    case 'align-lyrics':
       return isAtOrAfter(project, 'vocals_ready') && !hasTranscript(project)
     default:
       return false
@@ -291,8 +302,8 @@ function buildWorkbookSections(project: any): WorkbookSection[] {
           ? { label: GUIDED_RUN_STEPS.metadata.runLabel, run: 'read-metadata' }
           : isGuidedStepReady(project, 'isolate-vocals')
             ? { label: GUIDED_RUN_STEPS.vocals.runLabel, run: 'isolate-vocals' }
-            : isGuidedStepReady(project, 'transcribe-lyrics')
-              ? { label: GUIDED_RUN_STEPS.lyrics.runLabel, run: 'transcribe-lyrics' }
+            : isGuidedStepReady(project, lyricsGuidedStep(project).key)
+              ? { label: lyricsGuidedStep(project).runLabel, run: lyricsGuidedStep(project).key }
               : undefined,
       secondaryAction: project.stage === 'awaiting_project_info_review'
         ? { label: 'Edit transcript', href: 'review' }
@@ -498,6 +509,8 @@ export default function ProjectDetail({ id }: { id: string }) {
         await refreshFromResponse(await api.projects.isolateVocals(id))
       } else if (action === 'transcribe-lyrics') {
         await refreshFromResponse(await api.projects.transcribeLyrics(id))
+      } else if (action === 'align-lyrics') {
+        await refreshFromResponse(await api.projects.alignLyrics(id))
       } else if (action === 'run-song-analysis') {
         await refreshFromResponse(await api.pipeline.runSongAnalysis(id))
       } else if (action === 'generate-treatment') {
