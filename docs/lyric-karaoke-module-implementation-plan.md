@@ -2,7 +2,39 @@
 
 ## Status
 
-Draft, written 2026-07-10 from a real end-to-end pipeline test run (see
+**Lyric Video v1 (build-order steps 1-4) shipped 2026-07-10.** Bug #2
+(blocking server), bug #1 (align-lyrics wiring), the standalone Lyric Video
+Remotion composition + backend render branch, and hiding non-applicable
+workbook stages are all done, each independently verified with real
+end-to-end runs (real browser via Playwright, real Remotion renders,
+frame-level visual inspection) — not just type-checked or unit-tested in
+isolation. Branch `claude/lyric-video-v1`.
+
+Three real bugs were found and fixed along the way that this plan didn't
+anticipate, each confirmed by reproducing the failure first:
+- Local audio referenced via `file://` URI (the existing MusicVideo/
+  `build_timeline()` convention) 404s against this Remotion version's asset
+  server — the working form is copying into `remotion-composer/public/` and
+  referencing `/public/<filename>`. **This likely also affects the existing
+  Cinematic path's MusicVideo render** — not fixed here (out of scope per
+  this plan's Cinematic-path boundary), but worth a follow-up.
+- `<Composition>`'s `durationInFrames`/`fps` are static unless wired through
+  `calculateMetadata` — a render whose `--props` specified a different
+  duration silently rendered the composition's hardcoded placeholder length
+  instead. Fixed for the LyricVideo composition only.
+- `LyricOverlay.tsx` crashes (`interpolate()` non-monotonic input range) on
+  a segment shorter than its fade-animation window — hit for real via a
+  short forced-alignment segment. Fixed defensively (skip the fade below
+  that length) since the Cinematic path could hit this too.
+
+Bug #3 (UI feedback/copy fixes) is unstarted — explicitly lower priority
+and lowest risk, deferred to run after Randall tests the core flow.
+
+Still to do before this plan is fully closed: Randall's own end-to-end test
+of the merged feature, then Karaoke Video (same module, word-level
+highlight preset per decision-log.md's framing).
+
+Originally drafted 2026-07-10 from a real end-to-end pipeline test run (see
 `testing-notes/2026-07-10-pipeline-run.md`) plus direct backend/frontend
 tracing. Anchors issue #29's Lyric-overlay module the same way
 `production-workbook-implementation-plan.md` anchored issue #20 — this is
