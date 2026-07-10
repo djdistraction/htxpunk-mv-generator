@@ -469,8 +469,10 @@ def install_dependencies(want_electron: bool) -> None:
         # makes it see the real environment instead. It also needs
         # numpy.distutils, which NumPy removed entirely on Python >= 3.12;
         # prepare_aeneas_install.py shims that in (no-op on Python < 3.12).
-        # AENEAS_WITH_CEW=False skips aeneas's optional C extension, which
-        # needs espeak dev headers most systems don't have.
+        # AENEAS_WITH_CEW/CDTW/CMFCC=False skip all of aeneas's optional C
+        # extensions, so this never needs a C/C++ compiler on any platform
+        # (confirmed a real blocker on Windows without Visual C++ Build
+        # Tools installed — see requirements-aeneas.txt for the details).
         code = run_blocking(
             [sys.executable, str(BACKEND_DIR / "scripts" / "prepare_aeneas_install.py")],
             cwd=BACKEND_DIR,
@@ -479,7 +481,7 @@ def install_dependencies(want_electron: bool) -> None:
             fail("Preparing the environment for aeneas failed. See messages above.")
             sys.exit(1)
 
-        pip_env = {"AENEAS_WITH_CEW": "False"}
+        pip_env = {"AENEAS_WITH_CEW": "False", "AENEAS_WITH_CDTW": "False", "AENEAS_WITH_CMFCC": "False"}
         code = run_blocking(
             [sys.executable, "-m", "pip", "install", "--no-build-isolation", "-r", "requirements-aeneas.txt"],
             cwd=BACKEND_DIR,

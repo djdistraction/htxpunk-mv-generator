@@ -22,12 +22,19 @@
 #   the install failure, not assumed. This shims in the one function
 #   (`get_numpy_include_dirs()`) aeneas actually calls from it. A no-op on
 #   Python < 3.12, where numpy.distutils still exists.
-# - AENEAS_WITH_CEW=False env var at install time (set by run.py /
-#   electron-app's dependency install step, and by CI — not read from this
-#   file): skips aeneas's optional cew C extension, which links against
-#   classic espeak (not espeak-ng) and needs dev headers most systems don't
-#   have; the pure-Python/subprocess fallback is plenty fast for
-#   per-project alignment.
+# - AENEAS_WITH_CEW=False, AENEAS_WITH_CDTW=False, AENEAS_WITH_CMFCC=False
+#   env vars at install time (set by run.py / electron-app's dependency
+#   install step, and by CI — not read from this file): skip ALL of
+#   aeneas's optional C extensions (cew for espeak, cdtw for the DTW
+#   alignment core, cmfcc for MFCC extraction), so installing this package
+#   never needs a C/C++ compiler on any platform — confirmed a real
+#   blocker, not theoretical: a user without Visual C++ Build Tools hit
+#   "Microsoft Visual C++ 14.0 or greater is required" building cdtw on a
+#   real Windows machine (GitHub's windows-latest CI runner ships MSVC
+#   preinstalled, which is why CI didn't catch this). The pure-Python
+#   fallback for all three is plenty fast at this scale — benchmarked at
+#   ~5s wall time to align 30 lines against 94s of audio with every C
+#   extension disabled, well within a per-project one-time cost.
 #
 #   (SETUPTOOLS_USE_DISTUTILS=stdlib was needed here in an earlier version
 #   of this setup, on older setuptools — it is NOT needed with current

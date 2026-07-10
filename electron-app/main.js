@@ -242,9 +242,10 @@ async function ensureBackendDependencies(pythonCmd, onProgress) {
   // isolated build env otherwise hides — --no-build-isolation makes it see
   // the real environment instead. It also needs numpy.distutils, which
   // NumPy removed entirely on Python >= 3.12; prepare_aeneas_install.py
-  // shims that in (no-op on Python < 3.12). AENEAS_WITH_CEW=False skips
-  // aeneas's optional C extension, which needs espeak dev headers most
-  // systems don't have.
+  // shims that in (no-op on Python < 3.12). AENEAS_WITH_CEW/CDTW/CMFCC=False
+  // skip all of aeneas's optional C extensions, so this never needs a C/C++
+  // compiler — confirmed a real blocker on Windows without Visual C++
+  // Build Tools installed (users shouldn't need those for a desktop app).
   await runPythonScript(
     pythonCmd,
     path.join(backendPath, 'scripts', 'prepare_aeneas_install.py'),
@@ -255,7 +256,7 @@ async function ensureBackendDependencies(pythonCmd, onProgress) {
   await runPipInstall(
     pythonCmd,
     ['-m', 'pip', 'install', '--user', '--disable-pip-version-check', '--no-build-isolation', '-r', aeneasReqPath],
-    { ...process.env, AENEAS_WITH_CEW: 'False' },
+    { ...process.env, AENEAS_WITH_CEW: 'False', AENEAS_WITH_CDTW: 'False', AENEAS_WITH_CMFCC: 'False' },
     'pip-install-aeneas',
     'Installing lyric alignment dependencies'
   );

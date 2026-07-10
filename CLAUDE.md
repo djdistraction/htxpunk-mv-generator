@@ -156,7 +156,7 @@ way you'd install `ffmpeg`:
 cd backend
 pip install -r requirements.txt
 python scripts/prepare_aeneas_install.py
-AENEAS_WITH_CEW=False pip install --no-build-isolation -r requirements-aeneas.txt
+AENEAS_WITH_CEW=False AENEAS_WITH_CDTW=False AENEAS_WITH_CMFCC=False pip install --no-build-isolation -r requirements-aeneas.txt
 uvicorn main:app --reload --port 8000
 ```
 aeneas installs as a separate second step — see the comment at the top of
@@ -165,9 +165,11 @@ just installed above, to be importable, which pip's isolated build
 environment hides unless `--no-build-isolation` is passed, and also needs
 `numpy.distutils`, which NumPy removed entirely on Python >= 3.12 —
 `scripts/prepare_aeneas_install.py` shims that back in, a no-op on Python
-< 3.12). `AENEAS_WITH_CEW` is only needed for that one step — it skips
-aeneas's optional C extension. Nothing here needs to be set when running
-the server.
+< 3.12). The three `AENEAS_WITH_*` env vars are only needed for that one
+step — they skip all of aeneas's optional C extensions, so installing it
+never needs a C/C++ compiler (no Visual C++ Build Tools on Windows, no
+Xcode Command Line Tools on Mac). Nothing here needs to be set when
+running the server.
 
 **4. Frontend**
 ```bash
@@ -496,8 +498,9 @@ per-shot timecodes. See `services/shot_prompt.py`.
 - **Cause:** aeneas's setup.py needs `numpy.distutils`, which NumPy removed entirely on **Python >= 3.12** — no numpy version restores it there, and aeneas's own error message is misleading (it's not actually about numpy being missing).
 - **Fix:** run `python scripts/prepare_aeneas_install.py` (from `backend/`) before installing `requirements-aeneas.txt` — see Manual Setup step 3. `run.py` and the packaged Electron app already do this automatically.
 
-**Error:** `pip install` fails on `aeneas` with `AttributeError: install_layout`, a C compile error, or `Cannot import 'setuptools.build_meta'`
-- **Fix:** Install `requirements.txt` first, then run `python scripts/prepare_aeneas_install.py`, then `AENEAS_WITH_CEW=False pip install --no-build-isolation -r requirements-aeneas.txt` (see Manual Setup step 3) — `run.py` and the packaged Electron app already do all of this automatically. Do **not** set `SETUPTOOLS_USE_DISTUTILS=stdlib` — that was needed on an older setuptools version and now actively breaks the install on Python >= 3.12 (it points at the stdlib `distutils` module, which no longer exists there).
+**Error:** `pip install` fails on `aeneas` with `AttributeError: install_layout`, `Cannot import 'setuptools.build_meta'`, or `Microsoft Visual C++ 14.0 or greater is required` (building `aeneas.cdtw.cdtw` or similar)
+- **Cause:** without `AENEAS_WITH_CDTW`/`AENEAS_WITH_CMFCC` set, aeneas tries to compile its C extensions, which needs a C/C++ compiler most machines don't have — hit for real on a Windows machine without Visual C++ Build Tools installed (GitHub's CI runner ships one preinstalled, which is why this didn't show up in CI).
+- **Fix:** Install `requirements.txt` first, then run `python scripts/prepare_aeneas_install.py`, then `AENEAS_WITH_CEW=False AENEAS_WITH_CDTW=False AENEAS_WITH_CMFCC=False pip install --no-build-isolation -r requirements-aeneas.txt` (see Manual Setup step 3) — `run.py` and the packaged Electron app already do all of this automatically, so a compiler is never required. Do **not** set `SETUPTOOLS_USE_DISTUTILS=stdlib` — that was needed on an older setuptools version and now actively breaks the install on Python >= 3.12 (it points at the stdlib `distutils` module, which no longer exists there).
 
 ---
 

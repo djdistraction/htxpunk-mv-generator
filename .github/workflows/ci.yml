@@ -37,6 +37,8 @@ jobs:
         working-directory: backend
         env:
           AENEAS_WITH_CEW: "False"
+          AENEAS_WITH_CDTW: "False"
+          AENEAS_WITH_CMFCC: "False"
         # --no-build-isolation: aeneas's setup.py needs numpy (just
         # installed above) visible to import, which pip's isolated build
         # env otherwise hides — see requirements-aeneas.txt for the details.
@@ -86,6 +88,8 @@ jobs:
         working-directory: backend
         env:
           AENEAS_WITH_CEW: "False"
+          AENEAS_WITH_CDTW: "False"
+          AENEAS_WITH_CMFCC: "False"
         run: pip install --no-build-isolation -r requirements-aeneas.txt
       - name: Run Windows-sensitive tests
         working-directory: backend
