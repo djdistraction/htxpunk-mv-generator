@@ -229,6 +229,33 @@ async def generate_base_video(project_id: str):
     )
 
 
+@router.post("/{project_id}/generate-lyric-video")
+async def generate_lyric_video(project_id: str):
+    """Lyric Video v1 (issue #29): renders directly from approved lyrics,
+    skipping song analysis, treatment, element plan, element images, shot
+    manifest, and storyboard entirely — see
+    docs/lyric-karaoke-module-implementation-plan.md. Only for projects
+    whose production path is pure Lyric Video; hybrid/other paths still use
+    generate-base-video's full pipeline.
+    """
+    project = db_get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project.get("production_paths") != ["lyric"]:
+        raise HTTPException(
+            status_code=400,
+            detail="generate-lyric-video is only for projects with a single 'lyric' production path.",
+        )
+    return _start_manual_worker(
+        project_id,
+        "run_lyric_video_assembly",
+        {"info_confirmed"},
+        "Lyric video generation started",
+        target_section="final_video",
+        required_sections=("project_setup", "song_file", "rhythm_key", "lyrics"),
+    )
+
+
 @router.post("/{project_id}/run-lip-sync")
 async def run_lip_sync(project_id: str):
     return _start_manual_worker(

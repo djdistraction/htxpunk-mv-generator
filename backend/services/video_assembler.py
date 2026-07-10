@@ -302,6 +302,102 @@ def render_with_remotion(project_id: str, timeline: dict, output_filename: str =
             pass
 
 
+# ── Lyric Video (issue #29, Lyric Video v1) ───────────────────────────────────
+#
+# A pure Lyric Video has no shots, no per-shot images, no shot manifest — just
+# audio and an approved transcript. Renders LyricVideo.tsx (captions over a
+# flat color/gradient background) directly, skipping treatment/element
+# plan/element images/storyboard entirely. Always uses the local Remotion
+# renderer regardless of settings.video_backend — that setting selects how
+# the Cinematic path turns per-shot images into video (modal/ffmpeg/remotion
+# with panels), none of which apply here. Never touches Modal.
+
+def build_lyric_timeline(audio_path: str, segments: list[dict], fps: int = None) -> dict:
+    """Construct the LyricVideoData JSON that LyricVideo.tsx consumes."""
+    fps = fps or settings.video_fps
+    clean_segments = [
+        {"start": float(seg.get("start", 0)), "end": float(seg.get("end", 0)), "text": str(seg.get("text", "")).strip()}
+        for seg in segments if str(seg.get("text", "")).strip()
+    ]
+
+    duration_seconds = max((seg["end"] for seg in clean_segments), default=0.0)
+    audio_duration = _probe_media_duration(find_ffmpeg(), audio_path)
+    if audio_duration:
+        duration_seconds = max(duration_seconds, audio_duration)
+
+    return {
+        "fps": fps,
+        "durationInFrames": max(1, int(duration_seconds * fps)),
+        "audioSrc": "",  # filled in by render_lyric_video_with_remotion
+        "segments": clean_segments,
+        "backgroundColor": "#111111",
+    }
+
+
+def render_lyric_video_with_remotion(project_id: str, audio_path: str, timeline: dict, output_filename: str = "lyric_video.mp4") -> str:
+    """Call Remotion to render LyricVideo. Returns storage URL of rendered video.
+
+    Local audio must be copied into remotion-composer/public/ and referenced
+    with a "/public/<filename>" prefixed path in the props — confirmed by
+    direct rendering + frame-level inspection, not assumed. This Remotion
+    version's asset server resolves any src not starting with http(s):// as
+    relative to the served bundle root, and public/ contents land at
+    <bundle-root>/public/, not <bundle-root>/ — a bare "/<filename>" (the
+    file:// URI convention build_timeline() uses for MusicVideo, or the path
+    staticFile() itself returns) 404s. Out of scope to fix that for the
+    Cinematic path here — see docs/lyric-karaoke-module-implementation-plan.md.
+    """
+    if not REMOTION_DIR.exists():
+        raise RuntimeError(
+            f"remotion-composer/ not found at {REMOTION_DIR}. Run: cd remotion-composer && npm install"
+        )
+
+    public_dir = REMOTION_DIR / "public"
+    public_dir.mkdir(exist_ok=True)
+    public_audio_name = f"{project_id}_audio{Path(audio_path).suffix or '.mp3'}"
+    public_audio_path = public_dir / public_audio_name
+    shutil.copyfile(audio_path, public_audio_path)
+    timeline = {**timeline, "audioSrc": f"/public/{public_audio_name}"}
+
+    out_dir = REMOTION_DIR / "out"
+    out_dir.mkdir(exist_ok=True)
+    out_path = out_dir / f"{project_id}_{output_filename}"
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, dir=REMOTION_DIR) as f:
+        json.dump(timeline, f)
+        props_path = f.name
+
+    try:
+        cmd = ["npx", "remotion", "render", "LyricVideo", str(out_path), f"--props={props_path}", "--log=verbose"]
+        logger.info("Starting Remotion Lyric Video render: %s", " ".join(cmd))
+        result = subprocess.run(cmd, cwd=str(REMOTION_DIR), capture_output=True, text=True, timeout=1800)
+        if result.returncode != 0:
+            logger.error("Remotion stderr:\n%s", result.stderr)
+            raise RuntimeError(f"Remotion render failed (exit {result.returncode}):\n{result.stderr[-2000:]}")
+        storage_key = f"projects/{project_id}/videos/{output_filename}"
+        return upload_file_path(str(out_path), storage_key, "video/mp4")
+    finally:
+        try:
+            os.unlink(props_path)
+        except OSError:
+            pass
+        try:
+            public_audio_path.unlink()
+        except OSError:
+            pass
+
+
+def assemble_lyric_video(project_id: str, audio_path: str, segments: list[dict]) -> str:
+    """High-level entry point for pure Lyric Video projects."""
+    timeline = build_lyric_timeline(audio_path=audio_path, segments=segments)
+    logger.info(
+        "Lyric video timeline for project %s: %d frames @ %dfps = %.1fs, %d segments",
+        project_id, timeline["durationInFrames"], timeline["fps"],
+        timeline["durationInFrames"] / timeline["fps"], len(timeline["segments"]),
+    )
+    return render_lyric_video_with_remotion(project_id, audio_path, timeline)
+
+
 # ── High-level entry point ────────────────────────────────────────────────────
 
 def assemble_music_video(

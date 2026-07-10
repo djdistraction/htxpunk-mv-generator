@@ -15,3 +15,18 @@ export interface TimelineData {
   audioSrc: string;       // absolute local path or file:// URL
   panels: PanelData[];
 }
+
+export interface LyricSegment {
+  start: number;   // seconds
+  end: number;     // seconds
+  text: string;
+}
+
+export interface LyricVideoData {
+  fps: number;
+  durationInFrames: number;
+  audioSrc: string;             // absolute local path or file:// URL
+  segments: LyricSegment[];
+  backgroundColor?: string;     // flat color, e.g. "#111111" — default background
+  backgroundGradient?: [string, string]; // overrides backgroundColor when set
+}

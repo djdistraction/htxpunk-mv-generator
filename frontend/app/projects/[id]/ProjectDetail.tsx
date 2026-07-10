@@ -108,6 +108,16 @@ const GUIDED_RUN_STEPS: Record<string, GuidedStep> = {
   metadata: { key: 'read-metadata', runLabel: 'Read metadata' },
   vocals: { key: 'isolate-vocals', runLabel: 'Prepare vocal stem' },
   lyrics: { key: 'transcribe-lyrics', runLabel: 'Transcribe lyrics' },
+  lyrics_align: { key: 'align-lyrics', runLabel: 'Align provided lyrics' },
+}
+
+// Projects created with pasted/uploaded lyrics (user_lyrics_text) should be
+// forced-aligned against the vocal stem instead of transcribed with
+// Whisper — more accurate since the exact words are already known. Both
+// produce the same transcript shape, so everything downstream is unaffected
+// by which one ran.
+function lyricsGuidedStep(project: any): GuidedStep {
+  return project?.user_lyrics_text ? GUIDED_RUN_STEPS.lyrics_align : GUIDED_RUN_STEPS.lyrics
 }
 
 function stageIndex(stage: string): number {
@@ -140,6 +150,15 @@ function countElements(project: any): number {
     (elements.characters?.length || 0) +
     (elements.props?.length || 0)
   )
+}
+
+// Lyric Video v1: a pure (non-hybrid) lyric path skips treatment/element
+// plan/element images/shot manifest/storyboard entirely and renders
+// directly from approved lyrics — see
+// docs/lyric-karaoke-module-implementation-plan.md.
+function isPureLyricPath(project: any): boolean {
+  const paths = Array.isArray(project?.production_paths) ? project.production_paths : []
+  return paths.length === 1 && paths[0] === 'lyric'
 }
 
 function productionPathSummary(project: any): string {
@@ -200,6 +219,7 @@ function isGuidedStepReady(project: any, stepKey: string): boolean {
     case 'isolate-vocals':
       return Boolean(project.converted_audio_url) && !isAtOrAfter(project, 'vocals_ready')
     case 'transcribe-lyrics':
+    case 'align-lyrics':
       return isAtOrAfter(project, 'vocals_ready') && !hasTranscript(project)
     default:
       return false
@@ -231,7 +251,7 @@ function buildWorkbookSections(project: any): WorkbookSection[] {
   const baseVideoReady = Boolean(project.base_video_url || project.video_url) || project.stage === 'base_video_ready' || project.stage === 'complete'
   const finalVideoApproved = workbookApproved(project, 'final_video', Boolean(project.final_video_url) || project.stage === 'complete')
 
-  return [
+  const sections: WorkbookSection[] = [
     {
       key: 'project_setup',
       number: 1,
@@ -291,8 +311,8 @@ function buildWorkbookSections(project: any): WorkbookSection[] {
           ? { label: GUIDED_RUN_STEPS.metadata.runLabel, run: 'read-metadata' }
           : isGuidedStepReady(project, 'isolate-vocals')
             ? { label: GUIDED_RUN_STEPS.vocals.runLabel, run: 'isolate-vocals' }
-            : isGuidedStepReady(project, 'transcribe-lyrics')
-              ? { label: GUIDED_RUN_STEPS.lyrics.runLabel, run: 'transcribe-lyrics' }
+            : isGuidedStepReady(project, lyricsGuidedStep(project).key)
+              ? { label: lyricsGuidedStep(project).runLabel, run: lyricsGuidedStep(project).key }
               : undefined,
       secondaryAction: project.stage === 'awaiting_project_info_review'
         ? { label: 'Edit transcript', href: 'review' }
@@ -409,30 +429,64 @@ function buildWorkbookSections(project: any): WorkbookSection[] {
             : undefined,
       secondaryAction: storyboardReady ? { label: 'Open storyboard', href: 'storyboard' } : undefined,
     },
-    {
-      key: 'final_video',
-      number: 11,
-      title: 'Final Real Video Generation',
-      purpose: 'Generate a base real video, review it, optionally run lip sync, and choose the final approved export.',
-      status: workbookStatus(project, 'final_video', project.stage === 'assembling' ? 'running' : finalVideoApproved ? 'approved' : baseVideoReady ? 'generated' : storyboardApproved ? 'ready' : 'locked'),
-      required: ['approved storyboard images', 'approved audio', 'real video backend'],
-      output: finalVideoApproved ? 'Final video approved for export.' : baseVideoReady ? 'Base video generated. Review it before final approval.' : 'No base video generated yet.',
-      needs: storyboardApproved ? undefined : 'Approved Storyboard Images',
-      warning: 'Compute-cost warning: ffmpeg/Ken Burns is preview-only and should fail unless preview mode was explicitly enabled.',
-      canApprove: baseVideoReady && !finalVideoApproved,
-      canReject: baseVideoReady && !finalVideoApproved,
-      primaryAction: project.stage === 'storyboard_approved'
-        ? {
-            label: 'Generate base video',
-            run: 'generate-base-video',
-            confirm: 'Generate the base video now? This requires a real video backend unless preview slideshow mode is explicitly enabled.',
-          }
-        : baseVideoReady
-          ? { label: 'Open production output', href: 'production' }
-          : undefined,
-      secondaryAction: baseVideoReady ? { label: 'Open production', href: 'production' } : undefined,
-    },
+    isPureLyricPath(project)
+      ? {
+          key: 'final_video',
+          number: 11,
+          title: 'Final Real Video Generation',
+          purpose: 'Generate the Lyric Video directly from approved lyrics, review it, then choose the final approved export.',
+          status: workbookStatus(project, 'final_video', project.stage === 'assembling_lyric_video' ? 'running' : finalVideoApproved ? 'approved' : baseVideoReady ? 'generated' : (infoApproved && songFileApproved && rhythmApproved && lyricsApproved) ? 'ready' : 'locked'),
+          required: ['approved lyrics', 'approved project setup', 'approved rhythm/key'],
+          output: finalVideoApproved ? 'Final video approved for export.' : baseVideoReady ? 'Lyric video generated. Review it before final approval.' : 'No lyric video generated yet.',
+          needs: (infoApproved && songFileApproved && rhythmApproved && lyricsApproved) ? undefined : 'Approved Project Setup, Song File, Rhythm/Key, and Lyrics',
+          canApprove: baseVideoReady && !finalVideoApproved,
+          canReject: baseVideoReady && !finalVideoApproved,
+          primaryAction: project.stage === 'info_confirmed' && infoApproved && songFileApproved && rhythmApproved && lyricsApproved
+            ? {
+                label: 'Generate lyric video',
+                run: 'generate-lyric-video',
+                confirm: 'Generate the Lyric Video now?',
+              }
+            : baseVideoReady
+              ? { label: 'Open production output', href: 'production' }
+              : undefined,
+          secondaryAction: baseVideoReady ? { label: 'Open production', href: 'production' } : undefined,
+        }
+      : {
+          key: 'final_video',
+          number: 11,
+          title: 'Final Real Video Generation',
+          purpose: 'Generate a base real video, review it, optionally run lip sync, and choose the final approved export.',
+          status: workbookStatus(project, 'final_video', project.stage === 'assembling' ? 'running' : finalVideoApproved ? 'approved' : baseVideoReady ? 'generated' : storyboardApproved ? 'ready' : 'locked'),
+          required: ['approved storyboard images', 'approved audio', 'real video backend'],
+          output: finalVideoApproved ? 'Final video approved for export.' : baseVideoReady ? 'Base video generated. Review it before final approval.' : 'No base video generated yet.',
+          needs: storyboardApproved ? undefined : 'Approved Storyboard Images',
+          warning: 'Compute-cost warning: ffmpeg/Ken Burns is preview-only and should fail unless preview mode was explicitly enabled.',
+          canApprove: baseVideoReady && !finalVideoApproved,
+          canReject: baseVideoReady && !finalVideoApproved,
+          primaryAction: project.stage === 'storyboard_approved'
+            ? {
+                label: 'Generate base video',
+                run: 'generate-base-video',
+                confirm: 'Generate the base video now? This requires a real video backend unless preview slideshow mode is explicitly enabled.',
+              }
+            : baseVideoReady
+              ? { label: 'Open production output', href: 'production' }
+              : undefined,
+          secondaryAction: baseVideoReady ? { label: 'Open production', href: 'production' } : undefined,
+        },
   ]
+
+  // A pure Lyric Video project has no song analysis, treatment, elements,
+  // shot manifest, or storyboard — Base Video is the next gated step
+  // straight after Lyrics is approved. Hiding these rather than just
+  // leaving them "Locked" forever avoids a Lyric Video user ever seeing
+  // "Generate Element Plan" as something they're expected to do.
+  const HIDDEN_FOR_PURE_LYRIC = new Set([
+    'song_analysis', 'treatment', 'element_plan', 'element_images', 'shot_manifest', 'storyboard_images',
+  ])
+  const visible = isPureLyricPath(project) ? sections.filter(s => !HIDDEN_FOR_PURE_LYRIC.has(s.key)) : sections
+  return visible.map((section, i) => ({ ...section, number: i + 1 }))
 }
 
 export default function ProjectDetail({ id }: { id: string }) {
@@ -498,6 +552,8 @@ export default function ProjectDetail({ id }: { id: string }) {
         await refreshFromResponse(await api.projects.isolateVocals(id))
       } else if (action === 'transcribe-lyrics') {
         await refreshFromResponse(await api.projects.transcribeLyrics(id))
+      } else if (action === 'align-lyrics') {
+        await refreshFromResponse(await api.projects.alignLyrics(id))
       } else if (action === 'run-song-analysis') {
         await refreshFromResponse(await api.pipeline.runSongAnalysis(id))
       } else if (action === 'generate-treatment') {
@@ -512,6 +568,8 @@ export default function ProjectDetail({ id }: { id: string }) {
         await refreshFromResponse(await api.pipeline.generateManifestImages(id))
       } else if (action === 'generate-base-video') {
         await refreshFromResponse(await api.pipeline.generateBaseVideo(id))
+      } else if (action === 'generate-lyric-video') {
+        await refreshFromResponse(await api.pipeline.generateLyricVideo(id))
       }
     } catch (err: any) {
       setLocalError(err?.response?.data?.detail || err?.message || 'Action failed.')

@@ -196,6 +196,10 @@ export const api = {
       const { data } = await client.post(`/api/pipeline/${id}/generate-base-video`)
       return data
     },
+    generateLyricVideo: async (id: string) => {
+      const { data } = await client.post(`/api/pipeline/${id}/generate-lyric-video`)
+      return data
+    },
     regenerateImage: async (id: string, payload: { asset_id: string; new_prompt: string }) => {
       const { data } = await client.post(`/api/pipeline/${id}/regenerate-image`, payload)
       return data

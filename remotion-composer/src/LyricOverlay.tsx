@@ -16,20 +16,26 @@ export const LyricOverlay: React.FC<LyricOverlayProps> = ({
 }) => {
   const frame = useCurrentFrame();
   const ANIM_FRAMES = 8;
+  // A segment shorter than 2*ANIM_FRAMES can't fit a fade-in and fade-out
+  // without the interpolate() input range going non-monotonic (e.g.
+  // [0, 8, -7, 1] for a 1-frame segment) — confirmed as a real crash via a
+  // real forced-alignment segment shorter than expected, not a hypothetical.
+  // Below that length, skip the animation and just show static text rather
+  // than throwing.
+  const canAnimate = durationInFrames > ANIM_FRAMES * 2;
 
-  const translateY = interpolate(
-    frame,
-    [0, ANIM_FRAMES],
-    [20, 0],
-    { extrapolateRight: "clamp" }
-  );
+  const translateY = canAnimate
+    ? interpolate(frame, [0, ANIM_FRAMES], [20, 0], { extrapolateRight: "clamp" })
+    : 0;
 
-  const opacity = interpolate(
-    frame,
-    [0, ANIM_FRAMES, durationInFrames - ANIM_FRAMES, durationInFrames],
-    [0, 1, 1, 0],
-    { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
-  );
+  const opacity = canAnimate
+    ? interpolate(
+        frame,
+        [0, ANIM_FRAMES, durationInFrames - ANIM_FRAMES, durationInFrames],
+        [0, 1, 1, 0],
+        { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
+      )
+    : 1;
 
   return (
     <AbsoluteFill
