@@ -251,7 +251,7 @@ function buildWorkbookSections(project: any): WorkbookSection[] {
   const baseVideoReady = Boolean(project.base_video_url || project.video_url) || project.stage === 'base_video_ready' || project.stage === 'complete'
   const finalVideoApproved = workbookApproved(project, 'final_video', Boolean(project.final_video_url) || project.stage === 'complete')
 
-  return [
+  const sections: WorkbookSection[] = [
     {
       key: 'project_setup',
       number: 1,
@@ -476,6 +476,17 @@ function buildWorkbookSections(project: any): WorkbookSection[] {
           secondaryAction: baseVideoReady ? { label: 'Open production', href: 'production' } : undefined,
         },
   ]
+
+  // A pure Lyric Video project has no song analysis, treatment, elements,
+  // shot manifest, or storyboard — Base Video is the next gated step
+  // straight after Lyrics is approved. Hiding these rather than just
+  // leaving them "Locked" forever avoids a Lyric Video user ever seeing
+  // "Generate Element Plan" as something they're expected to do.
+  const HIDDEN_FOR_PURE_LYRIC = new Set([
+    'song_analysis', 'treatment', 'element_plan', 'element_images', 'shot_manifest', 'storyboard_images',
+  ])
+  const visible = isPureLyricPath(project) ? sections.filter(s => !HIDDEN_FOR_PURE_LYRIC.has(s.key)) : sections
+  return visible.map((section, i) => ({ ...section, number: i + 1 }))
 }
 
 export default function ProjectDetail({ id }: { id: string }) {
