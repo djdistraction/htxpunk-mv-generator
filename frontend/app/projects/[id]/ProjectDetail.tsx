@@ -152,6 +152,15 @@ function countElements(project: any): number {
   )
 }
 
+// Lyric Video v1: a pure (non-hybrid) lyric path skips treatment/element
+// plan/element images/shot manifest/storyboard entirely and renders
+// directly from approved lyrics — see
+// docs/lyric-karaoke-module-implementation-plan.md.
+function isPureLyricPath(project: any): boolean {
+  const paths = Array.isArray(project?.production_paths) ? project.production_paths : []
+  return paths.length === 1 && paths[0] === 'lyric'
+}
+
 function productionPathSummary(project: any): string {
   const paths = Array.isArray(project?.production_paths) ? project.production_paths : []
   if (paths.length === 0) return 'No production path selected.'
@@ -420,29 +429,52 @@ function buildWorkbookSections(project: any): WorkbookSection[] {
             : undefined,
       secondaryAction: storyboardReady ? { label: 'Open storyboard', href: 'storyboard' } : undefined,
     },
-    {
-      key: 'final_video',
-      number: 11,
-      title: 'Final Real Video Generation',
-      purpose: 'Generate a base real video, review it, optionally run lip sync, and choose the final approved export.',
-      status: workbookStatus(project, 'final_video', project.stage === 'assembling' ? 'running' : finalVideoApproved ? 'approved' : baseVideoReady ? 'generated' : storyboardApproved ? 'ready' : 'locked'),
-      required: ['approved storyboard images', 'approved audio', 'real video backend'],
-      output: finalVideoApproved ? 'Final video approved for export.' : baseVideoReady ? 'Base video generated. Review it before final approval.' : 'No base video generated yet.',
-      needs: storyboardApproved ? undefined : 'Approved Storyboard Images',
-      warning: 'Compute-cost warning: ffmpeg/Ken Burns is preview-only and should fail unless preview mode was explicitly enabled.',
-      canApprove: baseVideoReady && !finalVideoApproved,
-      canReject: baseVideoReady && !finalVideoApproved,
-      primaryAction: project.stage === 'storyboard_approved'
-        ? {
-            label: 'Generate base video',
-            run: 'generate-base-video',
-            confirm: 'Generate the base video now? This requires a real video backend unless preview slideshow mode is explicitly enabled.',
-          }
-        : baseVideoReady
-          ? { label: 'Open production output', href: 'production' }
-          : undefined,
-      secondaryAction: baseVideoReady ? { label: 'Open production', href: 'production' } : undefined,
-    },
+    isPureLyricPath(project)
+      ? {
+          key: 'final_video',
+          number: 11,
+          title: 'Final Real Video Generation',
+          purpose: 'Generate the Lyric Video directly from approved lyrics, review it, then choose the final approved export.',
+          status: workbookStatus(project, 'final_video', project.stage === 'assembling_lyric_video' ? 'running' : finalVideoApproved ? 'approved' : baseVideoReady ? 'generated' : (infoApproved && songFileApproved && rhythmApproved && lyricsApproved) ? 'ready' : 'locked'),
+          required: ['approved lyrics', 'approved project setup', 'approved rhythm/key'],
+          output: finalVideoApproved ? 'Final video approved for export.' : baseVideoReady ? 'Lyric video generated. Review it before final approval.' : 'No lyric video generated yet.',
+          needs: (infoApproved && songFileApproved && rhythmApproved && lyricsApproved) ? undefined : 'Approved Project Setup, Song File, Rhythm/Key, and Lyrics',
+          canApprove: baseVideoReady && !finalVideoApproved,
+          canReject: baseVideoReady && !finalVideoApproved,
+          primaryAction: project.stage === 'info_confirmed' && infoApproved && songFileApproved && rhythmApproved && lyricsApproved
+            ? {
+                label: 'Generate lyric video',
+                run: 'generate-lyric-video',
+                confirm: 'Generate the Lyric Video now?',
+              }
+            : baseVideoReady
+              ? { label: 'Open production output', href: 'production' }
+              : undefined,
+          secondaryAction: baseVideoReady ? { label: 'Open production', href: 'production' } : undefined,
+        }
+      : {
+          key: 'final_video',
+          number: 11,
+          title: 'Final Real Video Generation',
+          purpose: 'Generate a base real video, review it, optionally run lip sync, and choose the final approved export.',
+          status: workbookStatus(project, 'final_video', project.stage === 'assembling' ? 'running' : finalVideoApproved ? 'approved' : baseVideoReady ? 'generated' : storyboardApproved ? 'ready' : 'locked'),
+          required: ['approved storyboard images', 'approved audio', 'real video backend'],
+          output: finalVideoApproved ? 'Final video approved for export.' : baseVideoReady ? 'Base video generated. Review it before final approval.' : 'No base video generated yet.',
+          needs: storyboardApproved ? undefined : 'Approved Storyboard Images',
+          warning: 'Compute-cost warning: ffmpeg/Ken Burns is preview-only and should fail unless preview mode was explicitly enabled.',
+          canApprove: baseVideoReady && !finalVideoApproved,
+          canReject: baseVideoReady && !finalVideoApproved,
+          primaryAction: project.stage === 'storyboard_approved'
+            ? {
+                label: 'Generate base video',
+                run: 'generate-base-video',
+                confirm: 'Generate the base video now? This requires a real video backend unless preview slideshow mode is explicitly enabled.',
+              }
+            : baseVideoReady
+              ? { label: 'Open production output', href: 'production' }
+              : undefined,
+          secondaryAction: baseVideoReady ? { label: 'Open production', href: 'production' } : undefined,
+        },
   ]
 }
 
@@ -525,6 +557,8 @@ export default function ProjectDetail({ id }: { id: string }) {
         await refreshFromResponse(await api.pipeline.generateManifestImages(id))
       } else if (action === 'generate-base-video') {
         await refreshFromResponse(await api.pipeline.generateBaseVideo(id))
+      } else if (action === 'generate-lyric-video') {
+        await refreshFromResponse(await api.pipeline.generateLyricVideo(id))
       }
     } catch (err: any) {
       setLocalError(err?.response?.data?.detail || err?.message || 'Action failed.')

@@ -530,6 +530,50 @@ def run_video_assembly(project_id: str):
     logger.info("[Worker] Base video ready for %s → %s", project_id[:8], video_url)
 
 
+# ── Lyric Video v1 ────────────────────────────────────────────────────────────
+
+def run_lyric_video_assembly(project_id: str):
+    """Render a pure Lyric Video base video directly from the approved
+    transcript — no treatment, element plan, element images, shot manifest,
+    or storyboard involved. See services/video_assembler.py's
+    assemble_lyric_video() and docs/lyric-karaoke-module-implementation-plan.md.
+
+    Sets the same base_video_url/stage="base_video_ready"/"final_video"
+    section state run_video_assembly() does, so the existing Optional Lip
+    Sync and Final Export UI works identically regardless of which worker
+    produced the base video.
+    """
+    from services.video_assembler import assemble_lyric_video
+    # Distinct from run_video_assembly's "assembling" transitional stage —
+    # sharing it would make crash recovery reset a stuck lyric-video render
+    # back to "storyboard_approved", which a pure Lyric Video project never
+    # reaches (it has no storyboard at all). See orchestrator.py's
+    # TRANSITIONAL_RESET.
+    _set_stage(project_id, "assembling_lyric_video")
+    project = _get_project(project_id)
+
+    transcript = project.get("transcript") or {}
+    segments = transcript.get("segments") or []
+    if not segments:
+        raise ValueError(f"No approved lyric segments found for project {project_id}")
+
+    audio_url = project.get("converted_audio_url") or project.get("audio_url")
+    if not audio_url:
+        raise ValueError(f"No audio file found for project {project_id}")
+    audio_path = url_to_local_path(audio_url)
+
+    video_url = assemble_lyric_video(project_id=project_id, audio_path=audio_path, segments=segments)
+
+    db_update_project(
+        project_id,
+        stage="base_video_ready",
+        base_video_url=video_url,
+        video_url=video_url,
+    )
+    set_section_status(project_id, "final_video", "generated", message="Lyric video generated. Review before final approval.")
+    logger.info("[Worker] Lyric video ready for %s → %s", project_id[:8], video_url)
+
+
 # ── Optional Lip Sync ────────────────────────────────────────────────────────
 
 def run_lip_sync_generation(project_id: str):
