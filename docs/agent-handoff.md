@@ -6,7 +6,7 @@ Update this file when the active workflow, major branch, project direction, or n
 
 ## Current date
 
-2026-07-09
+2026-07-10
 
 ## Project goal (read this first)
 
@@ -35,7 +35,8 @@ were deleted after PR #19 and PR #22 landed.
 - Issue #20: `Build production-workbook pipeline interface with editable gated stages` — Phase 1 (workbook shell, explicit one-step actions) shipped via PR #22. PR #31 (Codex, `codex/issue-20-workbook-shell`) adds the rest of the list from PR #22's "still open" note: persisted workbook section statuses with approve/reject controls, per-asset (element/storyboard image) approve/reject gates, an editable shot-manifest workflow (import, add, edit, delete, preflight), and a base-video/final-export split (`base_video_url` stored separately, final approval selects `final_video_url`). Still open after #31: duplicate/timeline validation, token preflight checks, and the lip-sync half of the base/lip-sync split (see #27).
 - Issue #29: `Five production paths` — PR #31 implements the core of this: a production-path chooser (Lyric, Karaoke, Performance, Cinematic, or a hybrid of any two) at project creation, persisted and editable during Project Setup review, included in the creative context driving song analysis and downstream planning. The composable-module architecture proposed in `docs/decision-log.md` still needs validating against how the different paths actually render/assemble differently, not just how they're selected.
 - Issue #24: reference images/text were structurally invisible past the treatment stage. Part A (thread `reference_notes` through the whole pipeline) shipped in PR #28. Part B (vision-model captioning) not started.
-- Issue #25: lyrics upload + `aeneas` forced alignment. Feasibility proven (real working proof-of-concept). Not started. Load-bearing for the Lyric Video and Karaoke Video paths, not just a transcription-quality fix.
+- Issue #25: lyrics upload + `aeneas` forced alignment. Shipped (`159f28f`, PR #34; install/Python-3.12+/Windows-compiler fixes in PR #35). Backend (`services/lyrics_aligner.py`, `POST /guided/align-lyrics`) is done and tested. Still open: the guided frontend flow doesn't call it yet — `ProjectDetail.tsx` always dispatches Whisper transcription regardless of `project.user_lyrics_text`. See `docs/lyric-karaoke-module-implementation-plan.md`.
+- Randall's direction (2026-07-10): stop building all five paths at once. Get **Lyric Video** working end-to-end first (one stage at a time, each verified before the next), then Karaoke, then scale up. Modal/lip-sync is explicitly out of scope until there's an approved base video — preserving the 30-min free-tier budget. See `docs/lyric-karaoke-module-implementation-plan.md` for the active build order; treat it as the current priority over other issue work below until it's done.
 - Issue #26: double-dispatch race in the workbook's manual worker endpoints (found in review on #22, merged unaddressed, fixed separately in PR #26, merged).
 - Issue #27 (assigned to Codex, in progress): split base video generation from optional lip-sync into separate approval-gated stages. PR #31 splits base video from final export; the optional-lip-sync-as-its-own-gate half is still in progress — Codex was mid-way through it (`Add optional lip sync review gate`) when the July 15 unavailability window started.
 
