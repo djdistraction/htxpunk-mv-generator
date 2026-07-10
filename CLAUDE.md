@@ -155,16 +155,19 @@ way you'd install `ffmpeg`:
 ```bash
 cd backend
 pip install -r requirements.txt
-AENEAS_WITH_CEW=False SETUPTOOLS_USE_DISTUTILS=stdlib pip install --no-build-isolation -r requirements-aeneas.txt
+python scripts/prepare_aeneas_install.py
+AENEAS_WITH_CEW=False pip install --no-build-isolation -r requirements-aeneas.txt
 uvicorn main:app --reload --port 8000
 ```
 aeneas installs as a separate second step — see the comment at the top of
 `requirements-aeneas.txt` for why (short version: its setup.py needs numpy,
 just installed above, to be importable, which pip's isolated build
-environment hides unless `--no-build-isolation` is passed). The env vars
-are only needed for that step — they skip aeneas's optional C extension and
-work around a setuptools incompatibility in its packaging. Nothing here
-needs to be set when running the server.
+environment hides unless `--no-build-isolation` is passed, and also needs
+`numpy.distutils`, which NumPy removed entirely on Python >= 3.12 —
+`scripts/prepare_aeneas_install.py` shims that back in, a no-op on Python
+< 3.12). `AENEAS_WITH_CEW` is only needed for that one step — it skips
+aeneas's optional C extension. Nothing here needs to be set when running
+the server.
 
 **4. Frontend**
 ```bash
@@ -489,8 +492,12 @@ per-shot timecodes. See `services/shot_prompt.py`.
 **Error:** `Lyric alignment requires espeak-ng (or espeak) and/or ffprobe on PATH`
 - **Fix:** Install `espeak-ng` (see Manual Setup step 3) and make sure `ffprobe` is on PATH — the bundled `imageio-ffmpeg` binary only ships `ffmpeg`, not `ffprobe`, so a system-wide FFmpeg install is required for this feature specifically.
 
-**Error:** `pip install` fails on `aeneas` with `AttributeError: install_layout`, a C compile error, or `[ERRO] You must install numpy before installing aeneas`
-- **Fix:** Install `requirements.txt` first, then install `aeneas` as its own step with `AENEAS_WITH_CEW=False SETUPTOOLS_USE_DISTUTILS=stdlib pip install --no-build-isolation -r requirements-aeneas.txt` (see Manual Setup step 3) — `run.py` and the packaged Electron app already do both automatically. The two-step install (and `--no-build-isolation`) matters: aeneas's setup.py needs numpy already importable, which pip's isolated build environment hides unless requirements.txt has installed it first and build isolation is disabled for this specific package.
+**Error:** `pip install` fails on `aeneas` with `[ERRO] You must install numpy before installing aeneas` even though numpy is installed
+- **Cause:** aeneas's setup.py needs `numpy.distutils`, which NumPy removed entirely on **Python >= 3.12** — no numpy version restores it there, and aeneas's own error message is misleading (it's not actually about numpy being missing).
+- **Fix:** run `python scripts/prepare_aeneas_install.py` (from `backend/`) before installing `requirements-aeneas.txt` — see Manual Setup step 3. `run.py` and the packaged Electron app already do this automatically.
+
+**Error:** `pip install` fails on `aeneas` with `AttributeError: install_layout`, a C compile error, or `Cannot import 'setuptools.build_meta'`
+- **Fix:** Install `requirements.txt` first, then run `python scripts/prepare_aeneas_install.py`, then `AENEAS_WITH_CEW=False pip install --no-build-isolation -r requirements-aeneas.txt` (see Manual Setup step 3) — `run.py` and the packaged Electron app already do all of this automatically. Do **not** set `SETUPTOOLS_USE_DISTUTILS=stdlib` — that was needed on an older setuptools version and now actively breaks the install on Python >= 3.12 (it points at the stdlib `distutils` module, which no longer exists there).
 
 ---
 

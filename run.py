@@ -466,11 +466,20 @@ def install_dependencies(want_electron: bool) -> None:
     else:
         # aeneas's setup.py needs numpy (installed above) importable, which
         # pip's isolated build env otherwise hides — --no-build-isolation
-        # makes it see the real environment instead. AENEAS_WITH_CEW=False
-        # skips its optional C extension (avoids needing espeak dev
-        # headers), SETUPTOOLS_USE_DISTUTILS=stdlib works around an
-        # install_layout error under current setuptools.
-        pip_env = {"AENEAS_WITH_CEW": "False", "SETUPTOOLS_USE_DISTUTILS": "stdlib"}
+        # makes it see the real environment instead. It also needs
+        # numpy.distutils, which NumPy removed entirely on Python >= 3.12;
+        # prepare_aeneas_install.py shims that in (no-op on Python < 3.12).
+        # AENEAS_WITH_CEW=False skips aeneas's optional C extension, which
+        # needs espeak dev headers most systems don't have.
+        code = run_blocking(
+            [sys.executable, str(BACKEND_DIR / "scripts" / "prepare_aeneas_install.py")],
+            cwd=BACKEND_DIR,
+        )
+        if code != 0:
+            fail("Preparing the environment for aeneas failed. See messages above.")
+            sys.exit(1)
+
+        pip_env = {"AENEAS_WITH_CEW": "False"}
         code = run_blocking(
             [sys.executable, "-m", "pip", "install", "--no-build-isolation", "-r", "requirements-aeneas.txt"],
             cwd=BACKEND_DIR,

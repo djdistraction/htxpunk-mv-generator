@@ -6,23 +6,33 @@
 # disabled:
 #
 #   pip install -r requirements.txt
+#   python scripts/prepare_aeneas_install.py
 #   pip install --no-build-isolation -r requirements-aeneas.txt
 #
-# Both are required:
+# All three are required:
 # - `--no-build-isolation`: aeneas's setup.py imports numpy directly to
 #   locate its headers. With pip's default build isolation, that import runs
 #   in a throwaway env that doesn't have numpy yet — this makes pip use the
 #   real environment instead, where requirements.txt already installed it
 #   (numpy is a transitive dep of rembg/audio-separator/etc., not something
 #   this file needs to declare itself).
-# - AENEAS_WITH_CEW=False and SETUPTOOLS_USE_DISTUTILS=stdlib env vars at
-#   install time (set by run.py / electron-app's dependency install step,
-#   and by CI — not read from this file): AENEAS_WITH_CEW=False skips the
-#   optional C extension (it links against classic espeak, not espeak-ng,
-#   so building it needs dev headers most systems don't have; the
-#   pure-Python/subprocess fallback is plenty fast for per-project
-#   alignment), SETUPTOOLS_USE_DISTUTILS=stdlib works around its setup.py
-#   erroring under current setuptools otherwise.
+# - `scripts/prepare_aeneas_install.py`: aeneas's setup.py also needs
+#   `numpy.distutils`, which NumPy removed entirely on Python >= 3.12 (no
+#   numpy version brings it back there) — confirmed directly by reproducing
+#   the install failure, not assumed. This shims in the one function
+#   (`get_numpy_include_dirs()`) aeneas actually calls from it. A no-op on
+#   Python < 3.12, where numpy.distutils still exists.
+# - AENEAS_WITH_CEW=False env var at install time (set by run.py /
+#   electron-app's dependency install step, and by CI — not read from this
+#   file): skips aeneas's optional cew C extension, which links against
+#   classic espeak (not espeak-ng) and needs dev headers most systems don't
+#   have; the pure-Python/subprocess fallback is plenty fast for
+#   per-project alignment.
+#
+#   (SETUPTOOLS_USE_DISTUTILS=stdlib was needed here in an earlier version
+#   of this setup, on older setuptools — it is NOT needed with current
+#   setuptools, and actively breaks the install on Python >= 3.12, where
+#   the stdlib distutils it points at no longer exists. Don't set it.)
 #
 # Also requires espeak-ng (or espeak) and ffprobe on PATH at runtime — see
 # services/lyrics_aligner.py.

@@ -9,11 +9,18 @@ jobs:
   backend:
     name: Backend (compile, imports, tests)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11: CLAUDE.md's stated minimum. 3.13: aeneas's setup.py needs
+        # numpy.distutils, which NumPy removes entirely on Python >= 3.12 —
+        # this matrix entry is what would have caught that before it shipped.
+        python-version: ["3.11", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
           cache: "pip"
           cache-dependency-path: backend/requirements.txt
       - name: Install espeak-ng and ffmpeg (lyric forced alignment)
@@ -23,11 +30,13 @@ jobs:
       - name: Install dependencies
         working-directory: backend
         run: pip install -r requirements.txt
+      - name: Prepare environment for aeneas
+        working-directory: backend
+        run: python scripts/prepare_aeneas_install.py
       - name: Install aeneas (lyric forced alignment)
         working-directory: backend
         env:
           AENEAS_WITH_CEW: "False"
-          SETUPTOOLS_USE_DISTUTILS: "stdlib"
         # --no-build-isolation: aeneas's setup.py needs numpy (just
         # installed above) visible to import, which pip's isolated build
         # env otherwise hides — see requirements-aeneas.txt for the details.
@@ -70,11 +79,13 @@ jobs:
       - name: Install dependencies
         working-directory: backend
         run: pip install -r requirements.txt
+      - name: Prepare environment for aeneas
+        working-directory: backend
+        run: python scripts/prepare_aeneas_install.py
       - name: Install aeneas (lyric forced alignment)
         working-directory: backend
         env:
           AENEAS_WITH_CEW: "False"
-          SETUPTOOLS_USE_DISTUTILS: "stdlib"
         run: pip install --no-build-isolation -r requirements-aeneas.txt
       - name: Run Windows-sensitive tests
         working-directory: backend

@@ -31,6 +31,12 @@ onnxruntime==1.20.1
 # Database — SQLite, no server needed
 aiosqlite==0.20.0
 sqlalchemy==2.0.35
+# SQLAlchemy's async engine needs greenlet at runtime, but SQLAlchemy
+# 2.0.35's own PyPI metadata only auto-installs it for python_version<3.13
+# (a stale exclusion from before greenlet published 3.13 wheels — confirmed
+# greenlet has cp313 wheels now). Declared explicitly so the app doesn't
+# silently fail on Python 3.13+ with "the greenlet library is required".
+greenlet>=3.0.0
 
 # Storage — local filesystem for now, swap to S3/R2 later
 aiofiles==24.1.0
