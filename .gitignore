@@ -54,3 +54,7 @@ backend/temp/
 # Supabase local
 supabase/.branches/
 supabase/.temp/
+
+# Local design reference (Claude Design export)
+_design-ref/
+

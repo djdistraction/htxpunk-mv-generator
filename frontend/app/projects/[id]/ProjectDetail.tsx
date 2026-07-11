@@ -4,6 +4,13 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { api, mediaUrl } from '@/lib/api'
 import { analyzeAudioFile } from '@/lib/audioAnalysis'
+import {
+  Win95Alert,
+  Win95Button,
+  Win95GroupBox,
+  Win95Progress,
+  Win95StatusBadge,
+} from '@/components/win95/Win95Primitives'
 
 type SectionStatus = 'empty' | 'locked' | 'ready' | 'running' | 'generated' | 'approved' | 'rejected' | 'failed' | 'skipped'
 
@@ -168,24 +175,23 @@ function productionPathSummary(project: any): string {
   return labels.length === 1 ? labels[0] : `Hybrid: ${labels.join(' + ')}`
 }
 
-function statusClass(status: SectionStatus): string {
+function statusTone(status: SectionStatus): 'ok' | 'warn' | 'error' | 'info' | 'muted' | 'running' {
   switch (status) {
     case 'approved':
-      return 'bg-green-950 text-green-300 border-green-800'
+      return 'ok'
     case 'generated':
-      return 'bg-blue-950 text-blue-300 border-blue-800'
     case 'ready':
-      return 'bg-yellow-950 text-yellow-300 border-yellow-800'
+      return 'warn'
     case 'running':
-      return 'bg-purple-950 text-purple-300 border-purple-800'
+      return 'running'
     case 'failed':
-      return 'bg-red-950 text-red-300 border-red-800'
     case 'rejected':
-      return 'bg-orange-950 text-orange-300 border-orange-800'
+      return 'error'
     case 'locked':
-      return 'bg-gray-900 text-gray-500 border-gray-800'
+    case 'empty':
+    case 'skipped':
     default:
-      return 'bg-gray-950 text-gray-400 border-gray-800'
+      return 'muted'
   }
 }
 
@@ -494,6 +500,7 @@ export default function ProjectDetail({ id }: { id: string }) {
   const [loading, setLoading] = useState(true)
   const [runningAction, setRunningAction] = useState<string | null>(null)
   const [localError, setLocalError] = useState('')
+  const [activeSection, setActiveSection] = useState<string | null>(null)
 
   const fetchProject = async () => {
     try {
@@ -514,6 +521,17 @@ export default function ProjectDetail({ id }: { id: string }) {
   }, [id, project?.stage])
 
   const sections = useMemo(() => project ? buildWorkbookSections(project) : [], [project])
+
+  // Prefer the first section that still needs work; keep user selection sticky when valid.
+  useEffect(() => {
+    if (!sections.length) return
+    if (activeSection && sections.some(s => s.key === activeSection)) return
+    const focus =
+      sections.find(s => ['ready', 'running', 'generated', 'failed', 'rejected'].includes(s.status)) ||
+      sections.find(s => s.status !== 'approved') ||
+      sections[0]
+    setActiveSection(focus.key)
+  }, [sections, activeSection])
 
   const refreshFromResponse = async (data: any) => {
     if (data?.project) {
@@ -608,124 +626,119 @@ export default function ProjectDetail({ id }: { id: string }) {
     }
   }
 
-  if (loading) return (
-    <div className="min-h-screen bg-black text-white flex items-center justify-center">
-      Loading...
-    </div>
-  )
+  if (loading) {
+    return <div className="win95-empty">Loading project workbook…</div>
+  }
 
-  if (!project) return (
-    <div className="min-h-screen bg-black text-white flex items-center justify-center">
-      Project not found
-    </div>
-  )
+  if (!project) {
+    return (
+      <div className="win95-page">
+        <div className="win95-empty">Project not found.</div>
+        <Link href="/" className="win95-btn win95-btn-link">← Back to projects</Link>
+      </div>
+    )
+  }
 
   const completedCount = sections.filter(section => ['approved', 'generated'].includes(section.status)).length
-  const progress = Math.round((completedCount / sections.length) * 100)
+  const progress = sections.length ? Math.round((completedCount / sections.length) * 100) : 0
+  const current = sections.find(s => s.key === activeSection) || sections[0]
 
   return (
-    <div className="min-h-screen bg-black text-white p-6 md:p-8">
-      <div className="max-w-6xl mx-auto">
-        <a href="/" className="text-purple-400 text-sm hover:underline">Back to all projects</a>
-
-        <div className="mt-6 mb-8">
-          <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
-            <div>
-              <p className="text-xs uppercase tracking-widest text-gray-500 mb-2">Production Workbook</p>
-              <h1 className="text-3xl md:text-4xl font-bold">{project.title || 'Untitled Project'}</h1>
-              {project.artist && <p className="text-gray-400 mt-1">{project.artist}</p>}
-            </div>
-            <div className="lg:text-right">
-              <span className={`inline-flex px-3 py-1 rounded-full text-sm font-medium border ${
-                project.stage === 'complete' ? 'bg-green-950 text-green-300 border-green-800' :
-                project.stage === 'error' ? 'bg-red-950 text-red-300 border-red-800' :
-                project.stage.includes('awaiting') ? 'bg-yellow-950 text-yellow-300 border-yellow-800' :
-                'bg-purple-950 text-purple-300 border-purple-800'
-              }`}>
-                {STAGE_LABELS[project.stage] || project.stage}
-              </span>
-              <p className="text-gray-600 text-xs mt-2">Auto-refreshes every 5s</p>
-            </div>
-          </div>
-
-          <div className="mt-6 bg-gray-950 border border-gray-800 rounded-lg p-4">
-            <div className="flex items-center justify-between text-sm mb-2">
-              <span className="text-gray-400">Workbook completion</span>
-              <span className="text-gray-500">{completedCount}/{sections.length} sections have output or approval</span>
-            </div>
-            <div className="h-2 bg-gray-900 rounded-full overflow-hidden">
-              <div className="h-full bg-purple-600" style={{ width: `${progress}%` }} />
-            </div>
-          </div>
+    <div className="win95-page">
+      <div className="win95-page-header">
+        <div>
+          <h1 className="win95-page-title">{project.title || 'Untitled Project'}</h1>
+          <p className="win95-page-sub">
+            {project.artist ? `${project.artist} · ` : ''}
+            {productionPathSummary(project)} · stage: {STAGE_LABELS[project.stage] || project.stage}
+          </p>
         </div>
+        <div className="win95-row">
+          <Win95StatusBadge
+            status={
+              project.stage === 'complete' ? 'ok' :
+              project.stage === 'error' ? 'error' :
+              project.stage?.includes('awaiting') ? 'warn' :
+              'running'
+            }
+          >
+            {STAGE_LABELS[project.stage] || project.stage}
+          </Win95StatusBadge>
+          <Link href="/" className="win95-btn win95-btn-link">Projects</Link>
+        </div>
+      </div>
 
-        {localError && (
-          <div className="mb-6 bg-red-950/50 border border-red-800 rounded-lg p-4">
-            <h2 className="text-red-300 font-semibold mb-1">Action failed</h2>
-            <p className="text-red-200 text-sm font-mono whitespace-pre-wrap break-words">{localError}</p>
+      <Win95Progress
+        value={progress}
+        label={`Workbook completion — ${completedCount}/${sections.length} sections have output or approval`}
+      />
+
+      {localError && (
+        <Win95Alert tone="error" title="Action failed" onDismiss={() => setLocalError('')}>
+          {localError}
+        </Win95Alert>
+      )}
+
+      {project.stage === 'error' && project.error_message && (
+        <Win95Alert tone="error" title="Pipeline Error">
+          <div style={{ marginBottom: 8, fontFamily: 'var(--win-mono)', whiteSpace: 'pre-wrap' }}>
+            {project.error_message}
           </div>
-        )}
+          <Win95Button
+            onClick={async () => {
+              setRunningAction('retry')
+              try {
+                await refreshFromResponse(await api.projects.retry(id))
+              } catch (err: any) {
+                setLocalError(err?.response?.data?.detail || err?.message || 'Retry failed.')
+              } finally {
+                setRunningAction(null)
+              }
+            }}
+            disabled={runningAction === 'retry'}
+          >
+            {runningAction === 'retry' ? 'Retrying…' : 'Retry failed step'}
+          </Win95Button>
+        </Win95Alert>
+      )}
 
-        {project.stage === 'error' && project.error_message && (
-          <div className="mb-6 bg-red-950/50 border border-red-800 rounded-lg p-4">
-            <h2 className="text-red-300 font-semibold mb-1">Pipeline Error</h2>
-            <p className="text-red-200 text-sm font-mono whitespace-pre-wrap break-words">{project.error_message}</p>
+      <div className="win95-workbook">
+        <aside className="win95-sidebar">
+          <div className="win95-sidebar-title">PRODUCTION PIPELINE</div>
+          {sections.map(section => (
             <button
-              onClick={async () => {
-                setRunningAction('retry')
-                try {
-                  await refreshFromResponse(await api.projects.retry(id))
-                } catch (err: any) {
-                  setLocalError(err?.response?.data?.detail || err?.message || 'Retry failed.')
-                } finally {
-                  setRunningAction(null)
-                }
-              }}
-              disabled={runningAction === 'retry'}
-              className="mt-3 px-4 py-2 rounded-lg bg-red-800 hover:bg-red-700 disabled:bg-gray-800 text-sm font-semibold"
+              key={section.key}
+              type="button"
+              className={`win95-sidebar-step ${current?.key === section.key ? 'is-active' : ''}`}
+              onClick={() => setActiveSection(section.key)}
             >
-              {runningAction === 'retry' ? 'Retrying...' : 'Retry failed step'}
+              <span className="win95-sidebar-step-name">
+                {section.number}. {section.title}
+              </span>
+              <span className="win95-sidebar-step-status">
+                {prettyStatus(section.status)}
+              </span>
             </button>
+          ))}
+          <div className="win95-sidebar-foot">
+            Project ID:<br />{project.id}
           </div>
-        )}
+        </aside>
 
-        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_280px] gap-6">
-          <div className="space-y-4">
-            {sections.map(section => (
-              <WorkbookCard
-                key={section.key}
-                section={section}
-                projectId={id}
-                runningAction={runningAction}
-                onRun={runAction}
-                onApprove={approveSection}
-                onReject={rejectSection}
-              />
-            ))}
-          </div>
-
-          <aside className="xl:sticky xl:top-6 h-fit bg-gray-950 border border-gray-800 rounded-lg p-4">
-            <h2 className="font-semibold mb-3">Gates</h2>
-            <div className="space-y-2">
-              {sections.map(section => (
-                <a
-                  key={section.key}
-                  href={`#${section.key}`}
-                  className="flex items-center justify-between gap-3 text-sm py-1.5 text-gray-400 hover:text-white"
-                >
-                  <span className="truncate">{section.number}. {section.title}</span>
-                  <span className={`text-[11px] px-2 py-0.5 rounded-full border ${statusClass(section.status)}`}>
-                    {prettyStatus(section.status)}
-                  </span>
-                </a>
-              ))}
-            </div>
-          </aside>
+        <div className="win95-main-pane">
+          {current ? (
+            <WorkbookCard
+              section={current}
+              projectId={id}
+              runningAction={runningAction}
+              onRun={runAction}
+              onApprove={approveSection}
+              onReject={rejectSection}
+            />
+          ) : (
+            <div className="win95-empty">Select a pipeline stage from the left.</div>
+          )}
         </div>
-
-        <p className="text-gray-700 text-xs mt-8">
-          Project ID: {project.id}
-        </p>
       </div>
     </div>
   )
@@ -749,90 +762,104 @@ function WorkbookCard({
   const actionRunning = section.primaryAction?.run && runningAction === section.primaryAction.run
   const approving = runningAction === `approve-${section.key}`
   const rejecting = runningAction === `reject-${section.key}`
+  const locked = section.status === 'locked' || section.status === 'empty'
 
   return (
-    <section id={section.key} className="bg-gray-950 border border-gray-800 rounded-lg p-5 scroll-mt-6">
-      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-3 mb-2">
-            <span className="text-gray-500 text-sm tabular-nums">{section.number.toString().padStart(2, '0')}</span>
-            <h2 className="text-xl font-semibold text-white">{section.title}</h2>
-            <span className={`text-xs px-2 py-0.5 rounded-full border ${statusClass(section.status)}`}>
-              {prettyStatus(section.status)}
-            </span>
-          </div>
-          <p className="text-gray-400 text-sm leading-relaxed">{section.purpose}</p>
-        </div>
-
-        {(section.primaryAction || section.secondaryAction || section.canApprove || section.canReject) && (
-          <div className="flex flex-wrap gap-2 md:justify-end">
-            {section.primaryAction?.href && (
-              <Link
-                href={`/projects/${projectId}/${section.primaryAction.href}`}
-                className="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-sm font-semibold transition-colors"
-              >
-                {section.primaryAction.label}
-              </Link>
-            )}
-            {section.primaryAction?.run && (
-              <button
-                onClick={() => onRun(section.primaryAction!.run!, section.primaryAction!.confirm)}
-                disabled={Boolean(runningAction)}
-                className="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 disabled:bg-gray-800 disabled:text-gray-500 text-sm font-semibold transition-colors"
-              >
-                {actionRunning ? 'Starting...' : section.primaryAction.label}
-              </button>
-            )}
-            {section.canApprove && (
-              <button
-                onClick={() => onApprove(section.key)}
-                disabled={Boolean(runningAction)}
-                className="px-4 py-2 rounded-lg bg-green-700 hover:bg-green-600 disabled:bg-gray-800 disabled:text-gray-500 text-sm font-semibold transition-colors"
-              >
-                {approving ? 'Approving...' : 'Approve'}
-              </button>
-            )}
-            {section.canReject && (
-              <button
-                onClick={() => onReject(section.key)}
-                disabled={Boolean(runningAction)}
-                className="px-4 py-2 rounded-lg border border-orange-800 text-orange-300 hover:border-orange-600 disabled:border-gray-800 disabled:text-gray-600 text-sm transition-colors"
-              >
-                {rejecting ? 'Rejecting...' : 'Reject'}
-              </button>
-            )}
-            {section.secondaryAction && section.secondaryAction.href !== section.primaryAction?.href && (
-              <Link
-                href={section.secondaryAction.href.startsWith('/') ? section.secondaryAction.href : `/projects/${projectId}/${section.secondaryAction.href}`}
-                className="px-4 py-2 rounded-lg border border-gray-700 text-gray-300 hover:border-gray-500 text-sm transition-colors"
-              >
-                {section.secondaryAction.label}
-              </Link>
-            )}
-          </div>
-        )}
+    <div>
+      <div className="win95-row" style={{ marginBottom: 6, justifyContent: 'space-between' }}>
+        <h2 className="win95-section-title" style={{ margin: 0 }}>
+          {section.number.toString().padStart(2, '0')}. {section.title}
+        </h2>
+        <Win95StatusBadge status={statusTone(section.status)}>
+          {prettyStatus(section.status)}
+        </Win95StatusBadge>
       </div>
+      <p className="win95-section-desc">{section.purpose}</p>
 
-      <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div>
-          <h3 className="text-xs uppercase tracking-widest text-gray-600 mb-2">Required Inputs</h3>
-          <ul className="space-y-1">
+      {locked && (
+        <div className="win95-empty" style={{ marginBottom: 12 }}>
+          {section.needs
+            ? `Locked until prerequisites are met: ${section.needs}`
+            : 'This stage is locked. Complete and approve earlier stages first.'}
+        </div>
+      )}
+
+      {(section.primaryAction || section.secondaryAction || section.canApprove || section.canReject) && (
+        <div className="win95-row" style={{ marginBottom: 12 }}>
+          {section.primaryAction?.href && (
+            <Link
+              href={`/projects/${projectId}/${section.primaryAction.href}`}
+              className="win95-btn win95-btn-link win95-btn-primary"
+            >
+              {section.primaryAction.label}
+            </Link>
+          )}
+          {section.primaryAction?.run && (
+            <Win95Button
+              variant="primary"
+              onClick={() => onRun(section.primaryAction!.run!, section.primaryAction!.confirm)}
+              disabled={Boolean(runningAction)}
+            >
+              {actionRunning ? 'Starting…' : section.primaryAction.label}
+            </Win95Button>
+          )}
+          {section.canApprove && (
+            <Win95Button
+              onClick={() => onApprove(section.key)}
+              disabled={Boolean(runningAction)}
+            >
+              {approving ? 'Approving…' : 'Approve'}
+            </Win95Button>
+          )}
+          {section.canReject && (
+            <Win95Button
+              onClick={() => onReject(section.key)}
+              disabled={Boolean(runningAction)}
+            >
+              {rejecting ? 'Rejecting…' : 'Reject'}
+            </Win95Button>
+          )}
+          {section.secondaryAction && section.secondaryAction.href !== section.primaryAction?.href && (
+            <Link
+              href={
+                section.secondaryAction.href.startsWith('/')
+                  ? section.secondaryAction.href
+                  : `/projects/${projectId}/${section.secondaryAction.href}`
+              }
+              className="win95-btn win95-btn-link"
+            >
+              {section.secondaryAction.label}
+            </Link>
+          )}
+          {runningAction && !actionRunning && !approving && !rejecting && (
+            <span className="win95-muted">Busy: {runningAction}…</span>
+          )}
+        </div>
+      )}
+
+      {section.warning && (
+        <Win95Alert tone="warn" title="Cost / quality warning">
+          {section.warning}
+        </Win95Alert>
+      )}
+
+      <div className="win95-grid-2">
+        <Win95GroupBox title="Required Inputs">
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
             {section.required.map(item => (
-              <li key={item} className="text-sm text-gray-400">{item}</li>
+              <li key={item} style={{ marginBottom: 4 }}>{item}</li>
             ))}
           </ul>
-        </div>
-        <div className="md:col-span-2">
-          <h3 className="text-xs uppercase tracking-widest text-gray-600 mb-2">Generated Output</h3>
-          <p className="text-sm text-gray-300 break-words">{section.output}</p>
+        </Win95GroupBox>
+        <Win95GroupBox title="Generated Output">
+          <p style={{ margin: 0, wordBreak: 'break-word' }}>{section.output}</p>
           {section.needs && (
-            <p className="mt-2 text-sm text-yellow-300">Needs: {section.needs}</p>
+            <p style={{ margin: '8px 0 0', color: 'var(--win-warn)' }}>
+              Needs: {section.needs}
+            </p>
           )}
-          {section.warning && (
-            <p className="mt-2 text-sm text-amber-300">{section.warning}</p>
-          )}
-        </div>
+        </Win95GroupBox>
       </div>
-    </section>
+    </div>
   )
 }

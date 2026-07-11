@@ -6,7 +6,20 @@ Update this file when the active workflow, major branch, project direction, or n
 
 ## Current date
 
-2026-07-10
+2026-07-11
+
+## UI skin (2026-07-11)
+
+Branch `cursor/win95-app-shell` (based on `claude/lyric-video-v1`) applies the
+Claude Design Win95 utility look across the app:
+
+- App chrome: title bar, menu bar, toolbar, status bar (`frontend/components/win95/AppShell.tsx`)
+- Primitives: buttons, group boxes, progress, alerts, modal
+- Project library, new project, settings, and workbook detail reskinned natively
+- Workbook detail uses a left **PRODUCTION PIPELINE** sidebar (select one stage at a time)
+- Older stage pages (treatment/elements/storyboard/etc.) use a CSS compatibility layer inside the shell
+
+Visual direction: sturdy Windows 95 control-panel utility, not modern AI SaaS.
 
 ## Project goal (read this first)
 

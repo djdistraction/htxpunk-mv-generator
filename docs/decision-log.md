@@ -4,6 +4,24 @@ This document records product and architecture decisions that future agents must
 
 Use this file to prevent Claude Code, Codex, GitHub Copilot, Cursor, or future maintainers from rediscovering old decisions and accidentally reversing them.
 
+## 2026-07-11: Windows 95 utility UI skin
+
+Decision:
+
+The app UI should look like a sturdy classic Windows 95 / control-panel utility — teal desktop, grey face, navy title bars, beveled controls, system fonts (Tahoma / MS Sans Serif) — not a modern dark AI SaaS product.
+
+Reference design: Claude Design export saved by Randall (`Application interface design.zip`).
+
+Implementation notes:
+
+- App chrome lives in `frontend/components/win95/AppShell.tsx` (title bar, menus, toolbar, status bar, health check).
+- Shared controls live in `frontend/components/win95/Win95Primitives.tsx`.
+- Theme tokens and layout helpers live in `frontend/app/globals.css`.
+- Project workbook uses a left pipeline sidebar with one active stage pane (matching the design).
+- Stage subpages may still use older markup; a CSS compatibility layer under `.win95-content` remaps dark Tailwind classes into the utility palette.
+
+Do not reintroduce purple gradients, glassmorphism, rounded SaaS cards, or dark marketing-page layouts without an explicit product decision.
+
 ## 2026-07-08: Multi-agent collaboration rules
 
 The repo may be edited by multiple coding agents and human maintainers.
