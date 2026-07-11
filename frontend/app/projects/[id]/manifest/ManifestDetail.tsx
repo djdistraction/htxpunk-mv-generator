@@ -206,35 +206,31 @@ export default function ManifestDetail({ id }: { id: string }) {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center">
-        Loading production plan...
-      </div>
+      <div className="win95-empty">Loading production plan…</div>
     )
   }
 
   if (!project) {
     return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center p-8">
-        <div className="text-center max-w-md">
-          <p className="text-gray-400 mb-2">Project not found.</p>
-          <a href={`/projects/${id}`} className="text-purple-400 hover:underline text-sm">Back to project</a>
-        </div>
+      <div className="win95-page">
+        <div className="win95-empty">Project not found.</div>
+        <a href={`/projects/${id}`} className="win95-btn win95-btn-link">← Workbook</a>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-black text-white p-8">
-      <div className="max-w-6xl mx-auto">
-        <a href={`/projects/${id}`} className="text-purple-400 text-sm hover:underline">
-          Back to project
+    <div className="win95-page">
+      <div>
+        <a href={`/projects/${id}`} className="win95-btn win95-btn-link" style={{ marginBottom: 8, display: "inline-flex" }}>
+          ← Workbook
         </a>
 
-        <div className="mt-6 mb-8 flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+        <div className="win95-page-header">
           <div>
-            <h1 className="text-3xl font-bold">Shot Manifest / Storyboard Plan</h1>
-            <p className="text-gray-500 mt-2">
-              {manifests.length} shots planned for <span className="text-white">{project.title}</span>.
+            <h1 className="win95-page-title">Shot Manifest / Storyboard Plan</h1>
+            <p className="win95-page-sub">
+              {manifests.length} shots planned for <strong>{project.title}</strong>.
               Edit the shot list or import a production guide before approving.
             </p>
           </div>

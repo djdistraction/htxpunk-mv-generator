@@ -568,6 +568,11 @@ async def confirm_project_info(project_id: str, payload: ProjectInfoConfirm):
     )
     db_update_project(project_id, project_folder=folder, stage="info_confirmed")
     set_section_status(project_id, "project_setup", "approved", message="Project setup approved.")
+    # Song file is present by definition at this gate — mark approved so the
+    # workbook's Final Video / Lyric Video action unlocks without a second
+    # redundant "Approve Song File" click after Confirm & Continue.
+    if project.get("audio_url"):
+        set_section_status(project_id, "song_file", "approved", message="Song file confirmed with project setup.")
     if project.get("transcript"):
         set_section_status(project_id, "lyrics", "approved", message="Timestamped lyrics approved.")
     if project.get("bpm") or project.get("musical_key") or project.get("beat_grid"):

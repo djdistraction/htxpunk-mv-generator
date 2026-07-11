@@ -32,6 +32,7 @@ const STAGE_LABELS: Record<string, string> = {
   awaiting_storyboard_approval: "Review storyboard",
   storyboard_approved: "Storyboard approved",
   assembling: "Assembling video",
+  assembling_lyric_video: "Rendering lyric video",
   base_video_ready: "Review base video",
   complete: "Final approved",
   error: "Error",

@@ -4,10 +4,9 @@ import { usePathname, useRouter } from 'next/navigation'
 import { ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
 import { Win95Button, Win95Modal } from './Win95Primitives'
 
-const API_BASE =
-  typeof window !== 'undefined'
-    ? process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-    : process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+// Prefer explicit public API origin; otherwise health-check the loopback
+// backend (same host the Next rewrite targets in next.config.js).
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000'
 
 type MenuKey = 'file' | 'edit' | 'view' | 'tools' | 'help' | null
 

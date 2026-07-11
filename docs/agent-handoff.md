@@ -17,9 +17,25 @@ Claude Design Win95 utility look across the app:
 - Primitives: buttons, group boxes, progress, alerts, modal
 - Project library, new project, settings, and workbook detail reskinned natively
 - Workbook detail uses a left **PRODUCTION PIPELINE** sidebar (select one stage at a time)
-- Older stage pages (treatment/elements/storyboard/etc.) use a CSS compatibility layer inside the shell
+- **Native Win95 stage pages (follow-up same day):** treatment, elements, storyboard,
+  production, review, processing; manifest shell updated; remaining dark-class markup
+  still softened by `.win95-content` CSS compatibility layer
+
+### Lyric Video polish (same branch)
+
+- Faster polling while `assembling_lyric_video` / other busy stages run
+- Success banners after approve/run actions; auto-advance sidebar after approve
+- Production Review handles lyric render stage, clearer approve-final UX
+- Confirm-info also marks `song_file` approved so Generate lyric video unlocks without a redundant gate click
+- Default new-project path is **Lyric Video**
 
 Visual direction: sturdy Windows 95 control-panel utility, not modern AI SaaS.
+
+### Recommended when Randall returns
+
+1. Pull/checkout `cursor/win95-app-shell` and run a Lyric Video smoke test end-to-end.
+2. Merge into `claude/lyric-video-v1` or open PR to `main` after visual check.
+3. Next product slice: Karaoke path, or cinematic token preflights / shot-manifest editor depth.
 
 ## Project goal (read this first)
 

@@ -71,6 +71,7 @@ const STAGE_LABELS: Record<string, string> = {
   awaiting_storyboard_approval: 'Storyboard images ready for review',
   storyboard_approved: 'Storyboard approved',
   assembling: 'Generating base video',
+  assembling_lyric_video: 'Generating lyric video',
   base_video_ready: 'Base video ready for review',
   complete: 'Final video approved',
   error: 'Something went wrong',
@@ -441,45 +442,93 @@ function buildWorkbookSections(project: any): WorkbookSection[] {
           number: 11,
           title: 'Final Real Video Generation',
           purpose: 'Generate the Lyric Video directly from approved lyrics, review it, then choose the final approved export.',
-          status: workbookStatus(project, 'final_video', project.stage === 'assembling_lyric_video' ? 'running' : finalVideoApproved ? 'approved' : baseVideoReady ? 'generated' : (infoApproved && songFileApproved && rhythmApproved && lyricsApproved) ? 'ready' : 'locked'),
+          status: workbookStatus(
+            project,
+            'final_video',
+            project.stage === 'assembling_lyric_video'
+              ? 'running'
+              : finalVideoApproved
+                ? 'approved'
+                : baseVideoReady
+                  ? 'generated'
+                  : (infoApproved && songFileApproved && rhythmApproved && lyricsApproved)
+                    ? 'ready'
+                    : 'locked'
+          ),
           required: ['approved lyrics', 'approved project setup', 'approved rhythm/key'],
-          output: finalVideoApproved ? 'Final video approved for export.' : baseVideoReady ? 'Lyric video generated. Review it before final approval.' : 'No lyric video generated yet.',
-          needs: (infoApproved && songFileApproved && rhythmApproved && lyricsApproved) ? undefined : 'Approved Project Setup, Song File, Rhythm/Key, and Lyrics',
+          output: finalVideoApproved
+            ? 'Final video approved for export.'
+            : project.stage === 'assembling_lyric_video'
+              ? 'Lyric video render is running (Remotion). This can take a few minutes — keep this page open.'
+              : baseVideoReady
+                ? 'Lyric video generated. Open Production Review, watch it, then Approve Final.'
+                : 'No lyric video generated yet.',
+          needs: (infoApproved && songFileApproved && rhythmApproved && lyricsApproved)
+            ? undefined
+            : 'Approved Project Setup, Song File, Rhythm/Key, and Lyrics',
           canApprove: baseVideoReady && !finalVideoApproved,
           canReject: baseVideoReady && !finalVideoApproved,
-          primaryAction: project.stage === 'info_confirmed' && infoApproved && songFileApproved && rhythmApproved && lyricsApproved
-            ? {
-                label: 'Generate lyric video',
-                run: 'generate-lyric-video',
-                confirm: 'Generate the Lyric Video now?',
-              }
-            : baseVideoReady
-              ? { label: 'Open production output', href: 'production' }
-              : undefined,
-          secondaryAction: baseVideoReady ? { label: 'Open production', href: 'production' } : undefined,
+          primaryAction:
+            project.stage === 'assembling_lyric_video'
+              ? { label: 'Watch render progress', href: 'production' }
+              : project.stage === 'info_confirmed' && infoApproved && songFileApproved && rhythmApproved && lyricsApproved
+                ? {
+                    label: 'Generate lyric video',
+                    run: 'generate-lyric-video',
+                    confirm: 'Generate the Lyric Video from the approved transcript now? This uses Remotion (no image-generation tokens).',
+                  }
+                : baseVideoReady
+                  ? { label: 'Open production output', href: 'production' }
+                  : undefined,
+          secondaryAction: (baseVideoReady || project.stage === 'assembling_lyric_video')
+            ? { label: 'Open production', href: 'production' }
+            : undefined,
         }
       : {
           key: 'final_video',
           number: 11,
           title: 'Final Real Video Generation',
           purpose: 'Generate a base real video, review it, optionally run lip sync, and choose the final approved export.',
-          status: workbookStatus(project, 'final_video', project.stage === 'assembling' ? 'running' : finalVideoApproved ? 'approved' : baseVideoReady ? 'generated' : storyboardApproved ? 'ready' : 'locked'),
+          status: workbookStatus(
+            project,
+            'final_video',
+            project.stage === 'assembling'
+              ? 'running'
+              : finalVideoApproved
+                ? 'approved'
+                : baseVideoReady
+                  ? 'generated'
+                  : storyboardApproved
+                    ? 'ready'
+                    : 'locked'
+          ),
           required: ['approved storyboard images', 'approved audio', 'real video backend'],
-          output: finalVideoApproved ? 'Final video approved for export.' : baseVideoReady ? 'Base video generated. Review it before final approval.' : 'No base video generated yet.',
+          output: finalVideoApproved
+            ? 'Final video approved for export.'
+            : project.stage === 'assembling'
+              ? 'Base video render is running. Open Production Review for progress.'
+              : baseVideoReady
+                ? 'Base video generated. Review it before final approval.'
+                : 'No base video generated yet.',
           needs: storyboardApproved ? undefined : 'Approved Storyboard Images',
           warning: 'Compute-cost warning: ffmpeg/Ken Burns is preview-only and should fail unless preview mode was explicitly enabled.',
           canApprove: baseVideoReady && !finalVideoApproved,
           canReject: baseVideoReady && !finalVideoApproved,
-          primaryAction: project.stage === 'storyboard_approved'
-            ? {
-                label: 'Generate base video',
-                run: 'generate-base-video',
-                confirm: 'Generate the base video now? This requires a real video backend unless preview slideshow mode is explicitly enabled.',
-              }
-            : baseVideoReady
-              ? { label: 'Open production output', href: 'production' }
-              : undefined,
-          secondaryAction: baseVideoReady ? { label: 'Open production', href: 'production' } : undefined,
+          primaryAction:
+            project.stage === 'assembling'
+              ? { label: 'Watch render progress', href: 'production' }
+              : project.stage === 'storyboard_approved'
+                ? {
+                    label: 'Generate base video',
+                    run: 'generate-base-video',
+                    confirm: 'Generate the base video now? This requires a real video backend unless preview slideshow mode is explicitly enabled.',
+                  }
+                : baseVideoReady
+                  ? { label: 'Open production output', href: 'production' }
+                  : undefined,
+          secondaryAction: (baseVideoReady || project.stage === 'assembling')
+            ? { label: 'Open production', href: 'production' }
+            : undefined,
         },
   ]
 
@@ -500,6 +549,7 @@ export default function ProjectDetail({ id }: { id: string }) {
   const [loading, setLoading] = useState(true)
   const [runningAction, setRunningAction] = useState<string | null>(null)
   const [localError, setLocalError] = useState('')
+  const [successMsg, setSuccessMsg] = useState('')
   const [activeSection, setActiveSection] = useState<string | null>(null)
 
   const fetchProject = async () => {
@@ -515,7 +565,18 @@ export default function ProjectDetail({ id }: { id: string }) {
 
   useEffect(() => {
     fetchProject()
-    const interval = setInterval(fetchProject, project?.stage === 'complete' || project?.stage === 'error' ? 30000 : 5000)
+    const busy =
+      project?.stage === 'assembling' ||
+      project?.stage === 'assembling_lyric_video' ||
+      project?.stage === 'generating_images' ||
+      project?.stage === 'generating_manifest_images' ||
+      project?.stage === 'building_storyboard' ||
+      project?.stage === 'treatment_pending' ||
+      project?.stage === 'extracting_elements'
+    const interval = setInterval(
+      fetchProject,
+      project?.stage === 'complete' || project?.stage === 'error' ? 30000 : busy ? 3000 : 5000
+    )
     return () => clearInterval(interval)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, project?.stage])
@@ -547,6 +608,7 @@ export default function ProjectDetail({ id }: { id: string }) {
     if (!project || runningAction) return
     if (confirmMessage && !window.confirm(confirmMessage)) return
     setLocalError('')
+    setSuccessMsg('')
     setRunningAction(action)
     try {
       if (action === 'analyze-rhythm-key') {
@@ -588,6 +650,11 @@ export default function ProjectDetail({ id }: { id: string }) {
         await refreshFromResponse(await api.pipeline.generateBaseVideo(id))
       } else if (action === 'generate-lyric-video') {
         await refreshFromResponse(await api.pipeline.generateLyricVideo(id))
+        setSuccessMsg('Lyric video generation started. Open Production Review to watch progress.')
+        setActiveSection('final_video')
+      }
+      if (action !== 'generate-lyric-video') {
+        setSuccessMsg(`Step finished: ${action}`)
       }
     } catch (err: any) {
       setLocalError(err?.response?.data?.detail || err?.message || 'Action failed.')
@@ -600,9 +667,13 @@ export default function ProjectDetail({ id }: { id: string }) {
   const approveSection = async (sectionKey: string) => {
     if (runningAction) return
     setLocalError('')
+    setSuccessMsg('')
     setRunningAction(`approve-${sectionKey}`)
     try {
       await refreshFromResponse(await api.projects.approveSection(id, sectionKey))
+      setSuccessMsg(`Approved: ${sectionKey.replace(/_/g, ' ')}`)
+      // Advance sidebar to the next incomplete section after a successful approve.
+      setActiveSection(null)
     } catch (err: any) {
       setLocalError(err?.response?.data?.detail || err?.message || 'Approval failed.')
       await fetchProject()
@@ -615,9 +686,11 @@ export default function ProjectDetail({ id }: { id: string }) {
     if (runningAction) return
     const note = window.prompt('What needs to change before this section is approved?') || ''
     setLocalError('')
+    setSuccessMsg('')
     setRunningAction(`reject-${sectionKey}`)
     try {
       await refreshFromResponse(await api.projects.rejectSection(id, sectionKey, note))
+      setSuccessMsg(`Rejected: ${sectionKey.replace(/_/g, ' ')} — fix and re-run when ready.`)
     } catch (err: any) {
       setLocalError(err?.response?.data?.detail || err?.message || 'Rejection failed.')
       await fetchProject()
@@ -676,6 +749,22 @@ export default function ProjectDetail({ id }: { id: string }) {
       {localError && (
         <Win95Alert tone="error" title="Action failed" onDismiss={() => setLocalError('')}>
           {localError}
+        </Win95Alert>
+      )}
+
+      {successMsg && (
+        <Win95Alert tone="success" title="OK" onDismiss={() => setSuccessMsg('')}>
+          {successMsg}
+        </Win95Alert>
+      )}
+
+      {project.stage === 'assembling_lyric_video' && (
+        <Win95Alert tone="info" title="Lyric video rendering">
+          Remotion is building your lyric video from the approved transcript. Progress is on the Production page.
+          {' '}
+          <Link href={`/projects/${id}/production`} className="win95-btn win95-btn-link win95-btn-sm" style={{ display: 'inline-flex', marginLeft: 8 }}>
+            Open Production
+          </Link>
         </Win95Alert>
       )}
 
