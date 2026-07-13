@@ -6,7 +6,7 @@ Update this file when the active workflow, major branch, project direction, or n
 
 ## Current date
 
-2026-07-11
+2026-07-13
 
 ## UI skin (2026-07-11)
 
@@ -33,9 +33,10 @@ Visual direction: sturdy Windows 95 control-panel utility, not modern AI SaaS.
 
 ### Recommended when Randall returns
 
-1. Pull/checkout `cursor/win95-app-shell` and run a Lyric Video smoke test end-to-end.
-2. Merge into `claude/lyric-video-v1` or open PR to `main` after visual check.
-3. Next product slice: Karaoke path, or cinematic token preflights / shot-manifest editor depth.
+1. Open PR from `cursor/win95-app-shell` → `main` (compare URL + body in `docs/pr-win95-lyric-checklist.md`).
+2. Run the Lyric Video smoke checklist in that doc.
+3. Merge only after pass criteria are green.
+4. Next product slice after merge: Karaoke path (same module), not full cinematic rework.
 
 ## Project goal (read this first)
 
