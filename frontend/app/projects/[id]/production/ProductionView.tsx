@@ -151,6 +151,18 @@ export default function ProductionView({ id }: { id: string }) {
           {successMsg}
         </Win95Alert>
       )}
+      {project.stage === 'error' && project.error_message && (
+        <Win95Alert tone="error" title="Render / pipeline error">
+          <div style={{ fontFamily: 'var(--win-mono)', whiteSpace: 'pre-wrap', marginBottom: 8 }}>
+            {project.error_message}
+          </div>
+          <p className="win95-muted" style={{ marginTop: 0 }}>
+            For Lyric Video: install Remotion deps with <code>cd remotion-composer && npm install</code>,
+            ensure Node.js is on PATH, then return to the project workbook and use Retry generate.
+          </p>
+          <Link href={`/projects/${id}`} className="win95-btn win95-btn-link">← Back to workbook</Link>
+        </Win95Alert>
+      )}
 
       {!reviewVideoUrl && (
         <Win95GroupBox title="Render progress">

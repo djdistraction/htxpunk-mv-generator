@@ -246,6 +246,12 @@ async def generate_lyric_video(project_id: str):
             status_code=400,
             detail="generate-lyric-video is only for projects with a single 'lyric' production path.",
         )
+    # After a failed Remotion render the project sits at stage=error. Clear
+    # that and park back at info_confirmed so the same button can retry
+    # without a separate "retry project" hop (users hit this constantly).
+    if project.get("stage") == "error":
+        db_update_project(project_id, stage="info_confirmed", error_message="")
+        project = db_get_project(project_id)
     return _start_manual_worker(
         project_id,
         "run_lyric_video_assembly",

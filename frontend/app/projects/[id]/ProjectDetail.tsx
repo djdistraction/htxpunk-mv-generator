@@ -11,6 +11,7 @@ import {
   Win95Progress,
   Win95StatusBadge,
 } from '@/components/win95/Win95Primitives'
+import LyricLinearGuide from '@/components/LyricLinearGuide'
 
 type SectionStatus = 'empty' | 'locked' | 'ready' | 'running' | 'generated' | 'approved' | 'rejected' | 'failed' | 'skipped'
 
@@ -780,6 +781,25 @@ export default function ProjectDetail({ id }: { id: string }) {
   const completedCount = sections.filter(section => ['approved', 'generated'].includes(section.status)).length
   const progress = sections.length ? Math.round((completedCount / sections.length) * 100) : 0
   const current = sections.find(s => s.key === activeSection) || sections[0]
+  const pureLyric = isPureLyricPath(project)
+
+  const retryProject = async () => {
+    setRunningAction('retry')
+    setLocalError('')
+    try {
+      // Prefer lyric regenerate path: retry endpoint may lack task history for manual workers.
+      if (pureLyric) {
+        await refreshFromResponse(await api.pipeline.generateLyricVideo(id))
+        setSuccessMsg('Retrying lyric video generation…')
+      } else {
+        await refreshFromResponse(await api.projects.retry(id))
+      }
+    } catch (err: any) {
+      setLocalError(err?.response?.data?.detail || err?.message || 'Retry failed.')
+    } finally {
+      setRunningAction(null)
+    }
+  }
 
   return (
     <div className="win95-page">
@@ -788,7 +808,8 @@ export default function ProjectDetail({ id }: { id: string }) {
           <h1 className="win95-page-title">{project.title || 'Untitled Project'}</h1>
           <p className="win95-page-sub">
             {project.artist ? `${project.artist} · ` : ''}
-            {productionPathSummary(project)} · stage: {STAGE_LABELS[project.stage] || project.stage}
+            {productionPathSummary(project)}
+            {pureLyric ? ' · linear guide' : ` · stage: ${STAGE_LABELS[project.stage] || project.stage}`}
           </p>
         </div>
         <div className="win95-row">
@@ -796,7 +817,7 @@ export default function ProjectDetail({ id }: { id: string }) {
             status={
               project.stage === 'complete' ? 'ok' :
               project.stage === 'error' ? 'error' :
-              project.stage?.includes('awaiting') ? 'warn' :
+              project.stage?.includes('awaiting') || project.stage === 'assembling_lyric_video' ? 'warn' :
               'running'
             }
           >
@@ -805,11 +826,6 @@ export default function ProjectDetail({ id }: { id: string }) {
           <Link href="/" className="win95-btn win95-btn-link">Projects</Link>
         </div>
       </div>
-
-      <Win95Progress
-        value={progress}
-        label={`Workbook completion — ${completedCount}/${sections.length} sections have output or approval`}
-      />
 
       {localError && (
         <Win95Alert tone="error" title="Action failed" onDismiss={() => setLocalError('')}>
@@ -823,77 +839,73 @@ export default function ProjectDetail({ id }: { id: string }) {
         </Win95Alert>
       )}
 
-      {project.stage === 'assembling_lyric_video' && (
-        <Win95Alert tone="info" title="Lyric video rendering">
-          Remotion is building your lyric video from the approved transcript. Progress is on the Production page.
-          {' '}
-          <Link href={`/projects/${id}/production`} className="win95-btn win95-btn-link win95-btn-sm" style={{ display: 'inline-flex', marginLeft: 8 }}>
-            Open Production
-          </Link>
-        </Win95Alert>
-      )}
+      {pureLyric ? (
+        <LyricLinearGuide
+          projectId={id}
+          project={project}
+          runningAction={runningAction}
+          onRun={runAction}
+          onApprove={approveSection}
+          onRetryProject={retryProject}
+        />
+      ) : (
+        <>
+          <Win95Progress
+            value={progress}
+            label={`Workbook completion — ${completedCount}/${sections.length} sections have output or approval`}
+          />
 
-      {project.stage === 'error' && project.error_message && (
-        <Win95Alert tone="error" title="Pipeline Error">
-          <div style={{ marginBottom: 8, fontFamily: 'var(--win-mono)', whiteSpace: 'pre-wrap' }}>
-            {project.error_message}
-          </div>
-          <Win95Button
-            onClick={async () => {
-              setRunningAction('retry')
-              try {
-                await refreshFromResponse(await api.projects.retry(id))
-              } catch (err: any) {
-                setLocalError(err?.response?.data?.detail || err?.message || 'Retry failed.')
-              } finally {
-                setRunningAction(null)
-              }
-            }}
-            disabled={runningAction === 'retry'}
-          >
-            {runningAction === 'retry' ? 'Retrying…' : 'Retry failed step'}
-          </Win95Button>
-        </Win95Alert>
-      )}
-
-      <div className="win95-workbook">
-        <aside className="win95-sidebar">
-          <div className="win95-sidebar-title">PRODUCTION PIPELINE</div>
-          {sections.map(section => (
-            <button
-              key={section.key}
-              type="button"
-              className={`win95-sidebar-step ${current?.key === section.key ? 'is-active' : ''}`}
-              onClick={() => setActiveSection(section.key)}
-            >
-              <span className="win95-sidebar-step-name">
-                {section.number}. {section.title}
-              </span>
-              <span className="win95-sidebar-step-status">
-                {prettyStatus(section.status)}
-              </span>
-            </button>
-          ))}
-          <div className="win95-sidebar-foot">
-            Project ID:<br />{project.id}
-          </div>
-        </aside>
-
-        <div className="win95-main-pane">
-          {current ? (
-            <WorkbookCard
-              section={current}
-              projectId={id}
-              runningAction={runningAction}
-              onRun={runAction}
-              onApprove={approveSection}
-              onReject={rejectSection}
-            />
-          ) : (
-            <div className="win95-empty">Select a pipeline stage from the left.</div>
+          {project.stage === 'error' && project.error_message && (
+            <Win95Alert tone="error" title="Pipeline Error">
+              <div style={{ marginBottom: 8, fontFamily: 'var(--win-mono)', whiteSpace: 'pre-wrap' }}>
+                {project.error_message}
+              </div>
+              <Win95Button onClick={retryProject} disabled={runningAction === 'retry'}>
+                {runningAction === 'retry' ? 'Retrying…' : 'Retry failed step'}
+              </Win95Button>
+            </Win95Alert>
           )}
-        </div>
-      </div>
+
+          <div className="win95-workbook">
+            <aside className="win95-sidebar">
+              <div className="win95-sidebar-title">PRODUCTION PIPELINE</div>
+              {sections.map(section => (
+                <button
+                  key={section.key}
+                  type="button"
+                  className={`win95-sidebar-step ${current?.key === section.key ? 'is-active' : ''}`}
+                  onClick={() => setActiveSection(section.key)}
+                >
+                  <span className="win95-sidebar-step-name">
+                    {section.number}. {section.title}
+                  </span>
+                  <span className="win95-sidebar-step-status">
+                    {prettyStatus(section.status)}
+                  </span>
+                </button>
+              ))}
+              <div className="win95-sidebar-foot">
+                Project ID:<br />{project.id}
+              </div>
+            </aside>
+
+            <div className="win95-main-pane">
+              {current ? (
+                <WorkbookCard
+                  section={current}
+                  projectId={id}
+                  runningAction={runningAction}
+                  onRun={runAction}
+                  onApprove={approveSection}
+                  onReject={rejectSection}
+                />
+              ) : (
+                <div className="win95-empty">Select a pipeline stage from the left.</div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }

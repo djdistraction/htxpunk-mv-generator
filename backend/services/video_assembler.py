@@ -349,7 +349,21 @@ def render_lyric_video_with_remotion(project_id: str, audio_path: str, timeline:
     """
     if not REMOTION_DIR.exists():
         raise RuntimeError(
-            f"remotion-composer/ not found at {REMOTION_DIR}. Run: cd remotion-composer && npm install"
+            f"remotion-composer/ not found at {REMOTION_DIR}. "
+            "From the repo root run: cd remotion-composer && npm install"
+        )
+
+    node_modules = REMOTION_DIR / "node_modules" / "remotion"
+    if not node_modules.exists():
+        raise RuntimeError(
+            "Remotion packages are not installed. Lyric Video render needs them. "
+            "Run once: cd remotion-composer && npm install"
+        )
+
+    if not Path(audio_path).is_file():
+        raise RuntimeError(
+            f"Audio file missing for lyric render: {audio_path}. "
+            "Re-run Prepare audio on the workbook, then generate again."
         )
 
     public_dir = REMOTION_DIR / "public"
@@ -370,10 +384,25 @@ def render_lyric_video_with_remotion(project_id: str, audio_path: str, timeline:
     try:
         cmd = ["npx", "remotion", "render", "LyricVideo", str(out_path), f"--props={props_path}", "--log=verbose"]
         logger.info("Starting Remotion Lyric Video render: %s", " ".join(cmd))
-        result = subprocess.run(cmd, cwd=str(REMOTION_DIR), capture_output=True, text=True, timeout=1800)
+        try:
+            result = subprocess.run(cmd, cwd=str(REMOTION_DIR), capture_output=True, text=True, timeout=1800)
+        except FileNotFoundError as exc:
+            raise RuntimeError(
+                "Could not run `npx` (Node.js not on PATH). Install Node.js LTS, "
+                "re-open the terminal, then: cd remotion-composer && npm install"
+            ) from exc
         if result.returncode != 0:
             logger.error("Remotion stderr:\n%s", result.stderr)
-            raise RuntimeError(f"Remotion render failed (exit {result.returncode}):\n{result.stderr[-2000:]}")
+            tail = (result.stderr or result.stdout or "")[-2000:]
+            raise RuntimeError(
+                f"Remotion lyric render failed (exit {result.returncode}).\n"
+                f"If packages are missing: cd remotion-composer && npm install\n"
+                f"Details:\n{tail}"
+            )
+        if not out_path.is_file():
+            raise RuntimeError(
+                f"Remotion reported success but output missing: {out_path}"
+            )
         storage_key = f"projects/{project_id}/videos/{output_filename}"
         return upload_file_path(str(out_path), storage_key, "video/mp4")
     finally:
