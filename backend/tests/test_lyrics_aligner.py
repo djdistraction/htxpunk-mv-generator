@@ -62,3 +62,32 @@ def test_align_lyrics_missing_audio_raises():
 
     with pytest.raises(ValueError):
         align_lyrics("/no/such/file.wav", "hello world")
+
+
+def test_normalize_lyric_lines_strips_blanks_and_smart_quotes():
+    from services.lyrics_aligner import _normalize_lyric_lines
+
+    text = "  it’s alright  \n\n\u201cwow\u201d  \n"
+    lines = _normalize_lyric_lines(text)
+    assert lines == ["it's alright", '"wow"']
+
+
+def test_validate_complete_alignment_rejects_partial():
+    from services.lyrics_aligner import _validate_complete_alignment
+
+    lines = ["one", "two", "three", "four"]
+    partial = [
+        {"start": 0.0, "end": 1.0, "text": "one"},
+        {"start": 1.0, "end": 2.0, "text": "two"},
+    ]
+    with pytest.raises(RuntimeError, match="Alignment incomplete"):
+        _validate_complete_alignment(lines, partial, audio_duration=120.0)
+
+    crushed = [
+        {"start": 0.0, "end": 1.0, "text": "one"},
+        {"start": 1.0, "end": 2.0, "text": "two"},
+        {"start": 2.0, "end": 3.0, "text": "three"},
+        {"start": 3.0, "end": 4.0, "text": "four"},
+    ]
+    with pytest.raises(RuntimeError, match="covers only"):
+        _validate_complete_alignment(lines, crushed, audio_duration=120.0)

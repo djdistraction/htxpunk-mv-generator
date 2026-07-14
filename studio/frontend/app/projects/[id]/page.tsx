@@ -11,7 +11,7 @@ import { useParams } from "next/navigation"
 import { studioApi } from "@/lib/api"
 import { analyzeAudioFromUrl } from "@/lib/audioAnalysis"
 
-const FLOW = ["song", "rhythm", "vocals", "lyrics"] as const
+const FLOW = ["song", "rhythm", "vocals", "lyrics", "lyric_video"] as const
 type FlowStep = (typeof FLOW)[number]
 
 const LABELS: Record<FlowStep, string> = {
@@ -19,6 +19,7 @@ const LABELS: Record<FlowStep, string> = {
   rhythm: "2. Detect BPM & key",
   vocals: "3. Vocal stem",
   lyrics: "4. Lyrics + timestamps",
+  lyric_video: "5. Render lyric video",
 }
 
 export default function ProjectConsole() {
@@ -91,16 +92,21 @@ export default function ProjectConsole() {
   )
   const segCount = project?.transcript?.segments?.length || 0
 
+  const hasVideo = (p: any) =>
+    Boolean(p?.video_url || p?.base_video_url || p?.final_video_url)
+
   const stepDone = (p: any, s: FlowStep): boolean => {
     if (!p) return false
     if (s === "song") return Boolean(p.converted_audio_url)
     if (s === "rhythm") return Boolean(p.bpm || p.musical_key)
     if (s === "vocals") return Boolean(p.vocals_url)
     if (s === "lyrics") return segCount > 0 || Boolean(p.transcript?.segments?.length)
+    if (s === "lyric_video") return hasVideo(p)
     return false
   }
 
-  // Derive current earliest incomplete step on load
+  // On first load of a project, open the earliest incomplete step.
+  // Do not re-jump while the user is reviewing a finished step.
   useEffect(() => {
     if (!project) return
     for (const s of FLOW) {
@@ -109,7 +115,7 @@ export default function ProjectConsole() {
         return
       }
     }
-    setStep("lyrics")
+    setStep("lyric_video")
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project?.id])
 
@@ -130,17 +136,17 @@ export default function ProjectConsole() {
     await refresh()
   }
 
-  /** Run the work for the current step (idempotent if already done). */
-  const runCurrentStep = async (p: any, s: FlowStep) => {
+  /** Run the work for the current step. force=true re-runs even if already done. */
+  const runCurrentStep = async (p: any, s: FlowStep, force = false) => {
     if (s === "song") {
-      if (p.converted_audio_url) return
+      if (p.converted_audio_url && !force) return
       setInfo("Converting song to project audio…")
       await startJobAndWait("prepare_audio")
       setInfo("Song prepared.")
       return
     }
     if (s === "rhythm") {
-      if (p.bpm || p.musical_key) return
+      if ((p.bpm || p.musical_key) && !force) return
       setInfo("Detecting BPM and key in the browser…")
       setLocalProgress("Loading audio…")
       const url = studioApi.mediaUrl(id, p.converted_audio_url ? "converted" : "original")
@@ -161,14 +167,14 @@ export default function ProjectConsole() {
       return
     }
     if (s === "vocals") {
-      if (p.vocals_url) return
+      if (p.vocals_url && !force) return
       setInfo("Isolating vocals on CPU (slow). Watch Activity for progress…")
       await startJobAndWait("isolate_vocals")
       setInfo("Vocal stem ready.")
       return
     }
     if (s === "lyrics") {
-      if (p.transcript?.segments?.length) return
+      if (p.transcript?.segments?.length && !force) return
       // Save any pasted lyrics first
       if (lyricsText.trim()) {
         await studioApi.patchFoundation(id, { user_lyrics_text: lyricsText.trim() })
@@ -184,7 +190,17 @@ export default function ProjectConsole() {
         setInfo("Transcribing lyrics with Whisper (CPU)…")
         await startJobAndWait("transcribe_lyrics")
       }
-      setInfo("Lyrics ready. Review segments below — foundation complete for Phase 1.")
+      setInfo("Lyrics ready. Review timestamps, then Next to render the lyric video.")
+      await refresh()
+      return
+    }
+    if (s === "lyric_video") {
+      if (hasVideo(p) && !force) return
+      const segs = p.transcript?.segments?.length || 0
+      if (!segs) throw new Error("No timed lyrics yet. Finish step 4 first.")
+      setInfo("Rendering lyric video with Remotion (Node)… watch Activity for progress.")
+      await startJobAndWait("render_lyric_video")
+      setInfo("Lyric video ready — play it below.")
       await refresh()
     }
   }
@@ -195,8 +211,8 @@ export default function ProjectConsole() {
     const key = `${project.id}:${step}`
     if (autoStarted.current[key]) return
     if (stepDone(project, step)) return
-    // Don't auto-isolate vocals if user might want to upload — only auto song + rhythm
-    if (step === "vocals" || step === "lyrics") return
+    // Don't auto-run steps that need user choice or are slow/expensive
+    if (step === "vocals" || step === "lyrics" || step === "lyric_video") return
     autoStarted.current[key] = true
     ;(async () => {
       setBusy(true)
@@ -221,10 +237,11 @@ export default function ProjectConsole() {
     if (!stepDone(project, step)) {
       if (step === "vocals" && !project.vocals_url) return "Upload a vocal stem or start isolation first"
       if (step === "lyrics" && !segCount) return "Run lyrics (Next will start align/transcribe when ready)"
+      if (step === "lyric_video" && !hasVideo(project)) return "Next — render lyric video"
       return "Finish this step first"
     }
     const idx = FLOW.indexOf(step)
-    if (idx >= FLOW.length - 1) return "Foundation complete"
+    if (idx >= FLOW.length - 1) return "Lyric video complete"
     return `Next: ${LABELS[FLOW[idx + 1]]}`
   })()
 
@@ -232,7 +249,7 @@ export default function ProjectConsole() {
     if (!project || !nextEnabled) return
     const idx = FLOW.indexOf(step)
     if (idx >= FLOW.length - 1) {
-      setInfo("Foundation steps done. Lyric video & cinematic pipeline come next in Studio v2.")
+      setInfo("Lyric video complete. Karaoke / cinematic formats reuse this foundation later.")
       return
     }
     const next = FLOW[idx + 1]
@@ -248,9 +265,14 @@ export default function ProjectConsole() {
         return
       }
       if (next === "lyrics") {
-        // Start lyrics processing when user hits Next into lyrics if not done
         if (!p.transcript?.segments?.length) {
           await runCurrentStep(p, "lyrics")
+        }
+        return
+      }
+      if (next === "lyric_video") {
+        if (!hasVideo(p)) {
+          await runCurrentStep(p, "lyric_video")
         }
         return
       }
@@ -260,6 +282,18 @@ export default function ProjectConsole() {
     } finally {
       setBusy(false)
       setLocalProgress("")
+    }
+  }
+
+  const startLyricVideo = async (force = false) => {
+    setBusy(true)
+    setError("")
+    try {
+      await runCurrentStep(await refresh(), "lyric_video", force)
+    } catch (e: any) {
+      setError(e.message || String(e))
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -275,11 +309,11 @@ export default function ProjectConsole() {
     }
   }
 
-  const startLyrics = async () => {
+  const startLyrics = async (force = false) => {
     setBusy(true)
     setError("")
     try {
-      await runCurrentStep(await refresh(), "lyrics")
+      await runCurrentStep(await refresh(), "lyrics", force)
     } catch (e: any) {
       setError(e.message || String(e))
     } finally {
@@ -431,6 +465,7 @@ export default function ProjectConsole() {
                 <p>
                   Paste exact lyrics if you have them (more accurate). Next will force-align them
                   to the vocal stem. If the box is empty, Next runs Whisper transcription instead.
+                  Alignment must return every line with real timestamps (incomplete sync fails clearly).
                 </p>
                 <label>
                   Lyrics (optional)
@@ -446,14 +481,59 @@ export default function ProjectConsole() {
                       {lyricsText.trim() ? "Align lyrics now" : "Transcribe now"}
                     </button>
                   )}
+                  {segCount > 0 && (
+                    <button type="button" className="btn" disabled={busy || jobRunning || !project.vocals_url} onClick={() => startLyrics(true)}>
+                      Re-align / re-transcribe
+                    </button>
+                  )}
                 </div>
-                <p>Timed segments: {segCount}</p>
+                <p>Timed segments: {segCount}{project.transcript?.segments?.length ? ` · first ${Number(project.transcript.segments[0].start).toFixed(1)}s · last ${Number(project.transcript.segments[project.transcript.segments.length - 1].end).toFixed(1)}s` : ""}</p>
                 {segCount > 0 && (
                   <div style={{ maxHeight: 180, overflow: "auto", border: "2px inset #c0c0c0", background: "#fff", padding: 6 }}>
-                    {project.transcript.segments.slice(0, 50).map((s: any, i: number) => (
-                      <div key={i} className="muted">{Number(s.start).toFixed(1)}s — {s.text}</div>
+                    {project.transcript.segments.map((s: any, i: number) => (
+                      <div key={i} className="muted">{Number(s.start).toFixed(1)}–{Number(s.end).toFixed(1)}s — {s.text}</div>
                     ))}
                   </div>
+                )}
+              </>
+            )}
+
+            {step === "lyric_video" && (
+              <>
+                <p>
+                  Renders a caption lyric video (Remotion) from your timed lyrics and the full song mix.
+                  Needs Node/npx and <code>remotion-composer</code> packages installed once.
+                </p>
+                <p>
+                  Video: <strong>{hasVideo(project) ? "ready" : "not rendered yet"}</strong>
+                  {" · "}Timed lines: {segCount}
+                </p>
+                {!hasVideo(project) && (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={busy || jobRunning || !segCount}
+                    onClick={startLyricVideo}
+                  >
+                    Render lyric video
+                  </button>
+                )}
+                {hasVideo(project) && (
+                  <>
+                    <video
+                      controls
+                      style={{ width: "100%", maxHeight: 360, background: "#000", marginTop: 8 }}
+                      src={studioApi.mediaUrl(id, "video")}
+                    />
+                    <div className="row" style={{ marginTop: 8 }}>
+                      <a className="btn" href={studioApi.mediaUrl(id, "video")} download>
+                        Download video
+                      </a>
+                      <button type="button" className="btn" disabled={busy || jobRunning} onClick={() => startLyricVideo(true)}>
+                        Re-render
+                      </button>
+                    </div>
+                  </>
                 )}
               </>
             )}
@@ -472,11 +552,22 @@ export default function ProjectConsole() {
               type="button"
               className="btn btn-primary"
               style={{ minWidth: 220, fontSize: 13, padding: "8px 16px" }}
-              disabled={!nextEnabled && !(step === "lyrics" && !segCount && project.vocals_url && !busy && !jobRunning)}
+              disabled={
+                busy || jobRunning
+                  ? true
+                  : step === "lyrics" && !segCount
+                    ? !project.vocals_url
+                    : step === "lyric_video" && !hasVideo(project)
+                      ? !segCount
+                      : !nextEnabled
+              }
               onClick={async () => {
-                // On lyrics, if not done, Next means "run lyrics then stay"
                 if (step === "lyrics" && !segCount) {
                   await startLyrics()
+                  return
+                }
+                if (step === "lyric_video" && !hasVideo(project)) {
+                  await startLyricVideo()
                   return
                 }
                 await onNext()
@@ -484,7 +575,9 @@ export default function ProjectConsole() {
             >
               {step === "lyrics" && !segCount
                 ? (busy || jobRunning ? "Working on lyrics…" : (lyricsText.trim() ? "Next — align lyrics" : "Next — transcribe lyrics"))
-                : nextLabel}
+                : step === "lyric_video" && !hasVideo(project)
+                  ? (busy || jobRunning ? "Rendering lyric video…" : "Next — render lyric video")
+                  : nextLabel}
             </button>
           </div>
           <p className="muted" style={{ marginTop: 8 }}>

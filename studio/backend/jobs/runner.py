@@ -218,6 +218,74 @@ def job_align_lyrics(job_id: str, project_id: str) -> None:
     segs = transcript.get("segments") or []
     if not segs:
         raise RuntimeError("Alignment produced no segments.")
-    db.update_project(project_id, transcript=transcript, stage="lyrics_ready")
+    db.update_project(project_id, transcript=transcript, stage="lyrics_ready", error_message=None)
     db.set_step(project_id, "lyrics", "needs_review")
     _progress(job_id, 100, f"Aligned {len(segs)} segments")
+
+
+def job_render_lyric_video(job_id: str, project_id: str) -> None:
+    """Render pure Lyric Video via Remotion (same path as legacy assemble_lyric_video)."""
+    import shutil
+
+    from services.video_assembler import assemble_lyric_video  # type: ignore
+    from utils.storage import url_to_local_path  # type: ignore
+
+    proj = db.get_project(project_id)
+    transcript = proj.get("transcript") or {}
+    segments = transcript.get("segments") or []
+    if not segments:
+        raise RuntimeError("No timed lyric segments. Finish step 4 (align/transcribe) first.")
+
+    audio = proj.get("converted_audio_url") or proj.get("audio_url")
+    if not audio or not Path(str(audio)).is_file():
+        raise RuntimeError("Project audio missing. Finish step 1 (prepare song) first.")
+
+    db.set_step(project_id, "lyric_video", "running")
+    _progress(job_id, 5, "Building lyric timeline…")
+
+    stop = threading.Event()
+
+    def heartbeat():
+        n = 8
+        while not stop.wait(6):
+            n = min(92, n + 4)
+            _progress(job_id, n, f"Remotion lyric render… ~{n}% (can take several minutes)")
+
+    t = threading.Thread(target=heartbeat, daemon=True)
+    t.start()
+    try:
+        storage_url = assemble_lyric_video(
+            project_id=project_id,
+            audio_path=str(audio),
+            segments=segments,
+        )
+    finally:
+        stop.set()
+
+    # Copy into Studio project storage so /files and media endpoint can serve it.
+    if str(storage_url).startswith("/storage/"):
+        rendered = Path(url_to_local_path(str(storage_url)))
+    else:
+        rendered = Path(str(storage_url))
+    if not rendered.is_file():
+        raise RuntimeError(
+            f"Lyric video render finished but file not found: {storage_url}. "
+            "Check remotion-composer (npm install) and Node/npx on PATH."
+        )
+
+    out_dir = db.project_dir(project_id) / "videos"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    dest = out_dir / "lyric_video.mp4"
+    shutil.copy2(rendered, dest)
+
+    _progress(job_id, 97, "Saving video…")
+    db.update_project(
+        project_id,
+        video_url=str(dest),
+        base_video_url=str(dest),
+        final_video_url=str(dest),
+        stage="lyric_video_ready",
+        error_message=None,
+    )
+    db.set_step(project_id, "lyric_video", "approved")
+    _progress(job_id, 100, f"Lyric video ready ({len(segments)} lines)")

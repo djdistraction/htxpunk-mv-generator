@@ -169,7 +169,7 @@ def get_project(project_id: str):
 
 @app.get("/api/projects/{project_id}/media/{kind}")
 def get_project_media(project_id: str, kind: str):
-    """Stream project audio for browser analysis / playback (original|converted|vocals)."""
+    """Stream project media (original|converted|vocals audio, or video)."""
     from fastapi.responses import FileResponse
 
     p = db.get_project(project_id)
@@ -179,12 +179,23 @@ def get_project_media(project_id: str, kind: str):
         "original": p.get("audio_url"),
         "converted": p.get("converted_audio_url") or p.get("audio_url"),
         "vocals": p.get("vocals_url"),
+        "video": p.get("video_url") or p.get("base_video_url") or p.get("final_video_url"),
     }
+    if kind not in path_map:
+        raise HTTPException(400, f"Unknown media kind: {kind}")
     path = path_map.get(kind)
     if not path or not Path(str(path)).is_file():
-        raise HTTPException(404, f"No {kind} audio on this project yet")
+        raise HTTPException(404, f"No {kind} file on this project yet")
     media = Path(str(path))
-    media_type = "audio/mpeg" if media.suffix.lower() == ".mp3" else "application/octet-stream"
+    suffix = media.suffix.lower()
+    if suffix == ".mp3":
+        media_type = "audio/mpeg"
+    elif suffix == ".mp4":
+        media_type = "video/mp4"
+    elif suffix in {".wav", ".flac", ".ogg", ".m4a"}:
+        media_type = "application/octet-stream"
+    else:
+        media_type = "application/octet-stream"
     return FileResponse(str(media), media_type=media_type, filename=media.name)
 
 
@@ -252,6 +263,7 @@ def start_job(project_id: str, job_type: str):
         "isolate_vocals": runner.job_isolate_vocals,
         "transcribe_lyrics": runner.job_transcribe_lyrics,
         "align_lyrics": runner.job_align_lyrics,
+        "render_lyric_video": runner.job_render_lyric_video,
     }
     fn = handlers.get(job_type)
     if not fn:

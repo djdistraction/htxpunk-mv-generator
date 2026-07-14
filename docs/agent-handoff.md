@@ -20,7 +20,9 @@ to the legacy workbook as the long-term UI.
 - Jobs with live progress; foundation steps separately retryable
 - Full spine: foundation → treatment → **element images as visual locks** →
   storyboard (refs) → linked clips → **Modal lip sync last**
-- Phase 1 scaffolded: upload, prepare audio, isolate vocals, align/transcribe lyrics
+- Foundation + lyric video in Studio: prepare audio → BPM/key → vocals →
+  align/transcribe (full-line validation) → **Remotion lyric video render**
+- Shared services: `backend/services/lyrics_aligner.py`, `video_assembler.assemble_lyric_video`
 
 Legacy `frontend/` + `backend/` remain until cutover.
 

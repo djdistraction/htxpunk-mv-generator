@@ -58,6 +58,6 @@ export const studioApi = {
   listJobs: (id: string) => fetch(`${API}/api/projects/${id}/jobs`).then(r => json<any[]>(r)),
   approveStep: (id: string, step: string) =>
     fetch(`${API}/api/projects/${id}/steps/${step}/approve`, { method: "POST" }).then(r => json<any>(r)),
-  mediaUrl: (id: string, kind: "original" | "converted" | "vocals" = "converted") =>
+  mediaUrl: (id: string, kind: "original" | "converted" | "vocals" | "video" = "converted") =>
     `${API}/api/projects/${id}/media/${kind}`,
 }

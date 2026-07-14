@@ -100,6 +100,7 @@ def create_project(title: str, artist: str = "") -> dict[str, Any]:
         "treatment": None,
         "elements": [],
         "storyboard": [],
+        "video_url": None,
         "base_video_url": None,
         "lipsynced_video_url": None,
         "final_video_url": None,
@@ -137,7 +138,7 @@ def update_project(project_id: str, **fields: Any) -> dict[str, Any]:
         "stage", "steps", "audio_url", "converted_audio_url", "vocals_url", "vocals_source",
         "bpm", "musical_key", "beat_grid", "transcript", "user_lyrics_text",
         "analysis", "treatment", "elements", "storyboard",
-        "base_video_url", "lipsynced_video_url", "final_video_url", "error_message",
+        "video_url", "base_video_url", "lipsynced_video_url", "final_video_url", "error_message",
     }
     data = {k: proj[k] for k in data_keys if k in proj}
     for k, v in fields.items():
