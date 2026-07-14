@@ -1,18 +1,25 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+/**
+ * Linear foundation flow:
+ * One big Next button — disabled while work runs; when ready, Next finishes
+ * this step and starts the next. No vague "approve" buttons.
+ */
+import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useParams } from "next/navigation"
 import { studioApi } from "@/lib/api"
+import { analyzeAudioFromUrl } from "@/lib/audioAnalysis"
 
-const STEPS = [
-  { id: "song", label: "1. Song file" },
-  { id: "rhythm", label: "2. Rhythm & key" },
-  { id: "vocals", label: "3. Vocal stem" },
-  { id: "lyrics", label: "4. Lyrics + timestamps" },
-  { id: "understanding", label: "5. Understanding (soon)" },
-  { id: "lyric_video", label: "6. Lyric video (soon)" },
-]
+const FLOW = ["song", "rhythm", "vocals", "lyrics"] as const
+type FlowStep = (typeof FLOW)[number]
+
+const LABELS: Record<FlowStep, string> = {
+  song: "1. Prepare song",
+  rhythm: "2. Detect BPM & key",
+  vocals: "3. Vocal stem",
+  lyrics: "4. Lyrics + timestamps",
+}
 
 export default function ProjectConsole() {
   const params = useParams()
@@ -20,45 +27,41 @@ export default function ProjectConsole() {
   const [project, setProject] = useState<any>(null)
   const [jobs, setJobs] = useState<any[]>([])
   const [activeJob, setActiveJob] = useState<any>(null)
-  const [step, setStep] = useState("song")
+  const [step, setStep] = useState<FlowStep>("song")
   const [error, setError] = useState("")
   const [info, setInfo] = useState("")
   const [busy, setBusy] = useState(false)
-
-  // foundation edit fields
+  const [localProgress, setLocalProgress] = useState("")
   const [title, setTitle] = useState("")
   const [artist, setArtist] = useState("")
-  const [bpm, setBpm] = useState("")
-  const [key, setKey] = useState("")
   const [lyricsText, setLyricsText] = useState("")
+  const autoStarted = useRef<Record<string, boolean>>({})
 
   const refresh = useCallback(async () => {
     if (!id) return
-    try {
-      const p = await studioApi.getProject(id)
-      setProject(p)
-      setTitle(p.title || "")
-      setArtist(p.artist || "")
-      setBpm(p.bpm || "")
-      setKey(p.musical_key || "")
-      if (p.user_lyrics_text) setLyricsText(p.user_lyrics_text)
-      else if (p.transcript?.segments?.length) {
-        setLyricsText(p.transcript.segments.map((s: any) => s.text || "").join("\n"))
-      }
-      const j = await studioApi.listJobs(id)
-      setJobs(j)
-      const running = j.find((x: any) => x.status === "running" || x.status === "queued")
-      setActiveJob(running || j[0] || null)
-      setError("")
-    } catch (e: any) {
-      setError(e.message || "Failed to load project")
+    const p = await studioApi.getProject(id)
+    setProject(p)
+    setTitle(p.title || "")
+    setArtist(p.artist || "")
+    if (p.user_lyrics_text) setLyricsText(p.user_lyrics_text)
+    else if (p.transcript?.segments?.length) {
+      setLyricsText(p.transcript.segments.map((s: any) => s.text || "").join("\n"))
     }
+    const j = await studioApi.listJobs(id)
+    setJobs(j)
+    const running = j.find((x: any) => x.status === "running" || x.status === "queued")
+    setActiveJob(running || j[0] || null)
+    return p
   }, [id])
 
   useEffect(() => {
-    refresh()
+    refresh().catch((e: any) => setError(e.message || "Load failed"))
+  }, [refresh])
+
+  // Poll jobs while running
+  useEffect(() => {
+    if (!id) return
     const t = setInterval(async () => {
-      if (!id) return
       try {
         const j = await studioApi.listJobs(id)
         setJobs(j)
@@ -67,222 +70,222 @@ export default function ProjectConsole() {
           const live = await studioApi.getJob(running.id)
           setActiveJob(live)
           if (live.status === "succeeded" || live.status === "failed") {
-            await refresh()
+            const p = await refresh()
+            if (live.status === "failed") setError(live.error || "Job failed")
+            else setError("")
+            // stay on step; Next becomes enabled from derived state
+            setProject(p)
           }
         } else {
           setActiveJob(j[0] || null)
         }
       } catch {
-        /* ignore poll errors */
+        /* ignore */
       }
-    }, 1500)
+    }, 1200)
     return () => clearInterval(t)
   }, [id, refresh])
 
-  const stepsState = project?.steps || {}
-
-  const startJob = async (type: string) => {
-    setBusy(true)
-    setError("")
-    setInfo("")
-    try {
-      const job = await studioApi.startJob(id, type)
-      setActiveJob(job)
-      setInfo(`Job started: ${type}`)
-      await refresh()
-    } catch (e: any) {
-      setError(e.message || "Could not start job")
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const saveFoundation = async () => {
-    setBusy(true)
-    setError("")
-    try {
-      await studioApi.patchFoundation(id, {
-        title,
-        artist,
-        bpm,
-        musical_key: key,
-        user_lyrics_text: lyricsText,
-      })
-      setInfo("Foundation saved.")
-      await refresh()
-    } catch (e: any) {
-      setError(e.message)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const saveRhythm = async () => {
-    setBusy(true)
-    setError("")
-    try {
-      await studioApi.saveRhythm(id, { bpm, musical_key: key, beat_grid: project?.beat_grid || [] })
-      setInfo("Rhythm & key saved.")
-      await refresh()
-    } catch (e: any) {
-      setError(e.message)
-    } finally {
-      setBusy(false)
-    }
-  }
-
+  const jobRunning = Boolean(
+    activeJob && (activeJob.status === "running" || activeJob.status === "queued")
+  )
   const segCount = project?.transcript?.segments?.length || 0
-  const jobRunning = activeJob && (activeJob.status === "running" || activeJob.status === "queued")
 
-  const workspace = useMemo(() => {
-    if (!project) return null
-    if (step === "song") {
-      return (
-        <fieldset className="group">
-          <legend>Song file</legend>
-          <p className="muted">Original upload path (local):</p>
-          <code style={{ wordBreak: "break-all" }}>{project.audio_url || "—"}</code>
-          <p className="muted" style={{ marginTop: 8 }}>
-            Converted: {project.converted_audio_url || "not yet"}
-          </p>
-          <div className="row" style={{ marginTop: 10 }}>
-            <button type="button" className="btn btn-primary" disabled={busy || jobRunning} onClick={() => startJob("prepare_audio")}>
-              Prepare audio (convert)
-            </button>
-            <button type="button" className="btn" disabled={busy} onClick={() => studioApi.approveStep(id, "song").then(refresh)}>
-              Mark song step approved
-            </button>
-          </div>
-        </fieldset>
-      )
-    }
-    if (step === "rhythm") {
-      return (
-        <fieldset className="group">
-          <legend>Rhythm & key</legend>
-          <p className="muted">Enter measured values (browser analysis can be wired later). Editable anytime.</p>
-          <label>BPM<input value={bpm} onChange={e => setBpm(e.target.value)} /></label>
-          <label>Key<input value={key} onChange={e => setKey(e.target.value)} placeholder="e.g. A minor" /></label>
-          <button type="button" className="btn btn-primary" disabled={busy} onClick={saveRhythm}>Save rhythm & key</button>
-        </fieldset>
-      )
-    }
-    if (step === "vocals") {
-      const source = project.vocals_source === "uploaded"
-        ? "uploaded file (isolation skipped)"
-        : project.vocals_source === "isolated"
-          ? "auto-isolated on CPU"
-          : "none"
-      return (
-        <fieldset className="group">
-          <legend>Vocal stem</legend>
-          <p className="muted">
-            Prefer uploading a stem you already have — that skips the slow CPU isolation step.
-            Isolation is only needed when you do not have a separate vocal file.
-          </p>
-          <p>
-            Status: <strong>{project.vocals_url ? "ready" : "missing"}</strong>
-            {project.vocals_url ? ` · source: ${source}` : ""}
-          </p>
-          {project.vocals_url && (
-            <code style={{ wordBreak: "break-all", display: "block", marginBottom: 8 }}>{project.vocals_url}</code>
-          )}
+  const stepDone = (p: any, s: FlowStep): boolean => {
+    if (!p) return false
+    if (s === "song") return Boolean(p.converted_audio_url)
+    if (s === "rhythm") return Boolean(p.bpm || p.musical_key)
+    if (s === "vocals") return Boolean(p.vocals_url)
+    if (s === "lyrics") return segCount > 0 || Boolean(p.transcript?.segments?.length)
+    return false
+  }
 
-          <label>
-            Upload pre-isolated vocal file
-            <input
-              type="file"
-              accept="audio/*,.mp3,.wav,.mp4,.m4a,.flac"
-              disabled={busy || jobRunning}
-              onChange={async e => {
-                const f = e.target.files?.[0]
-                e.target.value = ""
-                if (!f) return
-                setBusy(true)
-                setError("")
-                setInfo("")
-                try {
-                  await studioApi.uploadVocals(id, f)
-                  setInfo(`Vocal stem uploaded (${f.name}). Isolation skipped — go to Lyrics when ready.`)
-                  setStep("lyrics")
-                  await refresh()
-                } catch (err: any) {
-                  setError(err.message || "Vocal upload failed")
-                } finally {
-                  setBusy(false)
-                }
-              }}
-            />
-          </label>
+  // Derive current earliest incomplete step on load
+  useEffect(() => {
+    if (!project) return
+    for (const s of FLOW) {
+      if (!stepDone(project, s)) {
+        setStep(s)
+        return
+      }
+    }
+    setStep("lyrics")
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project?.id])
 
-          <div className="row" style={{ marginTop: 10 }}>
-            <button
-              type="button"
-              className="btn"
-              disabled={busy || jobRunning || project.vocals_source === "uploaded"}
-              onClick={() => startJob("isolate_vocals")}
-              title={project.vocals_source === "uploaded" ? "Already using uploaded stem" : undefined}
-            >
-              {project.vocals_url && project.vocals_source !== "uploaded"
-                ? "Retry auto-isolate (CPU)"
-                : "Auto-isolate from full mix (CPU, slow)"}
-            </button>
-          </div>
-          {project.vocals_source === "uploaded" && (
-            <p className="muted" style={{ marginTop: 8 }}>
-              Using your uploaded stem. You can still replace it with another file above.
-            </p>
-          )}
-        </fieldset>
-      )
+  const waitJob = async (jobId: string) => {
+    for (;;) {
+      await new Promise(r => setTimeout(r, 1200))
+      const live = await studioApi.getJob(jobId)
+      setActiveJob(live)
+      if (live.status === "succeeded") return live
+      if (live.status === "failed") throw new Error(live.error || "Job failed")
     }
-    if (step === "lyrics") {
-      return (
-        <fieldset className="group">
-          <legend>Lyrics + timestamps</legend>
-          <p className="muted">
-            Requires vocal stem for best results. Align uses your pasted text; Transcribe uses Whisper.
-          </p>
-          <label>
-            Lyrics text (for align)
-            <textarea rows={8} value={lyricsText} onChange={e => setLyricsText(e.target.value)} />
-          </label>
-          <div className="row">
-            <button type="button" className="btn" disabled={busy} onClick={saveFoundation}>Save lyrics text</button>
-            <button type="button" className="btn btn-primary" disabled={busy || jobRunning || !project.vocals_url} onClick={() => startJob("align_lyrics")}>
-              Align lyrics to stem
-            </button>
-            <button type="button" className="btn" disabled={busy || jobRunning} onClick={() => startJob("transcribe_lyrics")}>
-              Transcribe (Whisper)
-            </button>
-            <button type="button" className="btn" disabled={busy || !segCount} onClick={() => studioApi.approveStep(id, "lyrics").then(refresh)}>
-              Approve lyrics
-            </button>
-          </div>
-          {!project.vocals_url && (
-            <div className="alert" style={{ marginTop: 8 }}>
-              No vocal stem yet. Go to step 3: upload a pre-separated vocal file (fast) or run auto-isolate (slow).
-              Align is disabled until a stem exists.
-            </div>
-          )}
-          <p style={{ marginTop: 8 }}>Segments: {segCount}</p>
-          {segCount > 0 && (
-            <div style={{ maxHeight: 200, overflow: "auto", border: "2px inset #c0c0c0", background: "#fff", padding: 6 }}>
-              {project.transcript.segments.slice(0, 40).map((s: any, i: number) => (
-                <div key={i} className="muted">{Number(s.start).toFixed(1)}s — {s.text}</div>
-              ))}
-            </div>
-          )}
-        </fieldset>
-      )
+  }
+
+  const startJobAndWait = async (type: string) => {
+    const job = await studioApi.startJob(id, type)
+    setActiveJob(job)
+    await waitJob(job.id)
+    await refresh()
+  }
+
+  /** Run the work for the current step (idempotent if already done). */
+  const runCurrentStep = async (p: any, s: FlowStep) => {
+    if (s === "song") {
+      if (p.converted_audio_url) return
+      setInfo("Converting song to project audio…")
+      await startJobAndWait("prepare_audio")
+      setInfo("Song prepared.")
+      return
     }
-    return (
-      <fieldset className="group">
-        <legend>{step}</legend>
-        <p className="muted">This stage lands in a later Studio v2 phase (treatment → element image lock → storyboard → linked clips → Modal lip sync).</p>
-      </fieldset>
-    )
-  }, [project, step, bpm, key, lyricsText, busy, jobRunning, segCount, id])
+    if (s === "rhythm") {
+      if (p.bpm || p.musical_key) return
+      setInfo("Detecting BPM and key in the browser…")
+      setLocalProgress("Loading audio…")
+      const url = studioApi.mediaUrl(id, p.converted_audio_url ? "converted" : "original")
+      const result = await analyzeAudioFromUrl(url, stepName => {
+        setLocalProgress(
+          stepName === "bpm" ? "Detecting BPM…" : stepName === "beatgrid" ? "Building beat grid…" : "Detecting key…"
+        )
+      })
+      setLocalProgress("")
+      if (!result) throw new Error("Could not detect BPM/key from this file. You can still type values and continue.")
+      await studioApi.saveRhythm(id, {
+        bpm: result.bpm,
+        musical_key: result.musicalKey,
+        beat_grid: result.beatGrid,
+      })
+      setInfo(`Detected BPM ${result.bpm}, key ${result.musicalKey}.`)
+      await refresh()
+      return
+    }
+    if (s === "vocals") {
+      if (p.vocals_url) return
+      setInfo("Isolating vocals on CPU (slow). Watch Activity for progress…")
+      await startJobAndWait("isolate_vocals")
+      setInfo("Vocal stem ready.")
+      return
+    }
+    if (s === "lyrics") {
+      if (p.transcript?.segments?.length) return
+      // Save any pasted lyrics first
+      if (lyricsText.trim()) {
+        await studioApi.patchFoundation(id, { user_lyrics_text: lyricsText.trim() })
+      }
+      const latest = await studioApi.getProject(id)
+      if (!latest.vocals_url) {
+        throw new Error("Vocal stem required for lyrics. Upload a stem or run isolation on step 3.")
+      }
+      if ((latest.user_lyrics_text || lyricsText).trim()) {
+        setInfo("Aligning your lyrics to the vocal stem…")
+        await startJobAndWait("align_lyrics")
+      } else {
+        setInfo("Transcribing lyrics with Whisper (CPU)…")
+        await startJobAndWait("transcribe_lyrics")
+      }
+      setInfo("Lyrics ready. Review segments below — foundation complete for Phase 1.")
+      await refresh()
+    }
+  }
+
+  // Auto-start current step work once when entering a step
+  useEffect(() => {
+    if (!project || busy || jobRunning) return
+    const key = `${project.id}:${step}`
+    if (autoStarted.current[key]) return
+    if (stepDone(project, step)) return
+    // Don't auto-isolate vocals if user might want to upload — only auto song + rhythm
+    if (step === "vocals" || step === "lyrics") return
+    autoStarted.current[key] = true
+    ;(async () => {
+      setBusy(true)
+      setError("")
+      try {
+        await runCurrentStep(project, step)
+      } catch (e: any) {
+        setError(e.message || String(e))
+        autoStarted.current[key] = false
+      } finally {
+        setBusy(false)
+        setLocalProgress("")
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project?.id, step, project?.converted_audio_url, project?.bpm, jobRunning])
+
+  const nextEnabled = Boolean(project && stepDone(project, step) && !busy && !jobRunning)
+  const nextLabel = (() => {
+    if (busy || jobRunning) return "Working… wait for this step to finish"
+    if (!project) return "Loading…"
+    if (!stepDone(project, step)) {
+      if (step === "vocals" && !project.vocals_url) return "Upload a vocal stem or start isolation first"
+      if (step === "lyrics" && !segCount) return "Run lyrics (Next will start align/transcribe when ready)"
+      return "Finish this step first"
+    }
+    const idx = FLOW.indexOf(step)
+    if (idx >= FLOW.length - 1) return "Foundation complete"
+    return `Next: ${LABELS[FLOW[idx + 1]]}`
+  })()
+
+  const onNext = async () => {
+    if (!project || !nextEnabled) return
+    const idx = FLOW.indexOf(step)
+    if (idx >= FLOW.length - 1) {
+      setInfo("Foundation steps done. Lyric video & cinematic pipeline come next in Studio v2.")
+      return
+    }
+    const next = FLOW[idx + 1]
+    setStep(next)
+    setInfo("")
+    setError("")
+    // Kick off next step work immediately (except vocals prefers upload option)
+    setBusy(true)
+    try {
+      const p = await refresh()
+      if (next === "vocals" && !p.vocals_url) {
+        setInfo("Optional: upload a pre-separated vocal file, or press “Start vocal isolation”.")
+        return
+      }
+      if (next === "lyrics") {
+        // Start lyrics processing when user hits Next into lyrics if not done
+        if (!p.transcript?.segments?.length) {
+          await runCurrentStep(p, "lyrics")
+        }
+        return
+      }
+      await runCurrentStep(p, next)
+    } catch (e: any) {
+      setError(e.message || String(e))
+    } finally {
+      setBusy(false)
+      setLocalProgress("")
+    }
+  }
+
+  const startVocalsIsolation = async () => {
+    setBusy(true)
+    setError("")
+    try {
+      await runCurrentStep(await refresh(), "vocals")
+    } catch (e: any) {
+      setError(e.message || String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const startLyrics = async () => {
+    setBusy(true)
+    setError("")
+    try {
+      await runCurrentStep(await refresh(), "lyrics")
+    } catch (e: any) {
+      setError(e.message || String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   if (!project) {
     return (
@@ -298,45 +301,195 @@ export default function ProjectConsole() {
     <div className="app">
       <div className="titlebar">
         <span>HTXpunk Studio v2 — {project.title}</span>
-        <span>{jobRunning ? `Job: ${activeJob?.progress?.toFixed?.(0) ?? activeJob?.progress}%` : "Idle"}</span>
+        <span>
+          {jobRunning
+            ? `${activeJob?.type}: ${Math.round(activeJob?.progress || 0)}%`
+            : busy
+              ? localProgress || "Working…"
+              : "Ready"}
+        </span>
       </div>
       <div className="toolbar">
         <Link href="/" className="btn" style={{ textDecoration: "none", color: "inherit" }}>Library</Link>
-        <button type="button" className="btn" onClick={refresh}>Refresh</button>
-        <span className="muted">stage: {project.stage}</span>
+        <button type="button" className="btn" onClick={() => refresh()}>Refresh</button>
+        <span className="muted">One step at a time · Next unlocks when this step finishes</span>
       </div>
 
       {(error || project.error_message) && (
         <div className="alert" style={{ margin: 8 }}>{error || project.error_message}</div>
       )}
       {info && <div className="alert ok" style={{ margin: 8 }}>{info}</div>}
+      {localProgress && <div className="alert info" style={{ margin: 8 }}>{localProgress}</div>}
 
       <div className="desk">
         <div className="pane">
-          <div style={{ fontWeight: "bold", marginBottom: 8 }}>STEPS</div>
-          {STEPS.map(s => (
-            <button
-              key={s.id}
-              type="button"
-              className={`step ${step === s.id ? "active" : ""}`}
-              onClick={() => setStep(s.id)}
-            >
-              {s.label}
-              <div className="meta">{stepsState[s.id] || "pending"}</div>
-            </button>
-          ))}
+          <div style={{ fontWeight: "bold", marginBottom: 8 }}>PROGRESS</div>
+          {FLOW.map(s => {
+            const done = stepDone(project, s)
+            const active = step === s
+            return (
+              <div
+                key={s}
+                className={`step ${active ? "active" : ""}`}
+                style={{ opacity: done || active ? 1 : 0.7 }}
+              >
+                {done ? "✓ " : active ? "► " : "○ "}
+                {LABELS[s]}
+                <div className="meta">{done ? "done" : active ? "current" : "waiting"}</div>
+              </div>
+            )
+          })}
         </div>
 
         <div className="pane">
           <fieldset className="group">
-            <legend>Foundation (edit anytime)</legend>
+            <legend>{LABELS[step]}</legend>
+
+            {step === "song" && (
+              <>
+                <p>
+                  This step converts your upload into a standard project audio file used for
+                  analysis and later video. It runs automatically when you open the project.
+                </p>
+                <p className="muted">Original: {project.audio_url ? PathName(project.audio_url) : "—"}</p>
+                <p className="muted">Converted: {project.converted_audio_url ? "yes ✓" : "not yet"}</p>
+                {!project.converted_audio_url && !busy && !jobRunning && (
+                  <button type="button" className="btn" onClick={() => runCurrentStep(project, "song").catch((e: any) => setError(e.message))}>
+                    Retry prepare audio
+                  </button>
+                )}
+              </>
+            )}
+
+            {step === "rhythm" && (
+              <>
+                <p>
+                  BPM and musical key are <strong>detected automatically</strong> in your browser
+                  from the song (essentia.js). You can correct them below if needed.
+                </p>
+                <label>BPM <input value={project.bpm || ""} readOnly={!project.bpm} onChange={async e => {
+                  await studioApi.saveRhythm(id, { bpm: e.target.value, musical_key: project.musical_key || "", beat_grid: project.beat_grid || [] })
+                  refresh()
+                }} /></label>
+                <label>Key <input value={project.musical_key || ""} onChange={async e => {
+                  await studioApi.saveRhythm(id, { bpm: project.bpm || "", musical_key: e.target.value, beat_grid: project.beat_grid || [] })
+                  refresh()
+                }} /></label>
+                <p className="muted">Beats detected: {(project.beat_grid || []).length}</p>
+                {!project.bpm && !busy && (
+                  <button type="button" className="btn" onClick={() => runCurrentStep(project, "rhythm").catch((e: any) => setError(e.message))}>
+                    Retry auto-detect
+                  </button>
+                )}
+              </>
+            )}
+
+            {step === "vocals" && (
+              <>
+                <p>
+                  Lyrics work best on a clean vocal track. If you already exported vocals from
+                  another tool, upload them here and skip the slow CPU isolation.
+                </p>
+                <p>
+                  Stem: <strong>{project.vocals_url ? "ready" : "needed"}</strong>
+                  {project.vocals_source ? ` (${project.vocals_source})` : ""}
+                </p>
+                <label>
+                  Upload pre-isolated vocals (optional)
+                  <input
+                    type="file"
+                    accept="audio/*,.mp3,.wav,.mp4,.m4a,.flac"
+                    disabled={busy || jobRunning}
+                    onChange={async e => {
+                      const f = e.target.files?.[0]
+                      e.target.value = ""
+                      if (!f) return
+                      setBusy(true)
+                      setError("")
+                      try {
+                        await studioApi.uploadVocals(id, f)
+                        setInfo(`Using uploaded stem: ${f.name}`)
+                        await refresh()
+                      } catch (err: any) {
+                        setError(err.message)
+                      } finally {
+                        setBusy(false)
+                      }
+                    }}
+                  />
+                </label>
+                {!project.vocals_url && (
+                  <button type="button" className="btn btn-primary" disabled={busy || jobRunning} onClick={startVocalsIsolation}>
+                    Start auto vocal isolation (CPU — can take several minutes)
+                  </button>
+                )}
+              </>
+            )}
+
+            {step === "lyrics" && (
+              <>
+                <p>
+                  Paste exact lyrics if you have them (more accurate). Next will force-align them
+                  to the vocal stem. If the box is empty, Next runs Whisper transcription instead.
+                </p>
+                <label>
+                  Lyrics (optional)
+                  <textarea rows={8} value={lyricsText} onChange={e => setLyricsText(e.target.value)} />
+                </label>
+                <div className="row">
+                  <button type="button" className="btn" disabled={busy} onClick={async () => {
+                    await studioApi.patchFoundation(id, { title, artist, user_lyrics_text: lyricsText })
+                    setInfo("Saved title / artist / lyrics text.")
+                  }}>Save text</button>
+                  {!segCount && (
+                    <button type="button" className="btn btn-primary" disabled={busy || jobRunning || !project.vocals_url} onClick={startLyrics}>
+                      {lyricsText.trim() ? "Align lyrics now" : "Transcribe now"}
+                    </button>
+                  )}
+                </div>
+                <p>Timed segments: {segCount}</p>
+                {segCount > 0 && (
+                  <div style={{ maxHeight: 180, overflow: "auto", border: "2px inset #c0c0c0", background: "#fff", padding: 6 }}>
+                    {project.transcript.segments.slice(0, 50).map((s: any, i: number) => (
+                      <div key={i} className="muted">{Number(s.start).toFixed(1)}s — {s.text}</div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </fieldset>
+
+          <fieldset className="group">
+            <legend>Project name</legend>
             <div className="row">
               <label style={{ flex: 1 }}>Title<input value={title} onChange={e => setTitle(e.target.value)} /></label>
               <label style={{ flex: 1 }}>Artist<input value={artist} onChange={e => setArtist(e.target.value)} /></label>
             </div>
-            <button type="button" className="btn" disabled={busy} onClick={saveFoundation}>Save foundation fields</button>
           </fieldset>
-          {workspace}
+
+          <div className="row" style={{ marginTop: 12 }}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              style={{ minWidth: 220, fontSize: 13, padding: "8px 16px" }}
+              disabled={!nextEnabled && !(step === "lyrics" && !segCount && project.vocals_url && !busy && !jobRunning)}
+              onClick={async () => {
+                // On lyrics, if not done, Next means "run lyrics then stay"
+                if (step === "lyrics" && !segCount) {
+                  await startLyrics()
+                  return
+                }
+                await onNext()
+              }}
+            >
+              {step === "lyrics" && !segCount
+                ? (busy || jobRunning ? "Working on lyrics…" : (lyricsText.trim() ? "Next — align lyrics" : "Next — transcribe lyrics"))
+                : nextLabel}
+            </button>
+          </div>
+          <p className="muted" style={{ marginTop: 8 }}>
+            Next stays disabled until the current step finishes. Activity panel (right) shows live job progress.
+          </p>
         </div>
 
         <div className="pane">
@@ -350,9 +503,9 @@ export default function ProjectConsole() {
               {activeJob.error && <div className="alert" style={{ marginTop: 6 }}>{activeJob.error}</div>}
             </div>
           ) : (
-            <p className="muted">No jobs yet. Start a step action — progress appears here.</p>
+            <p className="muted">{localProgress || "No background job right now."}</p>
           )}
-          <div style={{ fontWeight: "bold", margin: "12px 0 6px" }}>Recent jobs</div>
+          <div style={{ fontWeight: "bold", margin: "12px 0 6px" }}>Recent</div>
           {jobs.slice(0, 8).map(j => (
             <div key={j.id} className="meta" style={{ marginBottom: 4 }}>
               {j.type} · {j.status} · {Math.round(j.progress || 0)}%
@@ -362,4 +515,12 @@ export default function ProjectConsole() {
       </div>
     </div>
   )
+}
+
+function PathName(p: string) {
+  try {
+    return p.split(/[/\\]/).pop() || p
+  } catch {
+    return p
+  }
 }

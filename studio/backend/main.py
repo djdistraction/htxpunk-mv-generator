@@ -167,6 +167,27 @@ def get_project(project_id: str):
     return p
 
 
+@app.get("/api/projects/{project_id}/media/{kind}")
+def get_project_media(project_id: str, kind: str):
+    """Stream project audio for browser analysis / playback (original|converted|vocals)."""
+    from fastapi.responses import FileResponse
+
+    p = db.get_project(project_id)
+    if not p:
+        raise HTTPException(404, "Project not found")
+    path_map = {
+        "original": p.get("audio_url"),
+        "converted": p.get("converted_audio_url") or p.get("audio_url"),
+        "vocals": p.get("vocals_url"),
+    }
+    path = path_map.get(kind)
+    if not path or not Path(str(path)).is_file():
+        raise HTTPException(404, f"No {kind} audio on this project yet")
+    media = Path(str(path))
+    media_type = "audio/mpeg" if media.suffix.lower() == ".mp3" else "application/octet-stream"
+    return FileResponse(str(media), media_type=media_type, filename=media.name)
+
+
 @app.patch("/api/projects/{project_id}/foundation")
 def patch_foundation(project_id: str, body: FoundationPatch):
     if not db.get_project(project_id):
