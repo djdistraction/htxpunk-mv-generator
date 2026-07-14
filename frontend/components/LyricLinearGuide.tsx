@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { GuideStep, GuideStepState, buildLyricLinearGuide } from '@/lib/lyricGuide'
+import FoundationPanel from '@/components/FoundationPanel'
 import {
   Win95Alert,
   Win95Button,
@@ -32,6 +33,7 @@ export default function LyricLinearGuide({
   onRun,
   onApprove,
   onRetryProject,
+  onProjectUpdated,
 }: {
   projectId: string
   project: any
@@ -39,11 +41,15 @@ export default function LyricLinearGuide({
   onRun: (action: string, confirmMessage?: string) => void
   onApprove: (sectionKey: string) => void
   onRetryProject?: () => void
+  onProjectUpdated?: (project: any) => void
 }) {
   const guide = buildLyricLinearGuide(project)
   const current = guide.steps[guide.currentIndex]
   const failed = project.stage === 'error'
   const errorText = project.error_message || project.section_statuses?.final_video?.error || ''
+  const videoReady = Boolean(project.base_video_url || project.video_url) ||
+    project.stage === 'base_video_ready' || project.stage === 'complete'
+  const foundationReady = Boolean(project.audio_url)
 
   const handleAction = (step: GuideStep) => {
     const action = step.action
@@ -174,8 +180,18 @@ export default function LyricLinearGuide({
         </div>
       </Win95GroupBox>
 
+      {foundationReady && (
+        <FoundationPanel
+          project={project}
+          projectId={projectId}
+          showAddons={videoReady}
+          onUpdated={p => onProjectUpdated?.(p)}
+        />
+      )}
+
       <p className="win95-muted" style={{ fontSize: 11 }}>
-        Lyric Video path only: no treatment, elements, or storyboard. Project ID: {projectId}
+        Foundation (song · rhythm · lyrics) is shared by every video format. Lyric Video is the first deliverable;
+        enable other formats after the lyric output exists without re-gathering that data. Project ID: {projectId}
       </p>
     </div>
   )

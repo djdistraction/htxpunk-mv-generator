@@ -6,7 +6,19 @@ Update this file when the active workflow, major branch, project direction, or n
 
 ## Current date
 
-2026-07-13
+2026-07-14
+
+## Product model (2026-07-14 — read this)
+
+**Shared foundation first. Lyric Video is the first deliverable. Other formats branch from the same foundation.**
+
+- Foundation = song file + rhythm/key + timestamped lyrics + title/artist/metadata + optional brief/references.
+- Foundation must be **editable** (not locked “required” fields with no inputs).
+- Master **Lyric Video** end-to-end before investing in full cinematic quality.
+- After lyric video exists, user can **enable Karaoke / Performance / Cinematic** without re-uploading or re-transcribing.
+- See `docs/decision-log.md` entry **2026-07-14: Shared foundation first**.
+
+APIs: `POST /api/projects/{id}/foundation`, `POST /api/projects/{id}/production-paths/add`.
 
 ## UI skin (2026-07-11)
 

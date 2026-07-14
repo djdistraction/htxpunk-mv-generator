@@ -113,6 +113,18 @@ export const api = {
       const { data } = await client.post(`/api/projects/${id}/confirm-info`, payload)
       return data
     },
+    updateFoundation: async (id: string, payload: {
+      title?: string; artist?: string; composer?: string; album?: string
+      bpm?: string; musical_key?: string; beat_grid?: number[]
+      transcript?: object; brief?: string; user_lyrics_text?: string
+    }) => {
+      const { data } = await client.post(`/api/projects/${id}/foundation`, payload)
+      return data
+    },
+    addProductionPath: async (id: string, path: string) => {
+      const { data } = await client.post(`/api/projects/${id}/production-paths/add`, { path })
+      return data
+    },
     approveSection: async (id: string, section: string) => {
       const { data } = await client.post(`/api/projects/${id}/sections/${section}/approve`)
       return data

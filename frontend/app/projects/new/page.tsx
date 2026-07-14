@@ -142,8 +142,10 @@ export default function NewProjectPage() {
 
         <Win95GroupBox title="Production Path *">
           <p className="win95-muted" style={{ marginTop: 0, marginBottom: 10 }}>
-            Choose one path, or combine any two. Lyric Video is recommended for the first full end-to-end run.
-            {productionPaths.length === 2 ? ' (2 selected — maximum reached)' : ''}
+            Start with <strong>Lyric Video</strong> (recommended). Song, rhythm, and lyrics become a shared
+            foundation; you can enable Karaoke, Performance, or Cinematic later on the same project without
+            re-uploading. You may still select up to two formats at create time if you want.
+            {productionPaths.length === 2 ? ' (2 selected at create — more can be added later)' : ''}
           </p>
           <div className="win95-grid-2">
             {PRODUCTION_PATHS.map(path => {

@@ -847,6 +847,7 @@ export default function ProjectDetail({ id }: { id: string }) {
           onRun={runAction}
           onApprove={approveSection}
           onRetryProject={retryProject}
+          onProjectUpdated={setProject}
         />
       ) : (
         <>

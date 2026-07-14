@@ -4,6 +4,31 @@ This document records product and architecture decisions that future agents must
 
 Use this file to prevent Claude Code, Codex, GitHub Copilot, Cursor, or future maintainers from rediscovering old decisions and accidentally reversing them.
 
+## 2026-07-14: Shared foundation first; Lyric Video is the first deliverable
+
+Decision (supersedes "2026-07-09: Production path is chosen once, at project creation" for workflow shape):
+
+1. **Foundation is shared.** Song file, rhythm/key, timestamped lyrics, title/artist/metadata, optional brief and references are gathered **once** and used by every video format. That intake is not "lyric-only work" — it is the base of cinematic, karaoke, and performance as well.
+
+2. **Foundation must be inspectable and editable.** Stages must not show "required inputs" with no way to enter or correct them. Auto-filled metadata is fine as a default; the user must still be able to override title, artist, BPM/key, and lyric lines manually.
+
+3. **Master Lyric Video first.** The first end-to-end deliverable from a complete foundation is **Lyric Video**. Other formats are layered on after that path is solid — not built as separate tunnels that re-run intake.
+
+4. **Other formats branch from the foundation after (or alongside) lyric output.** After a lyric video exists (or foundation is confirmed), the user can choose to generate Karaoke, Performance, and/or Cinematic outputs **without re-uploading the song or re-transcribing lyrics**. Path selection is not a one-shot irreversible choice at create time that forces re-gathering.
+
+5. **Composable modules, not five full pipelines.** Aligns with the 2026-07-09 composable-modules proposal: lyric-overlay module first; narrative/visual and performer modules consume the same foundation later.
+
+Reason:
+
+Randall's direction after real Lyric Video testing: the multi-gate workbook felt wrong (locked stages demanded inputs that only appeared later; bouncing steps). He explicitly wants foundation mastery via Lyric Video, then reuse that data for other video types so production never gathers the same song intelligence twice.
+
+Implementation notes (started 2026-07-14 on `cursor/win95-app-shell`):
+
+- Linear Lyric guide for pure-lyric projects (`frontend/lib/lyricGuide.ts`, `LyricLinearGuide.tsx`).
+- `POST /api/projects/{id}/foundation` — edit title/artist/lyrics/BPM/key/brief without re-running intake.
+- `POST /api/projects/{id}/production-paths/add` — append another format after foundation/lyric work.
+- UI: "Build another format from this foundation" after lyric video is ready.
+
 ## 2026-07-11: Windows 95 utility UI skin
 
 Decision:
@@ -304,19 +329,11 @@ together or what else the app needs to become.
 
 ## 2026-07-09: Production path is chosen once, at project creation
 
-Decision:
+**SUPERSEDED 2026-07-14** — see "Shared foundation first; Lyric Video is the first deliverable".
 
-The user selects a production path (one of the four named paths, or a
-combination of two) when creating a project, alongside title and audio
-upload — not mid-project.
+Original decision (historical): path chosen at create time only, max hybrid of two.
 
-Reason:
-
-Randall's explicit choice. Matches how the app is already structured (one
-linear guided flow per project, per issue #20) with the least disruption.
-Changing paths mid-project (treating paths as toggleable layers over
-already-generated assets) was considered and explicitly not chosen for now —
-revisit only if Randall asks for it later.
+Replacement: start with foundation (+ prefer Lyric Video first); additional formats may be added later from the same foundation without re-intake.
 
 ## 2026-07-09: Performance Music Video supports both AI performer and uploaded footage
 

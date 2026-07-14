@@ -9,7 +9,7 @@ from pathlib import Path
 import httpx
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel
-from models.project import ProjectCreate, ProjectInfoConfirm
+from models.project import ProjectCreate, ProjectInfoConfirm, FoundationUpdate, ProductionPathAdd
 from database import (
     db_list_projects, db_create_project, db_get_project, db_update_project,
     db_create_asset, db_get_assets, db_delete_project, db_get_last_task,
@@ -41,11 +41,13 @@ def _validate_audio_file(filename: str | None):
         )
 
 
-def _normalize_production_paths(raw) -> list[str]:
-    """Validate the selected music-video path.
+def _normalize_production_paths(raw, *, max_paths: int = 4) -> list[str]:
+    """Validate music-video format module(s) enabled on this project.
 
-    A project can use one base path or a hybrid of any two:
-    lyric, karaoke, performance, cinematic.
+    Foundation (audio/lyrics/rhythm) is always shared. Formats can accumulate
+    over the project lifetime (Lyric first, then Karaoke/Cinematic/etc.) per
+    decision-log 2026-07-14. Creation UI still defaults to Lyric-only; hybrids
+    at create time remain allowed up to max_paths.
     """
     if isinstance(raw, str):
         try:
@@ -71,8 +73,11 @@ def _normalize_production_paths(raw) -> list[str]:
         )
     if not paths:
         raise HTTPException(status_code=400, detail="Select at least one production path.")
-    if len(paths) > 2:
-        raise HTTPException(status_code=400, detail="Select one path or a hybrid of any two paths.")
+    if len(paths) > max_paths:
+        raise HTTPException(
+            status_code=400,
+            detail=f"At most {max_paths} production formats can be enabled on one project.",
+        )
     return paths
 
 
@@ -528,6 +533,85 @@ async def upload_audio(project_id: str, file: UploadFile = File(...)):
     db_update_project(project_id, audio_url=audio_url, stage="audio_uploaded", error_message="", processing_step="Upload complete")
     _mark_generated(project_id, "song_file", "Song file uploaded and ready for review.")
     return {"audio_url": audio_url, "message": "Audio uploaded. Continue with Analyze Rhythm & Key."}
+
+
+@router.post("/{project_id}/foundation")
+async def update_foundation(project_id: str, payload: FoundationUpdate):
+    """Edit shared foundation fields without requiring the one-shot review gate.
+
+    Title, artist, BPM/key, transcript lines, and brief are foundation data for
+    every video format — users must be able to correct them anytime after upload.
+    """
+    project = db_get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if not project.get("audio_url"):
+        raise HTTPException(status_code=400, detail="Upload a song before editing foundation fields.")
+
+    updates = payload.model_dump(exclude_unset=True)
+    if "brief" in updates:
+        updates["user_brief"] = updates.pop("brief")
+    if updates:
+        db_update_project(project_id, **updates)
+    project = db_get_project(project_id)
+    if project.get("title") or project.get("artist"):
+        set_section_status(project_id, "project_setup", "generated", message="Foundation fields updated.")
+    if project.get("bpm") or project.get("musical_key") or project.get("beat_grid"):
+        set_section_status(project_id, "rhythm_key", "generated", message="Rhythm/key foundation updated.")
+    if project.get("transcript"):
+        set_section_status(project_id, "lyrics", "generated", message="Lyrics foundation updated.")
+    return db_get_project(project_id)
+
+
+@router.post("/{project_id}/production-paths/add")
+async def add_production_path(project_id: str, payload: ProductionPathAdd):
+    """Enable another video format that reuses this project's foundation.
+
+    Does not re-run upload, rhythm, or lyrics. Used after Lyric Video (or any
+    foundation-ready state) to branch into Karaoke / Performance / Cinematic.
+    """
+    project = db_get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    new_path = str(payload.path or "").strip().lower()
+    if new_path not in ALLOWED_PRODUCTION_PATHS:
+        raise HTTPException(status_code=400, detail=f"Unsupported production path: {new_path}")
+
+    existing = list(project.get("production_paths") or [])
+    if new_path in existing:
+        return {"project": project, "message": f"Format '{new_path}' is already enabled.", "added": False}
+
+    # Foundation gate: need song + some lyric or rhythm signal so we don't
+    # enable cinematic on an empty shell.
+    if not project.get("audio_url"):
+        raise HTTPException(status_code=400, detail="Upload a song before enabling more formats.")
+    has_foundation = bool(
+        project.get("transcript")
+        or project.get("bpm")
+        or project.get("converted_audio_url")
+        or project.get("stage") in (
+            "awaiting_project_info_review", "info_confirmed", "base_video_ready",
+            "assembling_lyric_video", "complete",
+        )
+    )
+    if not has_foundation:
+        raise HTTPException(
+            status_code=400,
+            detail="Finish foundation steps (rhythm and/or lyrics) before enabling another format.",
+        )
+
+    merged = _normalize_production_paths(existing + [new_path], max_paths=4)
+    db_update_project(project_id, production_paths=merged)
+    project = db_get_project(project_id)
+    return {
+        "project": project,
+        "message": (
+            f"Enabled '{new_path}'. Shared foundation (song, rhythm, lyrics) is reused — "
+            "continue with that format's generation stages; do not re-upload the song."
+        ),
+        "added": True,
+    }
 
 
 @router.post("/{project_id}/confirm-info")

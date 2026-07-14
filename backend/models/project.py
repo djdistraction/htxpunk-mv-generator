@@ -60,3 +60,27 @@ class ProjectInfoConfirm(BaseModel):
     series_id: Optional[str] = None
     brief: Optional[str] = None
     production_paths: Optional[list[str]] = None
+
+
+class FoundationUpdate(BaseModel):
+    """Edit shared foundation fields anytime after upload (decision 2026-07-14).
+
+    Foundation is song intelligence reused by Lyric, Karaoke, Performance, and
+    Cinematic modules — users must be able to correct auto-filled metadata and
+    lyric lines without re-running the whole intake tunnel.
+    """
+    title: Optional[str] = None
+    artist: Optional[str] = None
+    composer: Optional[str] = None
+    album: Optional[str] = None
+    bpm: Optional[str] = None
+    musical_key: Optional[str] = None
+    beat_grid: Optional[list[float]] = None
+    transcript: Optional[dict] = None
+    brief: Optional[str] = None
+    user_lyrics_text: Optional[str] = None
+
+
+class ProductionPathAdd(BaseModel):
+    """Enable another video format on an existing foundation (no re-intake)."""
+    path: str
