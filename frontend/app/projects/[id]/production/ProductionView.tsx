@@ -157,8 +157,11 @@ export default function ProductionView({ id }: { id: string }) {
             {project.error_message}
           </div>
           <p className="win95-muted" style={{ marginTop: 0 }}>
-            For Lyric Video: install Remotion deps with <code>cd remotion-composer && npm install</code>,
-            ensure Node.js is on PATH, then return to the project workbook and use Retry generate.
+            {/remotion|npx|node_modules/i.test(project.error_message || '')
+              ? 'Remotion/Node issue: run cd remotion-composer && npm install, then retry from the workbook.'
+              : /huggingface|api-inference|Connection error|getaddrinfo|FLUX/i.test(project.error_message || '')
+                ? 'Network/image-API failure — not an npm install problem. Pure Lyric Video should not call image APIs.'
+                : 'See the error text above for the real cause, then retry from the workbook.'}
           </p>
           <Link href={`/projects/${id}`} className="win95-btn win95-btn-link">← Back to workbook</Link>
         </Win95Alert>

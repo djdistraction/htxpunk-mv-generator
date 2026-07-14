@@ -85,8 +85,25 @@ export default function LyricLinearGuide({
             {errorText}
           </div>
           <div className="win95-muted" style={{ marginBottom: 8 }}>
-            Common fixes: run <code>cd remotion-composer && npm install</code>, ensure Node.js is on PATH,
-            then use the Retry button on the current step (or Retry failed step below).
+            {/remotion|npx|node\.js|node_modules/i.test(errorText) ? (
+              <>
+                This looks like a Remotion/Node render problem. On this machine, check that
+                <code> cd remotion-composer && npm install </code>
+                has been run, then use Retry below.
+              </>
+            ) : /huggingface|api-inference|connection error|getaddrinfo|MaxRetry|FLUX/i.test(errorText) ? (
+              <>
+                This is a <strong>network / image API</strong> failure (not a missing npm install).
+                Lyric Video should not need HuggingFace. If you only wanted lyrics-on-screen,
+                stay on pure Lyric Video and use <strong>Generate lyric video</strong> — do not
+                run cinematic image generation while offline or blocked from that API.
+              </>
+            ) : (
+              <>
+                Read the error text above first — it is the real failure.
+                The Retry button re-runs lyric video generation after you fix the cause.
+              </>
+            )}
           </div>
           {onRetryProject && (
             <Win95Button onClick={onRetryProject} disabled={Boolean(runningAction)}>
