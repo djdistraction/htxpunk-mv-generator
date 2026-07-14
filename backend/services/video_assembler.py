@@ -33,6 +33,70 @@ REMOTION_DIR = Path(__file__).parent.parent.parent / "remotion-composer"
 KEN_BURNS_EFFECTS = ["zoom-in", "zoom-out", "pan-right", "pan-left"]
 
 
+def find_npx() -> str:
+    """Resolve npx for subprocess on Windows and Unix.
+
+    On Windows, CreateProcess cannot launch bare ``npx`` (it's ``npx.cmd``).
+    That surfaces as the opaque ``[WinError 2] The system cannot find the
+    file specified`` — which is exactly what failed Randall's Lyric Video
+    render for project "Go Fish". Prefer shutil.which, then common names.
+    """
+    for name in ("npx.cmd", "npx.exe", "npx"):
+        found = shutil.which(name)
+        if found:
+            return found
+    # Node installers often put npx next to node even if PATH is thin.
+    node = shutil.which("node") or shutil.which("node.exe")
+    if node:
+        sibling = Path(node).with_name("npx.cmd" if os.name == "nt" else "npx")
+        if sibling.is_file():
+            return str(sibling)
+    raise RuntimeError(
+        "Could not find `npx` on PATH. Install Node.js LTS from https://nodejs.org "
+        "and restart the app (so PATH updates), then retry lyric video generation."
+    )
+
+
+def run_remotion_render(composition_id: str, out_path: Path, props_path: str) -> None:
+    """Run ``npx remotion render <composition>`` with Windows-safe npx resolution."""
+    npx = find_npx()
+    cmd = [
+        npx,
+        "remotion",
+        "render",
+        composition_id,
+        str(out_path),
+        f"--props={props_path}",
+        "--log=verbose",
+    ]
+    logger.info("Starting Remotion render: %s (cwd=%s)", " ".join(cmd), REMOTION_DIR)
+    # shell=False with full path to npx.cmd is the reliable Windows form.
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=str(REMOTION_DIR),
+            capture_output=True,
+            text=True,
+            timeout=1800,
+            shell=False,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            f"Failed to start Remotion (`{npx}`). Node/npx not runnable from the "
+            f"backend process PATH. Install Node.js LTS and restart the app.\n{exc}"
+        ) from exc
+    if result.returncode != 0:
+        logger.error("Remotion stderr:\n%s", result.stderr)
+        tail = (result.stderr or result.stdout or "")[-2000:]
+        raise RuntimeError(
+            f"Remotion render failed for '{composition_id}' (exit {result.returncode}).\n"
+            f"If packages are missing: cd remotion-composer && npm install\n"
+            f"Details:\n{tail}"
+        )
+    if not out_path.is_file():
+        raise RuntimeError(f"Remotion reported success but output missing: {out_path}")
+
+
 # ── ffmpeg discovery ──────────────────────────────────────────────────────────
 
 def find_ffmpeg() -> str:
@@ -287,12 +351,7 @@ def render_with_remotion(project_id: str, timeline: dict, output_filename: str =
         props_path = f.name
 
     try:
-        cmd = ["npx", "remotion", "render", "MusicVideo", str(out_path), f"--props={props_path}", "--log=verbose"]
-        logger.info("Starting Remotion render: %s", " ".join(cmd))
-        result = subprocess.run(cmd, cwd=str(REMOTION_DIR), capture_output=True, text=True, timeout=1800)
-        if result.returncode != 0:
-            logger.error("Remotion stderr:\n%s", result.stderr)
-            raise RuntimeError(f"Remotion render failed (exit {result.returncode}):\n{result.stderr[-2000:]}")
+        run_remotion_render("MusicVideo", out_path, props_path)
         storage_key = f"projects/{project_id}/videos/{output_filename}"
         return upload_file_path(str(out_path), storage_key, "video/mp4")
     finally:
@@ -382,27 +441,7 @@ def render_lyric_video_with_remotion(project_id: str, audio_path: str, timeline:
         props_path = f.name
 
     try:
-        cmd = ["npx", "remotion", "render", "LyricVideo", str(out_path), f"--props={props_path}", "--log=verbose"]
-        logger.info("Starting Remotion Lyric Video render: %s", " ".join(cmd))
-        try:
-            result = subprocess.run(cmd, cwd=str(REMOTION_DIR), capture_output=True, text=True, timeout=1800)
-        except FileNotFoundError as exc:
-            raise RuntimeError(
-                "Could not run `npx` (Node.js not on PATH). Install Node.js LTS, "
-                "re-open the terminal, then: cd remotion-composer && npm install"
-            ) from exc
-        if result.returncode != 0:
-            logger.error("Remotion stderr:\n%s", result.stderr)
-            tail = (result.stderr or result.stdout or "")[-2000:]
-            raise RuntimeError(
-                f"Remotion lyric render failed (exit {result.returncode}).\n"
-                f"If packages are missing: cd remotion-composer && npm install\n"
-                f"Details:\n{tail}"
-            )
-        if not out_path.is_file():
-            raise RuntimeError(
-                f"Remotion reported success but output missing: {out_path}"
-            )
+        run_remotion_render("LyricVideo", out_path, props_path)
         storage_key = f"projects/{project_id}/videos/{output_filename}"
         return upload_file_path(str(out_path), storage_key, "video/mp4")
     finally:
