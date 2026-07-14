@@ -4,6 +4,14 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { api, mediaUrl } from '@/lib/api'
 import { analyzeAudioFile } from '@/lib/audioAnalysis'
+import {
+  Win95Alert,
+  Win95Button,
+  Win95GroupBox,
+  Win95Progress,
+  Win95StatusBadge,
+} from '@/components/win95/Win95Primitives'
+import LyricLinearGuide from '@/components/LyricLinearGuide'
 
 type SectionStatus = 'empty' | 'locked' | 'ready' | 'running' | 'generated' | 'approved' | 'rejected' | 'failed' | 'skipped'
 
@@ -64,6 +72,7 @@ const STAGE_LABELS: Record<string, string> = {
   awaiting_storyboard_approval: 'Storyboard images ready for review',
   storyboard_approved: 'Storyboard approved',
   assembling: 'Generating base video',
+  assembling_lyric_video: 'Generating lyric video',
   base_video_ready: 'Base video ready for review',
   complete: 'Final video approved',
   error: 'Something went wrong',
@@ -108,6 +117,16 @@ const GUIDED_RUN_STEPS: Record<string, GuidedStep> = {
   metadata: { key: 'read-metadata', runLabel: 'Read metadata' },
   vocals: { key: 'isolate-vocals', runLabel: 'Prepare vocal stem' },
   lyrics: { key: 'transcribe-lyrics', runLabel: 'Transcribe lyrics' },
+  lyrics_align: { key: 'align-lyrics', runLabel: 'Align provided lyrics' },
+}
+
+// Projects created with pasted/uploaded lyrics (user_lyrics_text) should be
+// forced-aligned against the vocal stem instead of transcribed with
+// Whisper — more accurate since the exact words are already known. Both
+// produce the same transcript shape, so everything downstream is unaffected
+// by which one ran.
+function lyricsGuidedStep(project: any): GuidedStep {
+  return project?.user_lyrics_text ? GUIDED_RUN_STEPS.lyrics_align : GUIDED_RUN_STEPS.lyrics
 }
 
 function stageIndex(stage: string): number {
@@ -142,6 +161,15 @@ function countElements(project: any): number {
   )
 }
 
+// Lyric Video v1: a pure (non-hybrid) lyric path skips treatment/element
+// plan/element images/shot manifest/storyboard entirely and renders
+// directly from approved lyrics — see
+// docs/lyric-karaoke-module-implementation-plan.md.
+function isPureLyricPath(project: any): boolean {
+  const paths = Array.isArray(project?.production_paths) ? project.production_paths : []
+  return paths.length === 1 && paths[0] === 'lyric'
+}
+
 function productionPathSummary(project: any): string {
   const paths = Array.isArray(project?.production_paths) ? project.production_paths : []
   if (paths.length === 0) return 'No production path selected.'
@@ -149,24 +177,23 @@ function productionPathSummary(project: any): string {
   return labels.length === 1 ? labels[0] : `Hybrid: ${labels.join(' + ')}`
 }
 
-function statusClass(status: SectionStatus): string {
+function statusTone(status: SectionStatus): 'ok' | 'warn' | 'error' | 'info' | 'muted' | 'running' {
   switch (status) {
     case 'approved':
-      return 'bg-green-950 text-green-300 border-green-800'
+      return 'ok'
     case 'generated':
-      return 'bg-blue-950 text-blue-300 border-blue-800'
     case 'ready':
-      return 'bg-yellow-950 text-yellow-300 border-yellow-800'
+      return 'warn'
     case 'running':
-      return 'bg-purple-950 text-purple-300 border-purple-800'
+      return 'running'
     case 'failed':
-      return 'bg-red-950 text-red-300 border-red-800'
     case 'rejected':
-      return 'bg-orange-950 text-orange-300 border-orange-800'
+      return 'error'
     case 'locked':
-      return 'bg-gray-900 text-gray-500 border-gray-800'
+    case 'empty':
+    case 'skipped':
     default:
-      return 'bg-gray-950 text-gray-400 border-gray-800'
+      return 'muted'
   }
 }
 
@@ -189,6 +216,30 @@ function workbookApproved(project: any, key: string, legacyApproved: boolean): b
   return explicit ? explicit === 'approved' : legacyApproved
 }
 
+/** Prefer stages the user can actually act on — never auto-land on a locked gate. */
+function pickFocusSection(sections: WorkbookSection[]): string | null {
+  if (!sections.length) return null
+
+  const withAction = sections.find(
+    s => s.primaryAction || s.canApprove || s.canReject
+  )
+  if (withAction) return withAction.key
+
+  const active = sections.find(s =>
+    ['ready', 'running', 'generated', 'failed', 'rejected'].includes(s.status)
+  )
+  if (active) return active.key
+
+  const open = sections.find(
+    s => !['approved', 'locked', 'empty', 'skipped'].includes(s.status)
+  )
+  if (open) return open.key
+
+  // Last resort: first incomplete (may be locked) so the pane is never empty.
+  const incomplete = sections.find(s => s.status !== 'approved' && s.status !== 'skipped')
+  return incomplete?.key || sections[0].key
+}
+
 function isGuidedStepReady(project: any, stepKey: string): boolean {
   switch (stepKey) {
     case 'analyze-rhythm-key':
@@ -200,6 +251,7 @@ function isGuidedStepReady(project: any, stepKey: string): boolean {
     case 'isolate-vocals':
       return Boolean(project.converted_audio_url) && !isAtOrAfter(project, 'vocals_ready')
     case 'transcribe-lyrics':
+    case 'align-lyrics':
       return isAtOrAfter(project, 'vocals_ready') && !hasTranscript(project)
     default:
       return false
@@ -231,21 +283,49 @@ function buildWorkbookSections(project: any): WorkbookSection[] {
   const baseVideoReady = Boolean(project.base_video_url || project.video_url) || project.stage === 'base_video_ready' || project.stage === 'complete'
   const finalVideoApproved = workbookApproved(project, 'final_video', Boolean(project.final_video_url) || project.stage === 'complete')
 
-  return [
+  const sections: WorkbookSection[] = [
     {
       key: 'project_setup',
       number: 1,
       title: 'Project Setup',
-      purpose: 'Confirm title, artist, creative brief, references, and series context.',
-      status: workbookStatus(project, 'project_setup', infoApproved ? 'approved' : project.stage === 'awaiting_project_info_review' ? 'ready' : project.audio_url ? 'locked' : 'empty'),
-      required: ['title', 'production path', 'artist or intentional blank', 'creative direction'],
-      output: `${productionPathSummary(project)} | ${
-        infoApproved ? 'Project setup approved.' : project.stage === 'awaiting_project_info_review' ? 'Extracted info is ready to review.' : 'Waiting for audio preparation and transcript.'
+      purpose:
+        project.stage === 'awaiting_project_info_review'
+          ? 'Review title, artist, production path, optional brief/references, then confirm to continue.'
+          : infoApproved
+            ? 'Project setup is confirmed. Title, path, and creative notes were saved at review.'
+            : 'Title and production path were set at upload. You do not type them on this screen. After lyrics are ready, a Review setup page opens to confirm everything.',
+      status: workbookStatus(
+        project,
+        'project_setup',
+        infoApproved
+          ? 'approved'
+          : project.stage === 'awaiting_project_info_review'
+            ? 'ready'
+            : project.audio_url
+              ? 'locked'
+              : 'empty'
+      ),
+      required:
+        project.stage === 'awaiting_project_info_review'
+          ? ['title (from upload)', 'production path', 'optional artist / brief / references']
+          : ['complete Song File → Rhythm/Key → Lyrics first', 'then open Review setup'],
+      output: `${productionPathSummary(project)} | Title: ${project.title || '—'} | ${
+        infoApproved
+          ? 'Project setup approved.'
+          : project.stage === 'awaiting_project_info_review'
+            ? 'Ready for review — click Review setup.'
+            : lyricsReady
+              ? 'Lyrics exist but stage is not awaiting review yet — try refreshing, or re-run lyrics if stuck.'
+              : 'Waiting for audio prep + lyrics. Use the Lyrics stage next (Prepare audio → vocals → align/transcribe).'
       }`,
-      needs: project.stage === 'awaiting_project_info_review' ? undefined : 'Lyrics and metadata ready for review',
-      primaryAction: project.stage === 'awaiting_project_info_review'
-        ? { label: 'Review setup', href: 'review' }
-        : undefined,
+      needs:
+        infoApproved || project.stage === 'awaiting_project_info_review'
+          ? undefined
+          : 'Not editable here. Go to the Lyrics stage and run the buttons there until a transcript exists; then return here for Review setup.',
+      primaryAction:
+        project.stage === 'awaiting_project_info_review'
+          ? { label: 'Review setup', href: 'review' }
+          : undefined,
     },
     {
       key: 'song_file',
@@ -291,8 +371,8 @@ function buildWorkbookSections(project: any): WorkbookSection[] {
           ? { label: GUIDED_RUN_STEPS.metadata.runLabel, run: 'read-metadata' }
           : isGuidedStepReady(project, 'isolate-vocals')
             ? { label: GUIDED_RUN_STEPS.vocals.runLabel, run: 'isolate-vocals' }
-            : isGuidedStepReady(project, 'transcribe-lyrics')
-              ? { label: GUIDED_RUN_STEPS.lyrics.runLabel, run: 'transcribe-lyrics' }
+            : isGuidedStepReady(project, lyricsGuidedStep(project).key)
+              ? { label: lyricsGuidedStep(project).runLabel, run: lyricsGuidedStep(project).key }
               : undefined,
       secondaryAction: project.stage === 'awaiting_project_info_review'
         ? { label: 'Edit transcript', href: 'review' }
@@ -409,30 +489,112 @@ function buildWorkbookSections(project: any): WorkbookSection[] {
             : undefined,
       secondaryAction: storyboardReady ? { label: 'Open storyboard', href: 'storyboard' } : undefined,
     },
-    {
-      key: 'final_video',
-      number: 11,
-      title: 'Final Real Video Generation',
-      purpose: 'Generate a base real video, review it, optionally run lip sync, and choose the final approved export.',
-      status: workbookStatus(project, 'final_video', project.stage === 'assembling' ? 'running' : finalVideoApproved ? 'approved' : baseVideoReady ? 'generated' : storyboardApproved ? 'ready' : 'locked'),
-      required: ['approved storyboard images', 'approved audio', 'real video backend'],
-      output: finalVideoApproved ? 'Final video approved for export.' : baseVideoReady ? 'Base video generated. Review it before final approval.' : 'No base video generated yet.',
-      needs: storyboardApproved ? undefined : 'Approved Storyboard Images',
-      warning: 'Compute-cost warning: ffmpeg/Ken Burns is preview-only and should fail unless preview mode was explicitly enabled.',
-      canApprove: baseVideoReady && !finalVideoApproved,
-      canReject: baseVideoReady && !finalVideoApproved,
-      primaryAction: project.stage === 'storyboard_approved'
-        ? {
-            label: 'Generate base video',
-            run: 'generate-base-video',
-            confirm: 'Generate the base video now? This requires a real video backend unless preview slideshow mode is explicitly enabled.',
-          }
-        : baseVideoReady
-          ? { label: 'Open production output', href: 'production' }
-          : undefined,
-      secondaryAction: baseVideoReady ? { label: 'Open production', href: 'production' } : undefined,
-    },
+    isPureLyricPath(project)
+      ? {
+          key: 'final_video',
+          number: 11,
+          title: 'Final Real Video Generation',
+          purpose: 'Generate the Lyric Video directly from approved lyrics, review it, then choose the final approved export.',
+          status: workbookStatus(
+            project,
+            'final_video',
+            project.stage === 'assembling_lyric_video'
+              ? 'running'
+              : finalVideoApproved
+                ? 'approved'
+                : baseVideoReady
+                  ? 'generated'
+                  : (infoApproved && songFileApproved && rhythmApproved && lyricsApproved)
+                    ? 'ready'
+                    : 'locked'
+          ),
+          required: ['approved lyrics', 'approved project setup', 'approved rhythm/key'],
+          output: finalVideoApproved
+            ? 'Final video approved for export.'
+            : project.stage === 'assembling_lyric_video'
+              ? 'Lyric video render is running (Remotion). This can take a few minutes — keep this page open.'
+              : baseVideoReady
+                ? 'Lyric video generated. Open Production Review, watch it, then Approve Final.'
+                : 'No lyric video generated yet.',
+          needs: (infoApproved && songFileApproved && rhythmApproved && lyricsApproved)
+            ? undefined
+            : 'Approved Project Setup, Song File, Rhythm/Key, and Lyrics',
+          canApprove: baseVideoReady && !finalVideoApproved,
+          canReject: baseVideoReady && !finalVideoApproved,
+          primaryAction:
+            project.stage === 'assembling_lyric_video'
+              ? { label: 'Watch render progress', href: 'production' }
+              : project.stage === 'info_confirmed' && infoApproved && songFileApproved && rhythmApproved && lyricsApproved
+                ? {
+                    label: 'Generate lyric video',
+                    run: 'generate-lyric-video',
+                    confirm: 'Generate the Lyric Video from the approved transcript now? This uses Remotion (no image-generation tokens).',
+                  }
+                : baseVideoReady
+                  ? { label: 'Open production output', href: 'production' }
+                  : undefined,
+          secondaryAction: (baseVideoReady || project.stage === 'assembling_lyric_video')
+            ? { label: 'Open production', href: 'production' }
+            : undefined,
+        }
+      : {
+          key: 'final_video',
+          number: 11,
+          title: 'Final Real Video Generation',
+          purpose: 'Generate a base real video, review it, optionally run lip sync, and choose the final approved export.',
+          status: workbookStatus(
+            project,
+            'final_video',
+            project.stage === 'assembling'
+              ? 'running'
+              : finalVideoApproved
+                ? 'approved'
+                : baseVideoReady
+                  ? 'generated'
+                  : storyboardApproved
+                    ? 'ready'
+                    : 'locked'
+          ),
+          required: ['approved storyboard images', 'approved audio', 'real video backend'],
+          output: finalVideoApproved
+            ? 'Final video approved for export.'
+            : project.stage === 'assembling'
+              ? 'Base video render is running. Open Production Review for progress.'
+              : baseVideoReady
+                ? 'Base video generated. Review it before final approval.'
+                : 'No base video generated yet.',
+          needs: storyboardApproved ? undefined : 'Approved Storyboard Images',
+          warning: 'Compute-cost warning: ffmpeg/Ken Burns is preview-only and should fail unless preview mode was explicitly enabled.',
+          canApprove: baseVideoReady && !finalVideoApproved,
+          canReject: baseVideoReady && !finalVideoApproved,
+          primaryAction:
+            project.stage === 'assembling'
+              ? { label: 'Watch render progress', href: 'production' }
+              : project.stage === 'storyboard_approved'
+                ? {
+                    label: 'Generate base video',
+                    run: 'generate-base-video',
+                    confirm: 'Generate the base video now? This requires a real video backend unless preview slideshow mode is explicitly enabled.',
+                  }
+                : baseVideoReady
+                  ? { label: 'Open production output', href: 'production' }
+                  : undefined,
+          secondaryAction: (baseVideoReady || project.stage === 'assembling')
+            ? { label: 'Open production', href: 'production' }
+            : undefined,
+        },
   ]
+
+  // A pure Lyric Video project has no song analysis, treatment, elements,
+  // shot manifest, or storyboard — Base Video is the next gated step
+  // straight after Lyrics is approved. Hiding these rather than just
+  // leaving them "Locked" forever avoids a Lyric Video user ever seeing
+  // "Generate Element Plan" as something they're expected to do.
+  const HIDDEN_FOR_PURE_LYRIC = new Set([
+    'song_analysis', 'treatment', 'element_plan', 'element_images', 'shot_manifest', 'storyboard_images',
+  ])
+  const visible = isPureLyricPath(project) ? sections.filter(s => !HIDDEN_FOR_PURE_LYRIC.has(s.key)) : sections
+  return visible.map((section, i) => ({ ...section, number: i + 1 }))
 }
 
 export default function ProjectDetail({ id }: { id: string }) {
@@ -440,6 +602,8 @@ export default function ProjectDetail({ id }: { id: string }) {
   const [loading, setLoading] = useState(true)
   const [runningAction, setRunningAction] = useState<string | null>(null)
   const [localError, setLocalError] = useState('')
+  const [successMsg, setSuccessMsg] = useState('')
+  const [activeSection, setActiveSection] = useState<string | null>(null)
 
   const fetchProject = async () => {
     try {
@@ -454,12 +618,32 @@ export default function ProjectDetail({ id }: { id: string }) {
 
   useEffect(() => {
     fetchProject()
-    const interval = setInterval(fetchProject, project?.stage === 'complete' || project?.stage === 'error' ? 30000 : 5000)
+    const busy =
+      project?.stage === 'assembling' ||
+      project?.stage === 'assembling_lyric_video' ||
+      project?.stage === 'generating_images' ||
+      project?.stage === 'generating_manifest_images' ||
+      project?.stage === 'building_storyboard' ||
+      project?.stage === 'treatment_pending' ||
+      project?.stage === 'extracting_elements'
+    const interval = setInterval(
+      fetchProject,
+      project?.stage === 'complete' || project?.stage === 'error' ? 30000 : busy ? 3000 : 5000
+    )
     return () => clearInterval(interval)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, project?.stage])
 
   const sections = useMemo(() => project ? buildWorkbookSections(project) : [], [project])
+
+  // Initial / cleared selection: pick an actionable stage (e.g. Lyrics), not locked Project Setup.
+  // If the user clicks a sidebar item, keep that selection.
+  useEffect(() => {
+    if (!sections.length) return
+    if (activeSection && sections.some(s => s.key === activeSection)) return
+    const focus = pickFocusSection(sections)
+    if (focus) setActiveSection(focus)
+  }, [sections, activeSection])
 
   const refreshFromResponse = async (data: any) => {
     if (data?.project) {
@@ -475,6 +659,7 @@ export default function ProjectDetail({ id }: { id: string }) {
     if (!project || runningAction) return
     if (confirmMessage && !window.confirm(confirmMessage)) return
     setLocalError('')
+    setSuccessMsg('')
     setRunningAction(action)
     try {
       if (action === 'analyze-rhythm-key') {
@@ -498,6 +683,8 @@ export default function ProjectDetail({ id }: { id: string }) {
         await refreshFromResponse(await api.projects.isolateVocals(id))
       } else if (action === 'transcribe-lyrics') {
         await refreshFromResponse(await api.projects.transcribeLyrics(id))
+      } else if (action === 'align-lyrics') {
+        await refreshFromResponse(await api.projects.alignLyrics(id))
       } else if (action === 'run-song-analysis') {
         await refreshFromResponse(await api.pipeline.runSongAnalysis(id))
       } else if (action === 'generate-treatment') {
@@ -512,6 +699,13 @@ export default function ProjectDetail({ id }: { id: string }) {
         await refreshFromResponse(await api.pipeline.generateManifestImages(id))
       } else if (action === 'generate-base-video') {
         await refreshFromResponse(await api.pipeline.generateBaseVideo(id))
+      } else if (action === 'generate-lyric-video') {
+        await refreshFromResponse(await api.pipeline.generateLyricVideo(id))
+        setSuccessMsg('Lyric video generation started. Open Production Review to watch progress.')
+        setActiveSection('final_video')
+      }
+      if (action !== 'generate-lyric-video') {
+        setSuccessMsg(`Step finished: ${action}`)
       }
     } catch (err: any) {
       setLocalError(err?.response?.data?.detail || err?.message || 'Action failed.')
@@ -524,9 +718,28 @@ export default function ProjectDetail({ id }: { id: string }) {
   const approveSection = async (sectionKey: string) => {
     if (runningAction) return
     setLocalError('')
+    setSuccessMsg('')
     setRunningAction(`approve-${sectionKey}`)
     try {
-      await refreshFromResponse(await api.projects.approveSection(id, sectionKey))
+      const data = await api.projects.approveSection(id, sectionKey)
+      await refreshFromResponse(data)
+      setSuccessMsg(`Approved: ${sectionKey.replace(/_/g, ' ')}. Continue with the next stage that has a Run/action button.`)
+      // After approve, jump to the next *actionable* stage (e.g. Lyrics),
+      // not locked Project Setup which has no form fields.
+      const nextProject = data?.project || data?.id ? (data.project || data) : null
+      if (nextProject) {
+        const nextSections = buildWorkbookSections(nextProject)
+        // Prefer the next stage after the one we approved that has a real action.
+        const idx = nextSections.findIndex(s => s.key === sectionKey)
+        const after = idx >= 0 ? nextSections.slice(idx + 1) : nextSections
+        const nextKey =
+          pickFocusSection(after) ||
+          pickFocusSection(nextSections.filter(s => s.key !== sectionKey)) ||
+          pickFocusSection(nextSections)
+        if (nextKey) setActiveSection(nextKey)
+      } else {
+        setActiveSection(null)
+      }
     } catch (err: any) {
       setLocalError(err?.response?.data?.detail || err?.message || 'Approval failed.')
       await fetchProject()
@@ -539,9 +752,11 @@ export default function ProjectDetail({ id }: { id: string }) {
     if (runningAction) return
     const note = window.prompt('What needs to change before this section is approved?') || ''
     setLocalError('')
+    setSuccessMsg('')
     setRunningAction(`reject-${sectionKey}`)
     try {
       await refreshFromResponse(await api.projects.rejectSection(id, sectionKey, note))
+      setSuccessMsg(`Rejected: ${sectionKey.replace(/_/g, ' ')} — fix and re-run when ready.`)
     } catch (err: any) {
       setLocalError(err?.response?.data?.detail || err?.message || 'Rejection failed.')
       await fetchProject()
@@ -550,125 +765,148 @@ export default function ProjectDetail({ id }: { id: string }) {
     }
   }
 
-  if (loading) return (
-    <div className="min-h-screen bg-black text-white flex items-center justify-center">
-      Loading...
-    </div>
-  )
+  if (loading) {
+    return <div className="win95-empty">Loading project workbook…</div>
+  }
 
-  if (!project) return (
-    <div className="min-h-screen bg-black text-white flex items-center justify-center">
-      Project not found
-    </div>
-  )
+  if (!project) {
+    return (
+      <div className="win95-page">
+        <div className="win95-empty">Project not found.</div>
+        <Link href="/" className="win95-btn win95-btn-link">← Back to projects</Link>
+      </div>
+    )
+  }
 
   const completedCount = sections.filter(section => ['approved', 'generated'].includes(section.status)).length
-  const progress = Math.round((completedCount / sections.length) * 100)
+  const progress = sections.length ? Math.round((completedCount / sections.length) * 100) : 0
+  const current = sections.find(s => s.key === activeSection) || sections[0]
+  const pureLyric = isPureLyricPath(project)
+
+  const retryProject = async () => {
+    setRunningAction('retry')
+    setLocalError('')
+    try {
+      // Prefer lyric regenerate path: retry endpoint may lack task history for manual workers.
+      if (pureLyric) {
+        await refreshFromResponse(await api.pipeline.generateLyricVideo(id))
+        setSuccessMsg('Retrying lyric video generation…')
+      } else {
+        await refreshFromResponse(await api.projects.retry(id))
+      }
+    } catch (err: any) {
+      setLocalError(err?.response?.data?.detail || err?.message || 'Retry failed.')
+    } finally {
+      setRunningAction(null)
+    }
+  }
 
   return (
-    <div className="min-h-screen bg-black text-white p-6 md:p-8">
-      <div className="max-w-6xl mx-auto">
-        <a href="/" className="text-purple-400 text-sm hover:underline">Back to all projects</a>
-
-        <div className="mt-6 mb-8">
-          <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
-            <div>
-              <p className="text-xs uppercase tracking-widest text-gray-500 mb-2">Production Workbook</p>
-              <h1 className="text-3xl md:text-4xl font-bold">{project.title || 'Untitled Project'}</h1>
-              {project.artist && <p className="text-gray-400 mt-1">{project.artist}</p>}
-            </div>
-            <div className="lg:text-right">
-              <span className={`inline-flex px-3 py-1 rounded-full text-sm font-medium border ${
-                project.stage === 'complete' ? 'bg-green-950 text-green-300 border-green-800' :
-                project.stage === 'error' ? 'bg-red-950 text-red-300 border-red-800' :
-                project.stage.includes('awaiting') ? 'bg-yellow-950 text-yellow-300 border-yellow-800' :
-                'bg-purple-950 text-purple-300 border-purple-800'
-              }`}>
-                {STAGE_LABELS[project.stage] || project.stage}
-              </span>
-              <p className="text-gray-600 text-xs mt-2">Auto-refreshes every 5s</p>
-            </div>
-          </div>
-
-          <div className="mt-6 bg-gray-950 border border-gray-800 rounded-lg p-4">
-            <div className="flex items-center justify-between text-sm mb-2">
-              <span className="text-gray-400">Workbook completion</span>
-              <span className="text-gray-500">{completedCount}/{sections.length} sections have output or approval</span>
-            </div>
-            <div className="h-2 bg-gray-900 rounded-full overflow-hidden">
-              <div className="h-full bg-purple-600" style={{ width: `${progress}%` }} />
-            </div>
-          </div>
+    <div className="win95-page">
+      <div className="win95-page-header">
+        <div>
+          <h1 className="win95-page-title">{project.title || 'Untitled Project'}</h1>
+          <p className="win95-page-sub">
+            {project.artist ? `${project.artist} · ` : ''}
+            {productionPathSummary(project)}
+            {pureLyric ? ' · linear guide' : ` · stage: ${STAGE_LABELS[project.stage] || project.stage}`}
+          </p>
         </div>
+        <div className="win95-row">
+          <Win95StatusBadge
+            status={
+              project.stage === 'complete' ? 'ok' :
+              project.stage === 'error' ? 'error' :
+              project.stage?.includes('awaiting') || project.stage === 'assembling_lyric_video' ? 'warn' :
+              'running'
+            }
+          >
+            {STAGE_LABELS[project.stage] || project.stage}
+          </Win95StatusBadge>
+          <Link href="/" className="win95-btn win95-btn-link">Projects</Link>
+        </div>
+      </div>
 
-        {localError && (
-          <div className="mb-6 bg-red-950/50 border border-red-800 rounded-lg p-4">
-            <h2 className="text-red-300 font-semibold mb-1">Action failed</h2>
-            <p className="text-red-200 text-sm font-mono whitespace-pre-wrap break-words">{localError}</p>
-          </div>
-        )}
+      {localError && (
+        <Win95Alert tone="error" title="Action failed" onDismiss={() => setLocalError('')}>
+          {localError}
+        </Win95Alert>
+      )}
 
-        {project.stage === 'error' && project.error_message && (
-          <div className="mb-6 bg-red-950/50 border border-red-800 rounded-lg p-4">
-            <h2 className="text-red-300 font-semibold mb-1">Pipeline Error</h2>
-            <p className="text-red-200 text-sm font-mono whitespace-pre-wrap break-words">{project.error_message}</p>
-            <button
-              onClick={async () => {
-                setRunningAction('retry')
-                try {
-                  await refreshFromResponse(await api.projects.retry(id))
-                } catch (err: any) {
-                  setLocalError(err?.response?.data?.detail || err?.message || 'Retry failed.')
-                } finally {
-                  setRunningAction(null)
-                }
-              }}
-              disabled={runningAction === 'retry'}
-              className="mt-3 px-4 py-2 rounded-lg bg-red-800 hover:bg-red-700 disabled:bg-gray-800 text-sm font-semibold"
-            >
-              {runningAction === 'retry' ? 'Retrying...' : 'Retry failed step'}
-            </button>
-          </div>
-        )}
+      {successMsg && (
+        <Win95Alert tone="success" title="OK" onDismiss={() => setSuccessMsg('')}>
+          {successMsg}
+        </Win95Alert>
+      )}
 
-        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_280px] gap-6">
-          <div className="space-y-4">
-            {sections.map(section => (
-              <WorkbookCard
-                key={section.key}
-                section={section}
-                projectId={id}
-                runningAction={runningAction}
-                onRun={runAction}
-                onApprove={approveSection}
-                onReject={rejectSection}
-              />
-            ))}
-          </div>
+      {pureLyric ? (
+        <LyricLinearGuide
+          projectId={id}
+          project={project}
+          runningAction={runningAction}
+          onRun={runAction}
+          onApprove={approveSection}
+          onRetryProject={retryProject}
+          onProjectUpdated={setProject}
+        />
+      ) : (
+        <>
+          <Win95Progress
+            value={progress}
+            label={`Workbook completion — ${completedCount}/${sections.length} sections have output or approval`}
+          />
 
-          <aside className="xl:sticky xl:top-6 h-fit bg-gray-950 border border-gray-800 rounded-lg p-4">
-            <h2 className="font-semibold mb-3">Gates</h2>
-            <div className="space-y-2">
+          {project.stage === 'error' && project.error_message && (
+            <Win95Alert tone="error" title="Pipeline Error">
+              <div style={{ marginBottom: 8, fontFamily: 'var(--win-mono)', whiteSpace: 'pre-wrap' }}>
+                {project.error_message}
+              </div>
+              <Win95Button onClick={retryProject} disabled={runningAction === 'retry'}>
+                {runningAction === 'retry' ? 'Retrying…' : 'Retry failed step'}
+              </Win95Button>
+            </Win95Alert>
+          )}
+
+          <div className="win95-workbook">
+            <aside className="win95-sidebar">
+              <div className="win95-sidebar-title">PRODUCTION PIPELINE</div>
               {sections.map(section => (
-                <a
+                <button
                   key={section.key}
-                  href={`#${section.key}`}
-                  className="flex items-center justify-between gap-3 text-sm py-1.5 text-gray-400 hover:text-white"
+                  type="button"
+                  className={`win95-sidebar-step ${current?.key === section.key ? 'is-active' : ''}`}
+                  onClick={() => setActiveSection(section.key)}
                 >
-                  <span className="truncate">{section.number}. {section.title}</span>
-                  <span className={`text-[11px] px-2 py-0.5 rounded-full border ${statusClass(section.status)}`}>
+                  <span className="win95-sidebar-step-name">
+                    {section.number}. {section.title}
+                  </span>
+                  <span className="win95-sidebar-step-status">
                     {prettyStatus(section.status)}
                   </span>
-                </a>
+                </button>
               ))}
-            </div>
-          </aside>
-        </div>
+              <div className="win95-sidebar-foot">
+                Project ID:<br />{project.id}
+              </div>
+            </aside>
 
-        <p className="text-gray-700 text-xs mt-8">
-          Project ID: {project.id}
-        </p>
-      </div>
+            <div className="win95-main-pane">
+              {current ? (
+                <WorkbookCard
+                  section={current}
+                  projectId={id}
+                  runningAction={runningAction}
+                  onRun={runAction}
+                  onApprove={approveSection}
+                  onReject={rejectSection}
+                />
+              ) : (
+                <div className="win95-empty">Select a pipeline stage from the left.</div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -691,90 +929,116 @@ function WorkbookCard({
   const actionRunning = section.primaryAction?.run && runningAction === section.primaryAction.run
   const approving = runningAction === `approve-${section.key}`
   const rejecting = runningAction === `reject-${section.key}`
+  const locked = section.status === 'locked' || section.status === 'empty'
 
   return (
-    <section id={section.key} className="bg-gray-950 border border-gray-800 rounded-lg p-5 scroll-mt-6">
-      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-3 mb-2">
-            <span className="text-gray-500 text-sm tabular-nums">{section.number.toString().padStart(2, '0')}</span>
-            <h2 className="text-xl font-semibold text-white">{section.title}</h2>
-            <span className={`text-xs px-2 py-0.5 rounded-full border ${statusClass(section.status)}`}>
-              {prettyStatus(section.status)}
-            </span>
-          </div>
-          <p className="text-gray-400 text-sm leading-relaxed">{section.purpose}</p>
-        </div>
-
-        {(section.primaryAction || section.secondaryAction || section.canApprove || section.canReject) && (
-          <div className="flex flex-wrap gap-2 md:justify-end">
-            {section.primaryAction?.href && (
-              <Link
-                href={`/projects/${projectId}/${section.primaryAction.href}`}
-                className="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-sm font-semibold transition-colors"
-              >
-                {section.primaryAction.label}
-              </Link>
-            )}
-            {section.primaryAction?.run && (
-              <button
-                onClick={() => onRun(section.primaryAction!.run!, section.primaryAction!.confirm)}
-                disabled={Boolean(runningAction)}
-                className="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 disabled:bg-gray-800 disabled:text-gray-500 text-sm font-semibold transition-colors"
-              >
-                {actionRunning ? 'Starting...' : section.primaryAction.label}
-              </button>
-            )}
-            {section.canApprove && (
-              <button
-                onClick={() => onApprove(section.key)}
-                disabled={Boolean(runningAction)}
-                className="px-4 py-2 rounded-lg bg-green-700 hover:bg-green-600 disabled:bg-gray-800 disabled:text-gray-500 text-sm font-semibold transition-colors"
-              >
-                {approving ? 'Approving...' : 'Approve'}
-              </button>
-            )}
-            {section.canReject && (
-              <button
-                onClick={() => onReject(section.key)}
-                disabled={Boolean(runningAction)}
-                className="px-4 py-2 rounded-lg border border-orange-800 text-orange-300 hover:border-orange-600 disabled:border-gray-800 disabled:text-gray-600 text-sm transition-colors"
-              >
-                {rejecting ? 'Rejecting...' : 'Reject'}
-              </button>
-            )}
-            {section.secondaryAction && section.secondaryAction.href !== section.primaryAction?.href && (
-              <Link
-                href={section.secondaryAction.href.startsWith('/') ? section.secondaryAction.href : `/projects/${projectId}/${section.secondaryAction.href}`}
-                className="px-4 py-2 rounded-lg border border-gray-700 text-gray-300 hover:border-gray-500 text-sm transition-colors"
-              >
-                {section.secondaryAction.label}
-              </Link>
-            )}
-          </div>
-        )}
+    <div>
+      <div className="win95-row" style={{ marginBottom: 6, justifyContent: 'space-between' }}>
+        <h2 className="win95-section-title" style={{ margin: 0 }}>
+          {section.number.toString().padStart(2, '0')}. {section.title}
+        </h2>
+        <Win95StatusBadge status={statusTone(section.status)}>
+          {prettyStatus(section.status)}
+        </Win95StatusBadge>
       </div>
+      <p className="win95-section-desc">{section.purpose}</p>
 
-      <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div>
-          <h3 className="text-xs uppercase tracking-widest text-gray-600 mb-2">Required Inputs</h3>
-          <ul className="space-y-1">
+      {locked && (
+        <div className="win95-empty" style={{ marginBottom: 12 }}>
+          {section.key === 'project_setup' ? (
+            <>
+              <div style={{ marginBottom: 8 }}>
+                <strong>Nothing to type on this screen.</strong> Title and path were set when you uploaded the song.
+              </div>
+              <div>
+                {section.needs ||
+                  'Use the left sidebar → open Lyrics Transcription & Timestamping → run Prepare audio, then vocals, then align/transcribe. After that, this stage unlocks with a Review setup button.'}
+              </div>
+            </>
+          ) : section.needs ? (
+            `Locked until prerequisites are met: ${section.needs}`
+          ) : (
+            'This stage is locked. Complete and approve earlier stages first.'
+          )}
+        </div>
+      )}
+
+      {(section.primaryAction || section.secondaryAction || section.canApprove || section.canReject) && (
+        <div className="win95-row" style={{ marginBottom: 12 }}>
+          {section.primaryAction?.href && (
+            <Link
+              href={`/projects/${projectId}/${section.primaryAction.href}`}
+              className="win95-btn win95-btn-link win95-btn-primary"
+            >
+              {section.primaryAction.label}
+            </Link>
+          )}
+          {section.primaryAction?.run && (
+            <Win95Button
+              variant="primary"
+              onClick={() => onRun(section.primaryAction!.run!, section.primaryAction!.confirm)}
+              disabled={Boolean(runningAction)}
+            >
+              {actionRunning ? 'Starting…' : section.primaryAction.label}
+            </Win95Button>
+          )}
+          {section.canApprove && (
+            <Win95Button
+              onClick={() => onApprove(section.key)}
+              disabled={Boolean(runningAction)}
+            >
+              {approving ? 'Approving…' : 'Approve'}
+            </Win95Button>
+          )}
+          {section.canReject && (
+            <Win95Button
+              onClick={() => onReject(section.key)}
+              disabled={Boolean(runningAction)}
+            >
+              {rejecting ? 'Rejecting…' : 'Reject'}
+            </Win95Button>
+          )}
+          {section.secondaryAction && section.secondaryAction.href !== section.primaryAction?.href && (
+            <Link
+              href={
+                section.secondaryAction.href.startsWith('/')
+                  ? section.secondaryAction.href
+                  : `/projects/${projectId}/${section.secondaryAction.href}`
+              }
+              className="win95-btn win95-btn-link"
+            >
+              {section.secondaryAction.label}
+            </Link>
+          )}
+          {runningAction && !actionRunning && !approving && !rejecting && (
+            <span className="win95-muted">Busy: {runningAction}…</span>
+          )}
+        </div>
+      )}
+
+      {section.warning && (
+        <Win95Alert tone="warn" title="Cost / quality warning">
+          {section.warning}
+        </Win95Alert>
+      )}
+
+      <div className="win95-grid-2">
+        <Win95GroupBox title="Required Inputs">
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
             {section.required.map(item => (
-              <li key={item} className="text-sm text-gray-400">{item}</li>
+              <li key={item} style={{ marginBottom: 4 }}>{item}</li>
             ))}
           </ul>
-        </div>
-        <div className="md:col-span-2">
-          <h3 className="text-xs uppercase tracking-widest text-gray-600 mb-2">Generated Output</h3>
-          <p className="text-sm text-gray-300 break-words">{section.output}</p>
+        </Win95GroupBox>
+        <Win95GroupBox title="Generated Output">
+          <p style={{ margin: 0, wordBreak: 'break-word' }}>{section.output}</p>
           {section.needs && (
-            <p className="mt-2 text-sm text-yellow-300">Needs: {section.needs}</p>
+            <p style={{ margin: '8px 0 0', color: 'var(--win-warn)' }}>
+              Needs: {section.needs}
+            </p>
           )}
-          {section.warning && (
-            <p className="mt-2 text-sm text-amber-300">{section.warning}</p>
-          )}
-        </div>
+        </Win95GroupBox>
       </div>
-    </section>
+    </div>
   )
 }

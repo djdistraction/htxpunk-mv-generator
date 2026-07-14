@@ -6,7 +6,49 @@ Update this file when the active workflow, major branch, project direction, or n
 
 ## Current date
 
-2026-07-09
+2026-07-14
+
+## Product model (2026-07-14 — read this)
+
+**Shared foundation first. Lyric Video is the first deliverable. Other formats branch from the same foundation.**
+
+- Foundation = song file + rhythm/key + timestamped lyrics + title/artist/metadata + optional brief/references.
+- Foundation must be **editable** (not locked “required” fields with no inputs).
+- Master **Lyric Video** end-to-end before investing in full cinematic quality.
+- After lyric video exists, user can **enable Karaoke / Performance / Cinematic** without re-uploading or re-transcribing.
+- See `docs/decision-log.md` entry **2026-07-14: Shared foundation first**.
+
+APIs: `POST /api/projects/{id}/foundation`, `POST /api/projects/{id}/production-paths/add`.
+
+## UI skin (2026-07-11)
+
+Branch `cursor/win95-app-shell` (based on `claude/lyric-video-v1`) applies the
+Claude Design Win95 utility look across the app:
+
+- App chrome: title bar, menu bar, toolbar, status bar (`frontend/components/win95/AppShell.tsx`)
+- Primitives: buttons, group boxes, progress, alerts, modal
+- Project library, new project, settings, and workbook detail reskinned natively
+- Workbook detail uses a left **PRODUCTION PIPELINE** sidebar (select one stage at a time)
+- **Native Win95 stage pages (follow-up same day):** treatment, elements, storyboard,
+  production, review, processing; manifest shell updated; remaining dark-class markup
+  still softened by `.win95-content` CSS compatibility layer
+
+### Lyric Video polish (same branch)
+
+- Faster polling while `assembling_lyric_video` / other busy stages run
+- Success banners after approve/run actions; auto-advance sidebar after approve
+- Production Review handles lyric render stage, clearer approve-final UX
+- Confirm-info also marks `song_file` approved so Generate lyric video unlocks without a redundant gate click
+- Default new-project path is **Lyric Video**
+
+Visual direction: sturdy Windows 95 control-panel utility, not modern AI SaaS.
+
+### Recommended when Randall returns
+
+1. Open PR from `cursor/win95-app-shell` → `main` (compare URL + body in `docs/pr-win95-lyric-checklist.md`).
+2. Run the Lyric Video smoke checklist in that doc.
+3. Merge only after pass criteria are green.
+4. Next product slice after merge: Karaoke path (same module), not full cinematic rework.
 
 ## Project goal (read this first)
 
@@ -35,7 +77,8 @@ were deleted after PR #19 and PR #22 landed.
 - Issue #20: `Build production-workbook pipeline interface with editable gated stages` — Phase 1 (workbook shell, explicit one-step actions) shipped via PR #22. PR #31 (Codex, `codex/issue-20-workbook-shell`) adds the rest of the list from PR #22's "still open" note: persisted workbook section statuses with approve/reject controls, per-asset (element/storyboard image) approve/reject gates, an editable shot-manifest workflow (import, add, edit, delete, preflight), and a base-video/final-export split (`base_video_url` stored separately, final approval selects `final_video_url`). Still open after #31: duplicate/timeline validation, token preflight checks, and the lip-sync half of the base/lip-sync split (see #27).
 - Issue #29: `Five production paths` — PR #31 implements the core of this: a production-path chooser (Lyric, Karaoke, Performance, Cinematic, or a hybrid of any two) at project creation, persisted and editable during Project Setup review, included in the creative context driving song analysis and downstream planning. The composable-module architecture proposed in `docs/decision-log.md` still needs validating against how the different paths actually render/assemble differently, not just how they're selected.
 - Issue #24: reference images/text were structurally invisible past the treatment stage. Part A (thread `reference_notes` through the whole pipeline) shipped in PR #28. Part B (vision-model captioning) not started.
-- Issue #25: lyrics upload + `aeneas` forced alignment. Feasibility proven (real working proof-of-concept). Not started. Load-bearing for the Lyric Video and Karaoke Video paths, not just a transcription-quality fix.
+- Issue #25: lyrics upload + `aeneas` forced alignment. Shipped (`159f28f`, PR #34; install/Python-3.12+/Windows-compiler fixes in PR #35). Backend (`services/lyrics_aligner.py`, `POST /guided/align-lyrics`) is done and tested. Still open: the guided frontend flow doesn't call it yet — `ProjectDetail.tsx` always dispatches Whisper transcription regardless of `project.user_lyrics_text`. See `docs/lyric-karaoke-module-implementation-plan.md`.
+- Randall's direction (2026-07-10): stop building all five paths at once. Get **Lyric Video** working end-to-end first (one stage at a time, each verified before the next), then Karaoke, then scale up. Modal/lip-sync is explicitly out of scope until there's an approved base video — preserving the 30-min free-tier budget. See `docs/lyric-karaoke-module-implementation-plan.md` for the active build order; treat it as the current priority over other issue work below until it's done.
 - Issue #26: double-dispatch race in the workbook's manual worker endpoints (found in review on #22, merged unaddressed, fixed separately in PR #26, merged).
 - Issue #27 (assigned to Codex, in progress): split base video generation from optional lip-sync into separate approval-gated stages. PR #31 splits base video from final export; the optional-lip-sync-as-its-own-gate half is still in progress — Codex was mid-way through it (`Add optional lip sync review gate`) when the July 15 unavailability window started.
 

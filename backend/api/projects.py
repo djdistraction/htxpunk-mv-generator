@@ -1,12 +1,15 @@
 import json
+import logging
 import re
 import tempfile
+import threading
+import traceback
 import uuid
 from pathlib import Path
 import httpx
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel
-from models.project import ProjectCreate, ProjectInfoConfirm
+from models.project import ProjectCreate, ProjectInfoConfirm, FoundationUpdate, ProductionPathAdd
 from database import (
     db_list_projects, db_create_project, db_get_project, db_update_project,
     db_create_asset, db_get_assets, db_delete_project, db_get_last_task,
@@ -16,6 +19,7 @@ from utils.storage import upload_bytes, upload_file_path, url_to_local_path, del
 from services.workbook_status import get_section_statuses, set_section_status, validate_section_key
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 ALLOWED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".mp4"}
 ALLOWED_PRODUCTION_PATHS = {"lyric", "karaoke", "performance", "cinematic"}
@@ -37,11 +41,13 @@ def _validate_audio_file(filename: str | None):
         )
 
 
-def _normalize_production_paths(raw) -> list[str]:
-    """Validate the selected music-video path.
+def _normalize_production_paths(raw, *, max_paths: int = 4) -> list[str]:
+    """Validate music-video format module(s) enabled on this project.
 
-    A project can use one base path or a hybrid of any two:
-    lyric, karaoke, performance, cinematic.
+    Foundation (audio/lyrics/rhythm) is always shared. Formats can accumulate
+    over the project lifetime (Lyric first, then Karaoke/Cinematic/etc.) per
+    decision-log 2026-07-14. Creation UI still defaults to Lyric-only; hybrids
+    at create time remain allowed up to max_paths.
     """
     if isinstance(raw, str):
         try:
@@ -67,8 +73,11 @@ def _normalize_production_paths(raw) -> list[str]:
         )
     if not paths:
         raise HTTPException(status_code=400, detail="Select at least one production path.")
-    if len(paths) > 2:
-        raise HTTPException(status_code=400, detail="Select one path or a hybrid of any two paths.")
+    if len(paths) > max_paths:
+        raise HTTPException(
+            status_code=400,
+            detail=f"At most {max_paths} production formats can be enabled on one project.",
+        )
     return paths
 
 
@@ -99,6 +108,53 @@ def _set_guided_failure(project_id: str, step: str, exc: Exception):
 
 def _mark_generated(project_id: str, section_key: str, message: str):
     set_section_status(project_id, section_key, "generated", message=message)
+
+
+# ── Guided step background dispatch ───────────────────────────────────────────
+#
+# guided/* steps (vocal isolation, transcription, alignment, audio prep,
+# metadata reads) do real CPU/IO work — a full song through the vocal
+# separator or Whisper can take minutes. Running that inline in an `async
+# def` route handler blocks FastAPI's single event loop for the whole
+# duration: confirmed directly (see testing-notes/2026-07-10-pipeline-run.md)
+# that a plain GET /health on a separate connection hung until an unrelated
+# isolate-vocals call finished. Every other request — including the
+# frontend's own project-state polling — starves the same way, which is what
+# produced "Project not found" during a still-in-progress job.
+#
+# Mirrors pipeline.py's _start_manual_worker: fast preconditions are checked
+# synchronously by the caller before dispatch (so bad requests still fail
+# fast with a real error), the slow work runs in a background thread, and
+# section_statuses' existing "running" state (already rendered distinctly in
+# the workbook UI) is what the frontend's existing 5s poll picks up — no new
+# job-tracking mechanism needed since one already exists for this purpose.
+_guided_in_flight: set[str] = set()
+_guided_lock = threading.Lock()
+
+
+def _start_guided_worker(project_id: str, step_name: str, target_section: str, work_fn):
+    """Run a slow guided-workflow step in a background thread."""
+    with _guided_lock:
+        if project_id in _guided_in_flight:
+            raise HTTPException(status_code=409, detail="This project already has a guided step running.")
+        _guided_in_flight.add(project_id)
+
+    set_section_status(project_id, target_section, "running", message=f"{step_name} in progress…")
+
+    def _run():
+        try:
+            work_fn()
+        except Exception as exc:
+            logger.error("[Guided] FAILED %s -> project %s:\n%s", step_name, project_id, traceback.format_exc())
+            detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+            _set_guided_failure(project_id, step_name, RuntimeError(str(detail)))
+            set_section_status(project_id, target_section, "failed", error=str(detail))
+        finally:
+            with _guided_lock:
+                _guided_in_flight.discard(project_id)
+
+    threading.Thread(target=_run, daemon=True, name=f"guided-{step_name}").start()
+    return {"message": f"{step_name} started"}
 
 
 _TEXT_EXTENSIONS = {".txt", ".md", ".markdown", ".rtf", ".csv"}
@@ -316,7 +372,10 @@ async def guided_analyze_rhythm_key(project_id: str, payload: dict):
 @router.post("/{project_id}/guided/prepare-audio")
 async def guided_prepare_audio(project_id: str):
     project = _get_project_or_404(project_id)
-    try:
+    if not project.get("audio_url"):
+        raise HTTPException(status_code=400, detail="Upload a song before preparing audio.")
+
+    def _work():
         from services.audio_preprocessor import convert_to_mp3
         original_path = _local_audio_path(project.get("audio_url"), ".audio")
         original_ext = Path(original_path).suffix.lower()
@@ -328,16 +387,17 @@ async def guided_prepare_audio(project_id: str):
         action = "Source was already MP3. Conversion skipped; file copied." if original_ext == ".mp3" else "Source converted to MP3."
         db_update_project(project_id, converted_audio_url=converted_url, stage="audio_prepared", processing_step=action, error_message="")
         _mark_generated(project_id, "song_file", "Prepared audio is ready.")
-        return {"project": db_get_project(project_id), "result": {"action": action, "converted_audio_url": converted_url}}
-    except Exception as exc:
-        _set_guided_failure(project_id, "Prepare Project Audio", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+
+    return _start_guided_worker(project_id, "Prepare Project Audio", "song_file", _work)
 
 
 @router.post("/{project_id}/guided/read-metadata")
 async def guided_read_metadata(project_id: str):
     project = _get_project_or_404(project_id)
-    try:
+    if not project.get("converted_audio_url"):
+        raise HTTPException(status_code=400, detail="Prepare project audio before reading metadata.")
+
+    def _work():
         from services.audio_preprocessor import extract_metadata_tags
         mp3_path = _local_audio_path(project.get("converted_audio_url"), ".mp3")
         tags = extract_metadata_tags(mp3_path)
@@ -353,27 +413,26 @@ async def guided_read_metadata(project_id: str):
             error_message="",
         )
         _mark_generated(project_id, "project_setup", "Metadata was read and is ready for setup review.")
-        return {"project": db_get_project(project_id), "result": tags}
-    except Exception as exc:
-        _set_guided_failure(project_id, "Read Metadata Tags", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+
+    return _start_guided_worker(project_id, "Read Metadata Tags", "project_setup", _work)
 
 
 @router.post("/{project_id}/guided/isolate-vocals")
 async def guided_isolate_vocals(project_id: str):
     project = _get_project_or_404(project_id)
-    try:
+
+    def _work():
         existing = db_get_assets(project_id, asset_type="vocal_stem")
         if existing:
             db_update_project(project_id, stage="vocals_ready", processing_step="Vocal stem already available", error_message="")
             _mark_generated(project_id, "song_file", "Vocal stem is ready.")
-            return {"project": db_get_project(project_id), "result": {"action": "Existing vocal stem reused."}}
+            return
 
         if project.get("user_vocals_url"):
             db_create_asset(project_id, "vocal_stem", "User-provided vocal stem", project["user_vocals_url"], "", source="user")
             db_update_project(project_id, stage="vocals_ready", processing_step="Using user-provided vocal stem", error_message="")
             _mark_generated(project_id, "song_file", "User-provided vocal stem is ready.")
-            return {"project": db_get_project(project_id), "result": {"action": "User-provided vocal stem used."}}
+            return
 
         from services.audio_preprocessor import separate_vocals
         mp3_path = _local_audio_path(project.get("converted_audio_url"), ".mp3")
@@ -386,33 +445,26 @@ async def guided_isolate_vocals(project_id: str):
         db_create_asset(project_id, "vocal_stem", "Generated vocal stem", vocals_url, "", source="generated")
         db_update_project(project_id, stage="vocals_ready", processing_step="Vocal stem isolated", error_message="")
         _mark_generated(project_id, "song_file", "Generated vocal stem is ready.")
-        return {"project": db_get_project(project_id), "result": {"action": "Vocal stem isolated.", "url": vocals_url}}
-    except Exception as exc:
-        _set_guided_failure(project_id, "Isolate Vocal Stem", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+
+    return _start_guided_worker(project_id, "Isolate Vocal Stem", "song_file", _work)
 
 
 @router.post("/{project_id}/guided/transcribe-lyrics")
 async def guided_transcribe_lyrics(project_id: str):
     project = _get_project_or_404(project_id)
-    try:
-        from services.audio_analyzer import transcribe_audio
-        vocal_assets = db_get_assets(project_id, asset_type="vocal_stem")
-        vocals_url = vocal_assets[-1].get("url") if vocal_assets else ""
-        if not vocals_url:
-            vocals_url = project.get("user_vocals_url") or ""
-        if not vocals_url:
-            raise RuntimeError("No vocal stem is available. Run Isolate Vocal Stem first.")
+    vocal_assets = db_get_assets(project_id, asset_type="vocal_stem")
+    vocals_url = (vocal_assets[-1].get("url") if vocal_assets else "") or project.get("user_vocals_url") or ""
+    if not vocals_url:
+        raise HTTPException(status_code=400, detail="No vocal stem is available. Run Isolate Vocal Stem first.")
 
+    def _work():
+        from services.audio_analyzer import transcribe_audio
         vocals_path = _local_audio_path(vocals_url, Path(vocals_url).suffix or ".audio")
         transcript = transcribe_audio(vocals_path)
-        segment_count = len(transcript.get("segments", [])) if isinstance(transcript, dict) else 0
         db_update_project(project_id, transcript=transcript, stage="awaiting_project_info_review", processing_step="Transcription complete", error_message="")
         _mark_generated(project_id, "lyrics", "Timestamped lyrics generated. Review and approve before song analysis.")
-        return {"project": db_get_project(project_id), "result": {"segments": segment_count}}
-    except Exception as exc:
-        _set_guided_failure(project_id, "Transcribe & Timestamp Lyrics", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+
+    return _start_guided_worker(project_id, "Transcribe & Timestamp Lyrics", "lyrics", _work)
 
 
 class LyricsAlignRequest(BaseModel):
@@ -432,30 +484,26 @@ async def guided_align_lyrics(project_id: str, payload: LyricsAlignRequest | Non
     downstream needs to know which path ran.
     """
     project = _get_project_or_404(project_id)
-    try:
-        lyrics_text = ((payload.lyrics_text if payload else None) or project.get("user_lyrics_text") or "").strip()
-        if not lyrics_text:
-            raise RuntimeError("No lyrics text provided. Paste or upload lyrics first.")
-        if payload and payload.lyrics_text and payload.lyrics_text.strip() != (project.get("user_lyrics_text") or "").strip():
-            db_update_project(project_id, user_lyrics_text=lyrics_text)
+    lyrics_text = ((payload.lyrics_text if payload else None) or project.get("user_lyrics_text") or "").strip()
+    if not lyrics_text:
+        raise HTTPException(status_code=400, detail="No lyrics text provided. Paste or upload lyrics first.")
+    if payload and payload.lyrics_text and payload.lyrics_text.strip() != (project.get("user_lyrics_text") or "").strip():
+        db_update_project(project_id, user_lyrics_text=lyrics_text)
 
-        vocal_assets = db_get_assets(project_id, asset_type="vocal_stem")
-        vocals_url = vocal_assets[-1].get("url") if vocal_assets else ""
-        if not vocals_url:
-            vocals_url = project.get("user_vocals_url") or ""
-        if not vocals_url:
-            raise RuntimeError("No vocal stem is available. Run Isolate Vocal Stem first.")
+    vocal_assets = db_get_assets(project_id, asset_type="vocal_stem")
+    vocals_url = (vocal_assets[-1].get("url") if vocal_assets else "") or project.get("user_vocals_url") or ""
+    if not vocals_url:
+        raise HTTPException(status_code=400, detail="No vocal stem is available. Run Isolate Vocal Stem first.")
 
+    def _work():
         vocals_path = _local_audio_path(vocals_url, Path(vocals_url).suffix or ".audio")
         from services.lyrics_aligner import align_lyrics
         segments = align_lyrics(vocals_path, lyrics_text)
         transcript = {"segments": segments}
         db_update_project(project_id, transcript=transcript, stage="awaiting_project_info_review", processing_step="Lyric alignment complete", error_message="")
         _mark_generated(project_id, "lyrics", "Timestamped lyrics aligned from your provided text. Review and approve before song analysis.")
-        return {"project": db_get_project(project_id), "result": {"segments": len(segments)}}
-    except Exception as exc:
-        _set_guided_failure(project_id, "Align Lyrics", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+
+    return _start_guided_worker(project_id, "Align Lyrics", "lyrics", _work)
 
 
 @router.get("/{project_id}/references")
@@ -485,6 +533,85 @@ async def upload_audio(project_id: str, file: UploadFile = File(...)):
     db_update_project(project_id, audio_url=audio_url, stage="audio_uploaded", error_message="", processing_step="Upload complete")
     _mark_generated(project_id, "song_file", "Song file uploaded and ready for review.")
     return {"audio_url": audio_url, "message": "Audio uploaded. Continue with Analyze Rhythm & Key."}
+
+
+@router.post("/{project_id}/foundation")
+async def update_foundation(project_id: str, payload: FoundationUpdate):
+    """Edit shared foundation fields without requiring the one-shot review gate.
+
+    Title, artist, BPM/key, transcript lines, and brief are foundation data for
+    every video format — users must be able to correct them anytime after upload.
+    """
+    project = db_get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if not project.get("audio_url"):
+        raise HTTPException(status_code=400, detail="Upload a song before editing foundation fields.")
+
+    updates = payload.model_dump(exclude_unset=True)
+    if "brief" in updates:
+        updates["user_brief"] = updates.pop("brief")
+    if updates:
+        db_update_project(project_id, **updates)
+    project = db_get_project(project_id)
+    if project.get("title") or project.get("artist"):
+        set_section_status(project_id, "project_setup", "generated", message="Foundation fields updated.")
+    if project.get("bpm") or project.get("musical_key") or project.get("beat_grid"):
+        set_section_status(project_id, "rhythm_key", "generated", message="Rhythm/key foundation updated.")
+    if project.get("transcript"):
+        set_section_status(project_id, "lyrics", "generated", message="Lyrics foundation updated.")
+    return db_get_project(project_id)
+
+
+@router.post("/{project_id}/production-paths/add")
+async def add_production_path(project_id: str, payload: ProductionPathAdd):
+    """Enable another video format that reuses this project's foundation.
+
+    Does not re-run upload, rhythm, or lyrics. Used after Lyric Video (or any
+    foundation-ready state) to branch into Karaoke / Performance / Cinematic.
+    """
+    project = db_get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    new_path = str(payload.path or "").strip().lower()
+    if new_path not in ALLOWED_PRODUCTION_PATHS:
+        raise HTTPException(status_code=400, detail=f"Unsupported production path: {new_path}")
+
+    existing = list(project.get("production_paths") or [])
+    if new_path in existing:
+        return {"project": project, "message": f"Format '{new_path}' is already enabled.", "added": False}
+
+    # Foundation gate: need song + some lyric or rhythm signal so we don't
+    # enable cinematic on an empty shell.
+    if not project.get("audio_url"):
+        raise HTTPException(status_code=400, detail="Upload a song before enabling more formats.")
+    has_foundation = bool(
+        project.get("transcript")
+        or project.get("bpm")
+        or project.get("converted_audio_url")
+        or project.get("stage") in (
+            "awaiting_project_info_review", "info_confirmed", "base_video_ready",
+            "assembling_lyric_video", "complete",
+        )
+    )
+    if not has_foundation:
+        raise HTTPException(
+            status_code=400,
+            detail="Finish foundation steps (rhythm and/or lyrics) before enabling another format.",
+        )
+
+    merged = _normalize_production_paths(existing + [new_path], max_paths=4)
+    db_update_project(project_id, production_paths=merged)
+    project = db_get_project(project_id)
+    return {
+        "project": project,
+        "message": (
+            f"Enabled '{new_path}'. Shared foundation (song, rhythm, lyrics) is reused — "
+            "continue with that format's generation stages; do not re-upload the song."
+        ),
+        "added": True,
+    }
 
 
 @router.post("/{project_id}/confirm-info")
@@ -525,6 +652,11 @@ async def confirm_project_info(project_id: str, payload: ProjectInfoConfirm):
     )
     db_update_project(project_id, project_folder=folder, stage="info_confirmed")
     set_section_status(project_id, "project_setup", "approved", message="Project setup approved.")
+    # Song file is present by definition at this gate — mark approved so the
+    # workbook's Final Video / Lyric Video action unlocks without a second
+    # redundant "Approve Song File" click after Confirm & Continue.
+    if project.get("audio_url"):
+        set_section_status(project_id, "song_file", "approved", message="Song file confirmed with project setup.")
     if project.get("transcript"):
         set_section_status(project_id, "lyrics", "approved", message="Timestamped lyrics approved.")
     if project.get("bpm") or project.get("musical_key") or project.get("beat_grid"):

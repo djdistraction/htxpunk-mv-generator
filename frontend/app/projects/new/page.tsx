@@ -2,7 +2,17 @@
 
 import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { api } from '@/lib/api'
+import {
+  Win95Alert,
+  Win95Button,
+  Win95GroupBox,
+  Win95Input,
+  Win95Label,
+  Win95Progress,
+  Win95Textarea,
+} from '@/components/win95/Win95Primitives'
 
 const PRODUCTION_PATHS = [
   {
@@ -33,7 +43,7 @@ export default function NewProjectPage() {
   const vocalsInputRef = useRef<HTMLInputElement>(null)
   const lyricsInputRef = useRef<HTMLInputElement>(null)
   const [title, setTitle] = useState('')
-  const [productionPaths, setProductionPaths] = useState<string[]>(['cinematic'])
+  const [productionPaths, setProductionPaths] = useState<string[]>(['lyric'])
   const [file, setFile] = useState<File | null>(null)
   const [hasVocalStems, setHasVocalStems] = useState(false)
   const [vocalsFile, setVocalsFile] = useState<File | null>(null)
@@ -92,238 +102,214 @@ export default function NewProjectPage() {
 
   if (uploading) {
     return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center p-8">
-        <div className="max-w-md w-full text-center">
-          <h1 className="text-xl font-semibold mb-6">Uploading song</h1>
-          <div className="w-full h-2 bg-gray-800 rounded-full overflow-hidden">
-            <div className="h-full bg-purple-600 transition-all duration-500 ease-out" style={{ width: '50%' }} />
-          </div>
-          <p className="text-gray-600 text-sm mt-4">
-            The app is saving the original file and selected production path. Rhythm, key, metadata, vocals, and lyrics will run as separate steps on the project page.
-          </p>
-          {error && (
-            <div className="mt-6 bg-red-900/30 border border-red-700 rounded-lg p-3 text-red-300 text-sm">
-              {error}
-            </div>
-          )}
-        </div>
+      <div className="win95-page">
+        <h1 className="win95-page-title">Uploading song</h1>
+        <p className="win95-page-sub">
+          Saving the original file and selected production path. Rhythm, key, metadata, vocals, and lyrics run as separate steps on the project workbook.
+        </p>
+        <Win95Progress value={50} label="Upload in progress" />
+        {error && (
+          <Win95Alert tone="error" title="Upload failed">{error}</Win95Alert>
+        )}
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-black text-white p-8">
-      <div className="max-w-xl mx-auto">
-        <a href="/" className="text-purple-400 text-sm hover:underline">← Back to projects</a>
+    <div className="win95-page">
+      <div className="win95-page-header">
+        <div>
+          <h1 className="win95-page-title">New Music Video Project</h1>
+          <p className="win95-page-sub">
+            Choose a production path and upload the song. The workbook walks through each processing step with its own review gate.
+          </p>
+        </div>
+        <Link href="/" className="win95-btn win95-btn-link">← Projects</Link>
+      </div>
 
-        <h1 className="text-3xl font-bold mt-6 mb-2">New Music Video</h1>
-        <p className="text-gray-400 mb-8">
-          Start by choosing the production path and uploading the song. The project page will walk through each processing step one at a time with its own result and retry point.
-        </p>
-
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">Project Name *</label>
-            <input
-              type="text"
+      <form onSubmit={handleSubmit} className="win95-stack">
+        <Win95GroupBox title="Project">
+          <Win95Label>
+            Project Name *
+            <Win95Input
               value={title}
               onChange={e => setTitle(e.target.value)}
               required
               placeholder="e.g. Midnight Run"
-              className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
             />
-          </div>
+          </Win95Label>
+        </Win95GroupBox>
 
-          <div>
-            <div className="flex items-center justify-between gap-4 mb-2">
-              <label className="block text-sm font-medium text-gray-300">Production Path *</label>
-              <span className={`text-xs ${productionPaths.length === 2 ? 'text-yellow-300' : 'text-gray-500'}`}>
-                Choose one, or combine any two
-              </span>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {PRODUCTION_PATHS.map(path => {
-                const selected = productionPaths.includes(path.key)
-                const disabled = !selected && productionPaths.length >= 2
-                return (
-                  <label
-                    key={path.key}
-                    className={`block border rounded-lg p-4 transition-colors ${
-                      selected
-                        ? 'bg-purple-950/50 border-purple-600'
-                        : disabled
-                          ? 'bg-gray-900/40 border-gray-800 opacity-50 cursor-not-allowed'
-                          : 'bg-gray-900 border-gray-700 hover:border-purple-500 cursor-pointer'
-                    }`}
-                  >
-                    <div className="flex items-start gap-3">
-                      <input
-                        type="checkbox"
-                        checked={selected}
-                        disabled={disabled}
-                        onChange={() => toggleProductionPath(path.key)}
-                        className="mt-1"
-                      />
-                      <div>
-                        <div className="font-semibold text-white">{path.label}</div>
-                        <p className="text-gray-500 text-sm mt-1 leading-relaxed">{path.description}</p>
-                      </div>
+        <Win95GroupBox title="Production Path *">
+          <p className="win95-muted" style={{ marginTop: 0, marginBottom: 10 }}>
+            Start with <strong>Lyric Video</strong> (recommended). Song, rhythm, and lyrics become a shared
+            foundation; you can enable Karaoke, Performance, or Cinematic later on the same project without
+            re-uploading. You may still select up to two formats at create time if you want.
+            {productionPaths.length === 2 ? ' (2 selected at create — more can be added later)' : ''}
+          </p>
+          <div className="win95-grid-2">
+            {PRODUCTION_PATHS.map(path => {
+              const selected = productionPaths.includes(path.key)
+              const disabled = !selected && productionPaths.length >= 2
+              return (
+                <label
+                  key={path.key}
+                  className={`win95-path-card ${selected ? 'is-selected' : ''} ${disabled ? 'is-disabled' : ''}`}
+                >
+                  <div className="win95-row" style={{ alignItems: 'flex-start' }}>
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      disabled={disabled}
+                      onChange={() => toggleProductionPath(path.key)}
+                      style={{ marginTop: 2 }}
+                    />
+                    <div>
+                      <div className="win95-path-card-title">{path.label}</div>
+                      <div className="win95-path-card-desc">{path.description}</div>
                     </div>
-                  </label>
-                )
-              })}
-            </div>
-            {productionPaths.length === 0 && (
-              <p className="text-red-300 text-sm mt-2">Select at least one production path.</p>
+                  </div>
+                </label>
+              )
+            })}
+          </div>
+          {productionPaths.length === 0 && (
+            <p style={{ color: 'var(--win-danger)', marginBottom: 0 }}>Select at least one production path.</p>
+          )}
+        </Win95GroupBox>
+
+        <Win95GroupBox title="Audio File *">
+          <div className="win95-dropzone" onClick={() => fileInputRef.current?.click()}>
+            {file ? (
+              <>
+                <div className="win95-strong">{file.name}</div>
+                <div className="win95-muted">{(file.size / 1024 / 1024).toFixed(1)} MB</div>
+              </>
+            ) : (
+              <>
+                <div className="win95-strong">Click to select audio file</div>
+                <div className="win95-muted">MP3, WAV, or MP4 supported</div>
+              </>
             )}
           </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".wav,.mp3,.mp4,audio/wav,audio/mpeg,video/mp4"
+            style={{ display: 'none' }}
+            onChange={e => setFile(e.target.files?.[0] || null)}
+          />
+        </Win95GroupBox>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">Audio File *</label>
-            <div
-              onClick={() => fileInputRef.current?.click()}
-              className="w-full bg-gray-900 border-2 border-dashed border-gray-700 rounded-lg p-8 text-center cursor-pointer hover:border-purple-500 transition-colors"
-            >
-              {file ? (
-                <div>
-                  <div className="text-white font-medium">{file.name}</div>
-                  <div className="text-gray-500 text-sm">{(file.size / 1024 / 1024).toFixed(1)} MB</div>
-                </div>
-              ) : (
-                <div>
-                  <div className="text-gray-500 text-4xl mb-2">↑</div>
-                  <div className="text-gray-400">Click to select audio file</div>
-                  <div className="text-gray-600 text-sm mt-1">MP3, WAV, or MP4 supported</div>
-                </div>
-              )}
-            </div>
+        <Win95GroupBox title="Optional inputs">
+          <label className="win95-row" style={{ alignItems: 'flex-start', marginBottom: 8 }}>
             <input
-              ref={fileInputRef}
-              type="file"
-              accept=".wav,.mp3,.mp4,audio/wav,audio/mpeg,video/mp4"
-              className="hidden"
-              onChange={e => setFile(e.target.files?.[0] || null)}
+              type="checkbox"
+              checked={hasVocalStems}
+              onChange={e => {
+                setHasVocalStems(e.target.checked)
+                if (!e.target.checked) setVocalsFile(null)
+              }}
+              style={{ marginTop: 2 }}
             />
-          </div>
-
-          <div>
-            <label className="flex items-start gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={hasVocalStems}
-                onChange={e => { setHasVocalStems(e.target.checked); if (!e.target.checked) setVocalsFile(null) }}
-                className="mt-1"
-              />
-              <span className="text-sm text-gray-300">
-                I already have an isolated vocal stems file
-                <span className="text-gray-500 font-normal block text-xs mt-0.5">
-                  The guided workflow will use it and skip vocal isolation.
-                </span>
+            <span>
+              <span className="win95-strong">I already have an isolated vocal stems file</span>
+              <span className="win95-muted" style={{ display: 'block' }}>
+                The guided workflow will use it and skip vocal isolation.
               </span>
-            </label>
+            </span>
+          </label>
 
-            {hasVocalStems && (
-              <div className="mt-3">
-                <label className="block text-sm font-medium text-gray-300 mb-1">Vocal Stems File *</label>
-                <div
-                  onClick={() => vocalsInputRef.current?.click()}
-                  className="w-full bg-gray-900 border-2 border-dashed border-gray-700 rounded-lg p-6 text-center cursor-pointer hover:border-purple-500 transition-colors"
-                >
-                  {vocalsFile ? (
-                    <div>
-                      <div className="text-white font-medium">{vocalsFile.name}</div>
-                      <div className="text-gray-500 text-sm">{(vocalsFile.size / 1024 / 1024).toFixed(1)} MB</div>
-                    </div>
-                  ) : (
-                    <div>
-                      <div className="text-gray-500 text-2xl mb-1">↑</div>
-                      <div className="text-gray-400 text-sm">Click to select vocal stems file</div>
-                      <div className="text-gray-600 text-xs mt-1">MP3, WAV, or MP4 supported</div>
-                    </div>
-                  )}
-                </div>
-                <input
-                  ref={vocalsInputRef}
-                  type="file"
-                  accept=".wav,.mp3,.mp4,audio/wav,audio/mpeg,video/mp4"
-                  className="hidden"
-                  onChange={e => setVocalsFile(e.target.files?.[0] || null)}
-                />
+          {hasVocalStems && (
+            <div style={{ marginBottom: 12 }}>
+              <div className="win95-dropzone" onClick={() => vocalsInputRef.current?.click()}>
+                {vocalsFile ? (
+                  <>
+                    <div className="win95-strong">{vocalsFile.name}</div>
+                    <div className="win95-muted">{(vocalsFile.size / 1024 / 1024).toFixed(1)} MB</div>
+                  </>
+                ) : (
+                  <>
+                    <div className="win95-strong">Click to select vocal stems file</div>
+                    <div className="win95-muted">MP3, WAV, or MP4 supported</div>
+                  </>
+                )}
               </div>
-            )}
-          </div>
-
-          <div>
-            <label className="flex items-start gap-2 cursor-pointer">
               <input
-                type="checkbox"
-                checked={hasLyrics}
-                onChange={e => { setHasLyrics(e.target.checked); if (!e.target.checked) setLyricsText('') }}
-                className="mt-1"
+                ref={vocalsInputRef}
+                type="file"
+                accept=".wav,.mp3,.mp4,audio/wav,audio/mpeg,video/mp4"
+                style={{ display: 'none' }}
+                onChange={e => setVocalsFile(e.target.files?.[0] || null)}
               />
-              <span className="text-sm text-gray-300">
-                I have the exact lyrics
-                <span className="text-gray-500 font-normal block text-xs mt-0.5">
-                  The guided workflow will time-align this text against the vocal stem instead of transcribing with Whisper — more accurate than auto-transcription.
-                </span>
-              </span>
-            </label>
+            </div>
+          )}
 
-            {hasLyrics && (
-              <div className="mt-3 space-y-2">
-                <textarea
-                  value={lyricsText}
-                  onChange={e => setLyricsText(e.target.value)}
-                  placeholder={'Paste lyrics here, one line per line...'}
-                  rows={6}
-                  className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 font-mono text-sm"
-                />
-                <button
-                  type="button"
-                  onClick={() => lyricsInputRef.current?.click()}
-                  className="text-purple-400 text-sm hover:underline"
-                >
-                  Or upload a .txt file
-                </button>
+          <label className="win95-row" style={{ alignItems: 'flex-start' }}>
+            <input
+              type="checkbox"
+              checked={hasLyrics}
+              onChange={e => {
+                setHasLyrics(e.target.checked)
+                if (!e.target.checked) setLyricsText('')
+              }}
+              style={{ marginTop: 2 }}
+            />
+            <span>
+              <span className="win95-strong">I have the exact lyrics</span>
+              <span className="win95-muted" style={{ display: 'block' }}>
+                Time-align this text against the vocal stem instead of Whisper transcription — usually more accurate.
+              </span>
+            </span>
+          </label>
+
+          {hasLyrics && (
+            <div style={{ marginTop: 10 }}>
+              <Win95Textarea
+                value={lyricsText}
+                onChange={e => setLyricsText(e.target.value)}
+                placeholder="Paste lyrics here, one line per line…"
+                rows={6}
+                style={{ fontFamily: 'var(--win-mono)' }}
+              />
+              <div style={{ marginTop: 6 }}>
+                <Win95Button type="button" onClick={() => lyricsInputRef.current?.click()}>
+                  Upload .txt lyrics file…
+                </Win95Button>
                 <input
                   ref={lyricsInputRef}
                   type="file"
                   accept=".txt,text/plain"
-                  className="hidden"
+                  style={{ display: 'none' }}
                   onChange={e => handleLyricsFile(e.target.files?.[0] || null)}
                 />
               </div>
-            )}
-          </div>
-
-          {error && (
-            <div className="bg-red-900/30 border border-red-700 rounded-lg p-3 text-red-300 text-sm">
-              {error}
             </div>
           )}
+        </Win95GroupBox>
 
-          <button
-            type="submit"
-            disabled={!canSubmit}
-            className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold py-3 rounded-lg transition-colors"
-          >
-            Upload Song
-          </button>
-        </form>
+        {error && (
+          <Win95Alert tone="error" title="Could not create project">{error}</Win95Alert>
+        )}
 
-        <div className="mt-8 p-4 bg-gray-900 rounded-lg border border-gray-800">
-          <h3 className="text-sm font-semibold text-gray-300 mb-2">Guided Pipeline</h3>
-          <ol className="text-gray-500 text-sm space-y-1 list-decimal list-inside">
-            <li>Upload song</li>
-            <li>Analyze rhythm and key</li>
-            <li>Prepare project audio</li>
-            <li>Read metadata tags</li>
-            <li>Isolate vocal stem</li>
-            <li>Transcribe and timestamp lyrics (or align your provided lyrics)</li>
-            <li>Review song info and continue to creative generation</li>
-          </ol>
+        <div className="win95-row">
+          <Win95Button type="submit" disabled={!canSubmit} variant="primary">
+            Upload Song & Create Project
+          </Win95Button>
+          <Link href="/" className="win95-btn win95-btn-link">Cancel</Link>
         </div>
-      </div>
+      </form>
+
+      <Win95GroupBox title="Guided pipeline after upload">
+        <ol style={{ margin: 0, paddingLeft: 18, color: 'var(--win-muted)' }}>
+          <li>Analyze rhythm and key</li>
+          <li>Prepare project audio</li>
+          <li>Read metadata tags</li>
+          <li>Isolate vocal stem (or use yours)</li>
+          <li>Transcribe/align lyrics with timestamps</li>
+          <li>Approve stages, then generate the video for your production path</li>
+        </ol>
+      </Win95GroupBox>
     </div>
   )
 }

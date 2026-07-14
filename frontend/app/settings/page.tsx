@@ -1,134 +1,132 @@
-'use client';
+'use client'
 
-import { useState, useEffect } from 'react';
-import Link from 'next/link';
-import { ArrowLeft, Check, X, RotateCcw } from 'lucide-react';
+import { useState, useEffect } from 'react'
+import Link from 'next/link'
+import {
+  Win95Alert,
+  Win95Button,
+  Win95GroupBox,
+  Win95Input,
+  Win95Label,
+  Win95Select,
+  Win95StatusBadge,
+} from '@/components/win95/Win95Primitives'
 
 export default function SettingsPage() {
-  const [groqKey, setGroqKey] = useState('');
-  const [cloudflareAccountId, setCloudflareAccountId] = useState('');
-  const [cloudflareApiToken, setCloudflareApiToken] = useState('');
-  const [videoBackend, setVideoBackend] = useState<'ffmpeg' | 'modal'>('ffmpeg');
-  const [allowFallbackVideo, setAllowFallbackVideo] = useState(false);
-  const [modalTokenId, setModalTokenId] = useState('');
-  const [modalTokenSecret, setModalTokenSecret] = useState('');
-  const [groqStatus, setGroqStatus] = useState<'idle' | 'validating' | 'valid' | 'invalid'>('idle');
-  const [cloudflareStatus, setCloudflareStatus] = useState<'idle' | 'validating' | 'valid' | 'invalid'>('idle');
-  const [message, setMessage] = useState('');
-  const [isElectron] = useState(() => typeof window !== 'undefined' && !!(window as any).electron);
+  const [groqKey, setGroqKey] = useState('')
+  const [cloudflareAccountId, setCloudflareAccountId] = useState('')
+  const [cloudflareApiToken, setCloudflareApiToken] = useState('')
+  const [videoBackend, setVideoBackend] = useState<'ffmpeg' | 'modal'>('ffmpeg')
+  const [allowFallbackVideo, setAllowFallbackVideo] = useState(false)
+  const [modalTokenId, setModalTokenId] = useState('')
+  const [modalTokenSecret, setModalTokenSecret] = useState('')
+  const [groqStatus, setGroqStatus] = useState<'idle' | 'validating' | 'valid' | 'invalid'>('idle')
+  const [cloudflareStatus, setCloudflareStatus] = useState<'idle' | 'validating' | 'valid' | 'invalid'>('idle')
+  const [message, setMessage] = useState('')
+  const [isElectron] = useState(() => typeof window !== 'undefined' && !!(window as any).electron)
 
   useEffect(() => {
-    loadConfig();
-  }, []);
+    loadConfig()
+  }, [])
 
   async function loadConfig() {
-    if (!(window as any).electron) return;
+    if (!(window as any).electron) return
     try {
-      const config = await (window as any).electron.getConfig();
-      if (config.groqApiKey) setGroqKey(config.groqApiKey);
-      if (config.cloudflareAccountId) setCloudflareAccountId(config.cloudflareAccountId);
-      if (config.cloudflareApiToken) setCloudflareApiToken(config.cloudflareApiToken);
-      if (config.videoBackend) setVideoBackend(config.videoBackend);
-      setAllowFallbackVideo(Boolean(config.allowFallbackVideo));
-      if (config.modalTokenId) setModalTokenId(config.modalTokenId);
-      if (config.modalTokenSecret) setModalTokenSecret(config.modalTokenSecret);
+      const config = await (window as any).electron.getConfig()
+      if (config.groqApiKey) setGroqKey(config.groqApiKey)
+      if (config.cloudflareAccountId) setCloudflareAccountId(config.cloudflareAccountId)
+      if (config.cloudflareApiToken) setCloudflareApiToken(config.cloudflareApiToken)
+      if (config.videoBackend) setVideoBackend(config.videoBackend)
+      setAllowFallbackVideo(Boolean(config.allowFallbackVideo))
+      if (config.modalTokenId) setModalTokenId(config.modalTokenId)
+      if (config.modalTokenSecret) setModalTokenSecret(config.modalTokenSecret)
     } catch (err) {
-      console.error('Failed to load config:', err);
+      console.error('Failed to load config:', err)
     }
   }
 
   async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 5000) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
     try {
-      return await fetch(url, { ...options, signal: controller.signal });
+      return await fetch(url, { ...options, signal: controller.signal })
     } finally {
-      clearTimeout(timeoutId);
+      clearTimeout(timeoutId)
     }
   }
 
-  // Validation is proxied through the backend (POST /api/settings/validate-*)
-  // rather than fetched directly from the browser. Confirmed real bug: a
-  // direct browser fetch to Groq/Cloudflare's API from this page (served at
-  // http://127.0.0.1:3000) is blocked by CORS — neither provider sends
-  // Access-Control-Allow-Origin for arbitrary origins — so validation always
-  // failed here regardless of whether the credentials were actually valid.
-  // A server-to-server call isn't subject to CORS at all.
   async function testGroqKey(key: string) {
-    if (!key) return false;
+    if (!key) return false
     try {
       const response = await fetchWithTimeout('/api/settings/validate-groq', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ api_key: key }),
-      }, 8000);
-      if (!response.ok) return false;
-      const data = await response.json();
-      return data.valid === true;
+      }, 8000)
+      if (!response.ok) return false
+      const data = await response.json()
+      return data.valid === true
     } catch {
-      return false;
+      return false
     }
   }
 
   async function testCloudflareCreds(accountId: string, apiToken: string) {
-    if (!accountId || !apiToken) return false;
+    if (!accountId || !apiToken) return false
     try {
       const response = await fetchWithTimeout('/api/settings/validate-cloudflare', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ account_id: accountId, api_token: apiToken }),
-      }, 8000);
-      if (!response.ok) return false;
-      const data = await response.json();
-      return data.valid === true;
+      }, 8000)
+      if (!response.ok) return false
+      const data = await response.json()
+      return data.valid === true
     } catch {
-      return false;
+      return false
     }
   }
 
   async function validateGroq() {
     if (!groqKey) {
-      setGroqStatus('invalid');
-      return;
+      setGroqStatus('invalid')
+      return
     }
-    setGroqStatus('validating');
-    const valid = await testGroqKey(groqKey);
-    setGroqStatus(valid ? 'valid' : 'invalid');
+    setGroqStatus('validating')
+    const valid = await testGroqKey(groqKey)
+    setGroqStatus(valid ? 'valid' : 'invalid')
   }
 
   async function validateCloudflare() {
     if (!cloudflareAccountId || !cloudflareApiToken) {
-      setCloudflareStatus('idle');
-      return;
+      setCloudflareStatus('idle')
+      return
     }
-    setCloudflareStatus('validating');
-    const valid = await testCloudflareCreds(cloudflareAccountId, cloudflareApiToken);
-    setCloudflareStatus(valid ? 'valid' : 'invalid');
+    setCloudflareStatus('validating')
+    const valid = await testCloudflareCreds(cloudflareAccountId, cloudflareApiToken)
+    setCloudflareStatus(valid ? 'valid' : 'invalid')
   }
 
   async function save() {
     if (!groqKey) {
-      setMessage('Groq API key is required');
-      return;
+      setMessage('Groq API key is required')
+      return
     }
     if (!cloudflareAccountId || !cloudflareApiToken) {
-      setMessage('Cloudflare Account ID and API Token are required');
-      return;
+      setMessage('Cloudflare Account ID and API Token are required')
+      return
     }
-
     if (groqStatus !== 'valid') {
-      setMessage('Please validate the Groq API key first');
-      return;
+      setMessage('Please validate the Groq API key first')
+      return
     }
-
     if (cloudflareStatus !== 'valid') {
-      setMessage('Please validate the Cloudflare credentials first');
-      return;
+      setMessage('Please validate the Cloudflare credentials first')
+      return
     }
-
     if (!isElectron) {
-      setMessage('Settings saving only works in the Electron app');
-      return;
+      setMessage('Settings saving only works in the Electron app. For browser/dev mode, edit the root .env file instead.')
+      return
     }
 
     try {
@@ -140,210 +138,174 @@ export default function SettingsPage() {
         allowFallbackVideo,
         modalTokenId,
         modalTokenSecret,
-      };
-      await (window as any).electron.saveConfig(config);
-      setMessage('Settings saved! Restart the app for changes to take effect.');
+      }
+      await (window as any).electron.saveConfig(config)
+      setMessage('Settings saved! Restart the app for changes to take effect.')
     } catch (err: any) {
-      setMessage(`Save failed: ${err.message}`);
+      setMessage(`Save failed: ${err.message}`)
     }
   }
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 text-white p-6">
-      <div className="max-w-2xl mx-auto">
-        {/* Header */}
-        <div className="flex items-center gap-3 mb-8">
-          <Link href="/" className="hover:text-purple-400 transition">
-            <ArrowLeft className="w-6 h-6" />
-          </Link>
-          <h1 className="text-3xl font-bold">API Settings</h1>
-        </div>
+  const statusBadge = (status: typeof groqStatus) => {
+    if (status === 'valid') return <Win95StatusBadge status="ok">Valid</Win95StatusBadge>
+    if (status === 'invalid') return <Win95StatusBadge status="error">Invalid</Win95StatusBadge>
+    if (status === 'validating') return <Win95StatusBadge status="running">Checking…</Win95StatusBadge>
+    return <Win95StatusBadge status="muted">Not checked</Win95StatusBadge>
+  }
 
-        {/* Message */}
-        {message && (
-          <div className="mb-6 p-4 rounded-lg bg-blue-500/20 border border-blue-500/50 text-blue-200">
-            {message}
-          </div>
+  return (
+    <div className="win95-page">
+      <div className="win95-page-header">
+        <div>
+          <h1 className="win95-page-title">API Settings</h1>
+          <p className="win95-page-sub">
+            Configure keys used for analysis and image generation. Changes in the desktop app require a restart.
+          </p>
+        </div>
+        <Link href="/" className="win95-btn win95-btn-link">← Projects</Link>
+      </div>
+
+      {!isElectron && (
+        <Win95Alert tone="info" title="Browser / development mode">
+          You are not running inside the Electron desktop app. Validation still works through the backend proxy.
+          To persist keys for local web mode, edit the project root <code>.env</code> file.
+        </Win95Alert>
+      )}
+
+      {message && (
+        <Win95Alert tone="info" title="Notice" onDismiss={() => setMessage('')}>
+          {message}
+        </Win95Alert>
+      )}
+
+      <Win95GroupBox title="Groq API Key *">
+        <div className="win95-row" style={{ marginBottom: 8 }}>
+          {statusBadge(groqStatus)}
+          <Win95Button onClick={validateGroq} disabled={groqStatus === 'validating'}>
+            {groqStatus === 'validating' ? 'Validating…' : 'Validate'}
+          </Win95Button>
+        </div>
+        <Win95Label>
+          Key
+          <Win95Input
+            type="password"
+            placeholder="gsk_..."
+            value={groqKey}
+            onChange={e => {
+              setGroqKey(e.target.value)
+              setGroqStatus('idle')
+            }}
+          />
+        </Win95Label>
+        <p className="win95-muted" style={{ margin: 0 }}>
+          Get your key at{' '}
+          <a href="https://console.groq.com" target="_blank" rel="noopener noreferrer">
+            console.groq.com
+          </a>
+          . Required for song analysis and treatment generation.
+        </p>
+      </Win95GroupBox>
+
+      <Win95GroupBox title="Cloudflare Workers AI *">
+        <div className="win95-row" style={{ marginBottom: 8 }}>
+          {statusBadge(cloudflareStatus)}
+          <Win95Button
+            onClick={validateCloudflare}
+            disabled={cloudflareStatus === 'validating' || !cloudflareAccountId || !cloudflareApiToken}
+          >
+            {cloudflareStatus === 'validating' ? 'Validating…' : 'Validate'}
+          </Win95Button>
+        </div>
+        <Win95Label>
+          Account ID
+          <Win95Input
+            type="text"
+            placeholder="32-character hex string"
+            value={cloudflareAccountId}
+            onChange={e => {
+              setCloudflareAccountId(e.target.value)
+              setCloudflareStatus('idle')
+            }}
+          />
+        </Win95Label>
+        <Win95Label>
+          API Token
+          <Win95Input
+            type="password"
+            placeholder="Workers AI API Token"
+            value={cloudflareApiToken}
+            onChange={e => {
+              setCloudflareApiToken(e.target.value)
+              setCloudflareStatus('idle')
+            }}
+          />
+        </Win95Label>
+        <p className="win95-muted" style={{ margin: 0 }}>
+          From{' '}
+          <a href="https://dash.cloudflare.com" target="_blank" rel="noopener noreferrer">
+            dash.cloudflare.com
+          </a>
+          . Token needs <strong>Account · Workers AI · Edit</strong>. Free daily image allowance, no credit card.
+        </p>
+      </Win95GroupBox>
+
+      <Win95GroupBox title="Video Backend">
+        <Win95Label>
+          Backend
+          <Win95Select
+            value={videoBackend}
+            onChange={e => setVideoBackend(e.target.value as 'ffmpeg' | 'modal')}
+          >
+            <option value="ffmpeg">FFmpeg (Ken Burns slideshow — preview only)</option>
+            <option value="modal">Modal (AI image-to-video + lip-sync)</option>
+          </Win95Select>
+        </Win95Label>
+
+        {videoBackend === 'ffmpeg' && (
+          <label className="win95-row" style={{ alignItems: 'flex-start' }}>
+            <input
+              type="checkbox"
+              checked={allowFallbackVideo}
+              onChange={e => setAllowFallbackVideo(e.target.checked)}
+              style={{ marginTop: 2 }}
+            />
+            <span className="win95-muted">
+              Enable Ken Burns preview rendering. Off by default so the app fails clearly instead of
+              silently producing a slideshow when you asked for a real music video.
+            </span>
+          </label>
         )}
 
-        {/* Settings Card */}
-        <div className="bg-gray-800/50 backdrop-blur border border-gray-700 rounded-xl p-6 space-y-6">
-          {/* Groq Key */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="font-semibold text-lg">Groq API Key *</label>
-              <button
-                onClick={validateGroq}
-                className={`px-4 py-2 rounded-lg font-medium transition flex items-center gap-2 ${
-                  groqStatus === 'validating'
-                    ? 'bg-yellow-500/30 text-yellow-200 cursor-wait'
-                    : groqStatus === 'valid'
-                      ? 'bg-green-500/30 text-green-200'
-                      : groqStatus === 'invalid'
-                        ? 'bg-red-500/30 text-red-200'
-                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                }`}
-                disabled={groqStatus === 'validating'}
-              >
-                {groqStatus === 'validating' && <RotateCcw className="w-4 h-4 animate-spin" />}
-                {groqStatus === 'valid' && <Check className="w-4 h-4" />}
-                {groqStatus === 'invalid' && <X className="w-4 h-4" />}
-                {groqStatus === 'idle' || groqStatus === 'validating' ? 'Validate' : groqStatus === 'valid' ? 'Valid' : 'Invalid'}
-              </button>
-            </div>
-            <input
-              type="password"
-              placeholder="gsk_..."
-              value={groqKey}
-              onChange={(e) => {
-                setGroqKey(e.target.value);
-                setGroqStatus('idle');
-              }}
-              className="w-full px-4 py-3 rounded-lg bg-gray-700/50 border border-gray-600 focus:border-purple-500 focus:outline-none transition text-white placeholder-gray-400"
-            />
-            <p className="text-sm text-gray-400">
-              Get your key at{' '}
-              <a href="https://console.groq.com" target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:underline">
-                console.groq.com
-              </a>
-              . Required for text analysis.
-            </p>
-          </div>
+        {videoBackend === 'modal' && (
+          <>
+            <Win95Label>
+              Modal Token ID
+              <Win95Input
+                type="text"
+                placeholder="Modal Token ID"
+                value={modalTokenId}
+                onChange={e => setModalTokenId(e.target.value)}
+              />
+            </Win95Label>
+            <Win95Label>
+              Modal Token Secret
+              <Win95Input
+                type="password"
+                placeholder="Modal Token Secret"
+                value={modalTokenSecret}
+                onChange={e => setModalTokenSecret(e.target.value)}
+              />
+            </Win95Label>
+          </>
+        )}
+      </Win95GroupBox>
 
-          {/* Cloudflare Credentials */}
-          <div className="space-y-3 pt-4 border-t border-gray-700">
-            <div className="flex items-center justify-between">
-              <label className="font-semibold text-lg">Cloudflare Credentials *</label>
-              <button
-                onClick={validateCloudflare}
-                className={`px-4 py-2 rounded-lg font-medium transition flex items-center gap-2 ${
-                  cloudflareStatus === 'validating'
-                    ? 'bg-yellow-500/30 text-yellow-200 cursor-wait'
-                    : cloudflareStatus === 'valid'
-                      ? 'bg-green-500/30 text-green-200'
-                      : cloudflareStatus === 'invalid'
-                        ? 'bg-red-500/30 text-red-200'
-                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                }`}
-                disabled={cloudflareStatus === 'validating' || !cloudflareAccountId || !cloudflareApiToken}
-              >
-                {cloudflareStatus === 'validating' && <RotateCcw className="w-4 h-4 animate-spin" />}
-                {cloudflareStatus === 'valid' && <Check className="w-4 h-4" />}
-                {cloudflareStatus === 'invalid' && <X className="w-4 h-4" />}
-                {cloudflareStatus === 'idle' || cloudflareStatus === 'validating' ? 'Validate' : cloudflareStatus === 'valid' ? 'Valid' : 'Invalid'}
-              </button>
-            </div>
-            <input
-              type="text"
-              placeholder="Account ID (32-character hex string)"
-              value={cloudflareAccountId}
-              onChange={(e) => {
-                setCloudflareAccountId(e.target.value);
-                setCloudflareStatus('idle');
-              }}
-              className="w-full px-4 py-3 rounded-lg bg-gray-700/50 border border-gray-600 focus:border-purple-500 focus:outline-none transition text-white placeholder-gray-400"
-            />
-            <input
-              type="password"
-              placeholder="Workers AI API Token"
-              value={cloudflareApiToken}
-              onChange={(e) => {
-                setCloudflareApiToken(e.target.value);
-                setCloudflareStatus('idle');
-              }}
-              className="w-full px-4 py-3 rounded-lg bg-gray-700/50 border border-gray-600 focus:border-purple-500 focus:outline-none transition text-white placeholder-gray-400"
-            />
-            <p className="text-sm text-gray-400">
-              Get both at{' '}
-              <a href="https://dash.cloudflare.com" target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:underline">
-                dash.cloudflare.com
-              </a>
-              . Account ID is in the Workers &amp; Pages sidebar; create the token under My Profile → API Tokens with <strong>Account · Workers AI · Edit</strong> permission. Free daily image generation allowance, no credit card.
-            </p>
-          </div>
-
-          {/* Video backend / Modal (optional, advanced) */}
-          <div className="space-y-3 pt-4 border-t border-gray-700">
-            <label className="font-semibold text-lg">Video Backend</label>
-            <select
-              value={videoBackend}
-              onChange={(e) => setVideoBackend(e.target.value as 'ffmpeg' | 'modal')}
-              className="w-full px-4 py-3 rounded-lg bg-gray-700/50 border border-gray-600 focus:border-purple-500 focus:outline-none transition text-white"
-            >
-              <option value="ffmpeg">FFmpeg (Ken Burns slideshow — preview only)</option>
-              <option value="modal">Modal (AI image-to-video + lip-sync, serverless GPU)</option>
-            </select>
-            {videoBackend === 'ffmpeg' && (
-              <div className="space-y-2">
-                <label className="flex items-start gap-2 text-sm text-gray-300">
-                  <input
-                    type="checkbox"
-                    checked={allowFallbackVideo}
-                    onChange={(e) => setAllowFallbackVideo(e.target.checked)}
-                    className="mt-1"
-                  />
-                  <span>
-                    Enable Ken Burns preview rendering. Off by default so the app fails
-                    with a clear error instead of silently producing a slideshow when
-                    you asked for a real AI-generated music video. Leave this unchecked
-                    unless you specifically want a $0 preview/smoke-test render.
-                  </span>
-                </label>
-              </div>
-            )}
-            {videoBackend === 'modal' && (
-              <>
-                <input
-                  type="text"
-                  placeholder="Modal Token ID"
-                  value={modalTokenId}
-                  onChange={(e) => setModalTokenId(e.target.value)}
-                  className="w-full px-4 py-3 rounded-lg bg-gray-700/50 border border-gray-600 focus:border-purple-500 focus:outline-none transition text-white placeholder-gray-400"
-                />
-                <input
-                  type="password"
-                  placeholder="Modal Token Secret"
-                  value={modalTokenSecret}
-                  onChange={(e) => setModalTokenSecret(e.target.value)}
-                  className="w-full px-4 py-3 rounded-lg bg-gray-700/50 border border-gray-600 focus:border-purple-500 focus:outline-none transition text-white placeholder-gray-400"
-                />
-                <p className="text-sm text-gray-400">
-                  Run <code className="bg-black/40 px-1 rounded">modal token new</code> on this machine to get both values, or find them at{' '}
-                  <a href="https://modal.com/settings/tokens" target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:underline">
-                    modal.com/settings/tokens
-                  </a>.
-                </p>
-              </>
-            )}
-          </div>
-
-          {/* Save Button */}
-          <div className="pt-4 border-t border-gray-700">
-            <button
-              onClick={save}
-              disabled={groqStatus !== 'valid'}
-              className={`w-full py-3 rounded-lg font-semibold transition ${
-                groqStatus !== 'valid'
-                  ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                  : 'bg-gradient-to-r from-purple-600 to-pink-600 text-white hover:from-purple-700 hover:to-pink-700'
-              }`}
-            >
-              Save Settings
-            </button>
-            <p className="text-xs text-gray-500 mt-2 text-center">
-              Note: You'll need to restart the app for changes to take effect.
-            </p>
-          </div>
-
-          {!isElectron && (
-            <div className="p-4 rounded-lg bg-yellow-500/20 border border-yellow-500/50 text-yellow-200">
-              <p className="text-sm">
-                ⚠️ Settings saving only works when running the Electron desktop app. In web mode, edit your .env file directly.
-              </p>
-            </div>
-          )}
-        </div>
+      <div className="win95-row">
+        <Win95Button variant="primary" onClick={save}>
+          Save Settings
+        </Win95Button>
+        <Link href="/" className="win95-btn win95-btn-link">Cancel</Link>
       </div>
     </div>
-  );
+  )
 }
