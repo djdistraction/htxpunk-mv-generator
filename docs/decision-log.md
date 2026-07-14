@@ -4,6 +4,17 @@ This document records product and architecture decisions that future agents must
 
 Use this file to prevent Claude Code, Codex, GitHub Copilot, Cursor, or future maintainers from rediscovering old decisions and accidentally reversing them.
 
+## 2026-07-14: Studio v2 greenfield + visual element locking
+
+Decision:
+
+- Primary product work moves to greenfield `studio/` (job-based production desk).
+- Legacy workbook is not the long-term UX.
+- **Element image locking:** storyboard frames are built with real approved element
+  stills as visual references (composite / image-conditioned generation), not text IDs alone.
+- Modal lip sync remains final polish after approved base video; protect free minutes.
+- Linked motion: start/end frame chaining where supported; stills backbone + hero I2V for free-GPU budget.
+
 ## 2026-07-14: Shared foundation first; Lyric Video is the first deliverable
 
 Decision (supersedes "2026-07-09: Production path is chosen once, at project creation" for workflow shape):

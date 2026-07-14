@@ -8,6 +8,22 @@ Update this file when the active workflow, major branch, project direction, or n
 
 2026-07-14
 
+## Studio v2 (greenfield — primary product path going forward)
+
+Branch: `studio/v2-foundation`
+
+Randall approved a **fresh production desk** (`studio/`) rather than more patches
+to the legacy workbook as the long-term UI.
+
+- Spec: `docs/studio-v2/`
+- Run: `py run-studio.py` → UI :3010, API :8010
+- Jobs with live progress; foundation steps separately retryable
+- Full spine: foundation → treatment → **element images as visual locks** →
+  storyboard (refs) → linked clips → **Modal lip sync last**
+- Phase 1 scaffolded: upload, prepare audio, isolate vocals, align/transcribe lyrics
+
+Legacy `frontend/` + `backend/` remain until cutover.
+
 ## Product model (2026-07-14 — read this)
 
 **Shared foundation first. Lyric Video is the first deliverable. Other formats branch from the same foundation.**
