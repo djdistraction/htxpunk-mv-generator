@@ -33,6 +33,33 @@ app.add_middleware(
 db.init_db()
 app.mount("/files", StaticFiles(directory=str(STORAGE)), name="files")
 
+_AUDIO_EXTS = {".wav", ".mp3", ".mp4", ".m4a", ".flac", ".ogg"}
+
+
+def _safe_name(name: str | None) -> str:
+    base = Path(name or "audio.bin").name
+    return base.replace("..", "_") or "audio.bin"
+
+
+async def _save_upload(upload: UploadFile, dest: Path) -> Path:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with dest.open("wb") as f:
+        shutil.copyfileobj(upload.file, f)
+    if not dest.is_file() or dest.stat().st_size < 64:
+        raise HTTPException(400, f"Uploaded file empty or too small: {dest.name}")
+    return dest
+
+
+def _assert_audio_filename(filename: str | None, label: str) -> None:
+    if not filename:
+        raise HTTPException(400, f"{label} filename missing")
+    ext = Path(filename).suffix.lower()
+    if ext not in _AUDIO_EXTS:
+        raise HTTPException(
+            400,
+            f"{label} must be audio ({', '.join(sorted(_AUDIO_EXTS))}), got '{ext or 'no extension'}'",
+        )
+
 
 class FoundationPatch(BaseModel):
     title: Optional[str] = None
@@ -66,24 +93,62 @@ async def create_project(
     artist: str = Form(""),
     file: UploadFile = File(...),
     lyrics_text: str = Form(""),
+    vocals_file: Optional[UploadFile] = File(None),
 ):
-    if not file.filename:
-        raise HTTPException(400, "Audio file required")
+    """Create project with full mix. Optional pre-isolated vocal stem skips CPU separation."""
+    _assert_audio_filename(file.filename, "Song file")
     proj = db.create_project(title.strip() or "Untitled", artist.strip())
     pid = proj["id"]
-    dest = db.project_dir(pid) / "audio" / Path(file.filename).name
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    with dest.open("wb") as f:
-        shutil.copyfileobj(file.file, f)
+    dest = db.project_dir(pid) / "audio" / _safe_name(file.filename)
+    await _save_upload(file, dest)
     updates: dict[str, Any] = {
         "audio_url": str(dest),
         "stage": "song_ready",
+        "vocals_source": None,
     }
     if lyrics_text.strip():
         updates["user_lyrics_text"] = lyrics_text.strip()
+
+    # Pre-existing vocal stem: store and mark vocals step done (skip isolate job).
+    if vocals_file is not None and vocals_file.filename:
+        _assert_audio_filename(vocals_file.filename, "Vocal stem")
+        vdest = db.project_dir(pid) / "vocals" / f"uploaded_{_safe_name(vocals_file.filename)}"
+        await _save_upload(vocals_file, vdest)
+        updates["vocals_url"] = str(vdest)
+        updates["vocals_source"] = "uploaded"
+        updates["stage"] = "vocals_ready"
+
     db.update_project(pid, **updates)
     db.set_step(pid, "song", "needs_review")
+    if updates.get("vocals_url"):
+        db.set_step(pid, "vocals", "approved")
     return db.get_project(pid)
+
+
+@app.post("/api/projects/{project_id}/vocals")
+async def upload_vocals_stem(project_id: str, vocals_file: UploadFile = File(...)):
+    """Attach a pre-isolated vocal stem and skip CPU vocal separation.
+
+    Stores the file as vocals_url with vocals_source=uploaded so align/transcribe
+    use it directly. Prefer a clean mono/stereo vocal-only file (wav/mp3).
+    """
+    proj = db.get_project(project_id)
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    if not proj.get("audio_url"):
+        raise HTTPException(400, "Upload the full song before attaching a vocal stem.")
+    _assert_audio_filename(vocals_file.filename, "Vocal stem")
+    vdest = db.project_dir(project_id) / "vocals" / f"uploaded_{_safe_name(vocals_file.filename)}"
+    await _save_upload(vocals_file, vdest)
+    db.update_project(
+        project_id,
+        vocals_url=str(vdest),
+        vocals_source="uploaded",
+        stage="vocals_ready",
+        error_message=None,
+    )
+    db.set_step(project_id, "vocals", "approved")
+    return db.get_project(project_id)
 
 
 @app.get("/api/projects/{project_id}")

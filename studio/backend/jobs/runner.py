@@ -105,9 +105,18 @@ def job_isolate_vocals(job_id: str, project_id: str) -> None:
     from services.audio_preprocessor import separate_vocals  # type: ignore
 
     proj = db.get_project(project_id)
+
+    # If user already uploaded a stem, isolation is unnecessary.
+    existing = proj.get("vocals_url")
+    if existing and Path(str(existing)).is_file() and proj.get("vocals_source") == "uploaded":
+        _progress(job_id, 100, "Using uploaded vocal stem — isolation skipped")
+        db.set_step(project_id, "vocals", "approved")
+        db.update_project(project_id, stage="vocals_ready", error_message=None)
+        return
+
     src = proj.get("converted_audio_url") or proj.get("audio_url")
     if not src or not Path(src).is_file():
-        raise RuntimeError("Prepare project audio first (converted MP3).")
+        raise RuntimeError("Prepare project audio first (converted MP3), or upload a vocal stem file.")
 
     db.set_step(project_id, "vocals", "running")
     _progress(job_id, 5, "Loading vocal separation model (CPU — can take several minutes)…")
@@ -134,7 +143,13 @@ def job_isolate_vocals(job_id: str, project_id: str) -> None:
         raise RuntimeError(f"Vocal stem not written: {vocals_path}")
 
     _progress(job_id, 95, "Saving vocal stem…")
-    db.update_project(project_id, vocals_url=str(vocals_path), stage="vocals_ready")
+    db.update_project(
+        project_id,
+        vocals_url=str(vocals_path),
+        vocals_source="isolated",
+        stage="vocals_ready",
+        error_message=None,
+    )
     db.set_step(project_id, "vocals", "approved")
     _progress(job_id, 100, "Vocal stem ready — you can align or transcribe lyrics next")
 

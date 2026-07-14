@@ -90,6 +90,7 @@ def create_project(title: str, artist: str = "") -> dict[str, Any]:
         "audio_url": None,
         "converted_audio_url": None,
         "vocals_url": None,
+        "vocals_source": None,  # "uploaded" | "isolated" | None
         "bpm": None,
         "musical_key": None,
         "beat_grid": [],
@@ -133,7 +134,7 @@ def update_project(project_id: str, **fields: Any) -> dict[str, Any]:
     artist = fields.pop("artist", proj["artist"])
     # known top-level columns vs data blob
     data_keys = {
-        "stage", "steps", "audio_url", "converted_audio_url", "vocals_url",
+        "stage", "steps", "audio_url", "converted_audio_url", "vocals_url", "vocals_source",
         "bpm", "musical_key", "beat_grid", "transcript", "user_lyrics_text",
         "analysis", "treatment", "elements", "storyboard",
         "base_video_url", "lipsynced_video_url", "final_video_url", "error_message",

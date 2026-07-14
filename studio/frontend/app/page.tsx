@@ -10,6 +10,7 @@ export default function HomePage() {
   const [online, setOnline] = useState<boolean | null>(null)
   const [title, setTitle] = useState("")
   const [file, setFile] = useState<File | null>(null)
+  const [vocalsFile, setVocalsFile] = useState<File | null>(null)
   const [lyrics, setLyrics] = useState("")
   const [busy, setBusy] = useState(false)
 
@@ -39,7 +40,7 @@ export default function HomePage() {
     setBusy(true)
     setError("")
     try {
-      const p = await studioApi.createProject(title.trim(), file, lyrics)
+      const p = await studioApi.createProject(title.trim(), file, lyrics, "", vocalsFile)
       window.location.href = `/projects/${p.id}`
     } catch (e: any) {
       setError(e.message || "Create failed")
@@ -71,9 +72,17 @@ export default function HomePage() {
             <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Song title" />
           </label>
           <label>
-            Audio file *
-            <input type="file" accept="audio/*,.mp3,.wav,.mp4" onChange={e => setFile(e.target.files?.[0] || null)} />
+            Full mix (song) *
+            <input type="file" accept="audio/*,.mp3,.wav,.mp4,.m4a,.flac" onChange={e => setFile(e.target.files?.[0] || null)} />
           </label>
+          <label>
+            Isolated vocal stem (optional — strongly recommended if you have it)
+            <input type="file" accept="audio/*,.mp3,.wav,.mp4,.m4a,.flac" onChange={e => setVocalsFile(e.target.files?.[0] || null)} />
+          </label>
+          <p className="muted">
+            If you upload a pre-separated vocal file, Studio skips CPU vocal isolation (the usual bottleneck)
+            and uses your stem for lyric align/transcribe. Full mix is still required for the final video audio.
+          </p>
           <label>
             Exact lyrics (optional — enables force-align later)
             <textarea rows={5} value={lyrics} onChange={e => setLyrics(e.target.value)} placeholder="One line per line…" />

@@ -27,6 +27,8 @@ Open http://localhost:3010
 ## Phases
 
 - **Phase 1 (this scaffold):** jobs + foundation upload/rhythm/vocals/lyrics  
+- **Optional pre-isolated vocal stem** on create or on the Vocals step — skips CPU isolation when provided  
+
 - **Phase 2:** lyric video render  
 - **Phase 3–6:** treatment → element images (visual lock) → storyboard → linked clips → Modal lip sync  
 

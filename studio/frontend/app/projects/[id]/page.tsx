@@ -168,25 +168,71 @@ export default function ProjectConsole() {
       )
     }
     if (step === "vocals") {
+      const source = project.vocals_source === "uploaded"
+        ? "uploaded file (isolation skipped)"
+        : project.vocals_source === "isolated"
+          ? "auto-isolated on CPU"
+          : "none"
       return (
         <fieldset className="group">
-          <legend>Vocal stem (separate step — always retryable)</legend>
+          <legend>Vocal stem</legend>
           <p className="muted">
-            CPU separation can take many minutes. Watch the Activity panel for live progress.
-            If this fails, stay here and click Retry — do not skip to lyrics without a stem if you want force-align.
+            Prefer uploading a stem you already have — that skips the slow CPU isolation step.
+            Isolation is only needed when you do not have a separate vocal file.
           </p>
-          <p>Stem: {project.vocals_url ? "ready" : "not created"}</p>
+          <p>
+            Status: <strong>{project.vocals_url ? "ready" : "missing"}</strong>
+            {project.vocals_url ? ` · source: ${source}` : ""}
+          </p>
           {project.vocals_url && (
             <code style={{ wordBreak: "break-all", display: "block", marginBottom: 8 }}>{project.vocals_url}</code>
           )}
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled={busy || jobRunning}
-            onClick={() => startJob("isolate_vocals")}
-          >
-            {project.vocals_url ? "Retry isolate vocals" : "Isolate vocals"}
-          </button>
+
+          <label>
+            Upload pre-isolated vocal file
+            <input
+              type="file"
+              accept="audio/*,.mp3,.wav,.mp4,.m4a,.flac"
+              disabled={busy || jobRunning}
+              onChange={async e => {
+                const f = e.target.files?.[0]
+                e.target.value = ""
+                if (!f) return
+                setBusy(true)
+                setError("")
+                setInfo("")
+                try {
+                  await studioApi.uploadVocals(id, f)
+                  setInfo(`Vocal stem uploaded (${f.name}). Isolation skipped — go to Lyrics when ready.`)
+                  setStep("lyrics")
+                  await refresh()
+                } catch (err: any) {
+                  setError(err.message || "Vocal upload failed")
+                } finally {
+                  setBusy(false)
+                }
+              }}
+            />
+          </label>
+
+          <div className="row" style={{ marginTop: 10 }}>
+            <button
+              type="button"
+              className="btn"
+              disabled={busy || jobRunning || project.vocals_source === "uploaded"}
+              onClick={() => startJob("isolate_vocals")}
+              title={project.vocals_source === "uploaded" ? "Already using uploaded stem" : undefined}
+            >
+              {project.vocals_url && project.vocals_source !== "uploaded"
+                ? "Retry auto-isolate (CPU)"
+                : "Auto-isolate from full mix (CPU, slow)"}
+            </button>
+          </div>
+          {project.vocals_source === "uploaded" && (
+            <p className="muted" style={{ marginTop: 8 }}>
+              Using your uploaded stem. You can still replace it with another file above.
+            </p>
+          )}
         </fieldset>
       )
     }
@@ -215,7 +261,8 @@ export default function ProjectConsole() {
           </div>
           {!project.vocals_url && (
             <div className="alert" style={{ marginTop: 8 }}>
-              No vocal stem yet. Go to step 3 and run Isolate vocals (or Retry). Align is disabled until a stem exists.
+              No vocal stem yet. Go to step 3: upload a pre-separated vocal file (fast) or run auto-isolate (slow).
+              Align is disabled until a stem exists.
             </div>
           )}
           <p style={{ marginTop: 8 }}>Segments: {segCount}</p>
