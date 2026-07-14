@@ -215,6 +215,30 @@ function workbookApproved(project: any, key: string, legacyApproved: boolean): b
   return explicit ? explicit === 'approved' : legacyApproved
 }
 
+/** Prefer stages the user can actually act on — never auto-land on a locked gate. */
+function pickFocusSection(sections: WorkbookSection[]): string | null {
+  if (!sections.length) return null
+
+  const withAction = sections.find(
+    s => s.primaryAction || s.canApprove || s.canReject
+  )
+  if (withAction) return withAction.key
+
+  const active = sections.find(s =>
+    ['ready', 'running', 'generated', 'failed', 'rejected'].includes(s.status)
+  )
+  if (active) return active.key
+
+  const open = sections.find(
+    s => !['approved', 'locked', 'empty', 'skipped'].includes(s.status)
+  )
+  if (open) return open.key
+
+  // Last resort: first incomplete (may be locked) so the pane is never empty.
+  const incomplete = sections.find(s => s.status !== 'approved' && s.status !== 'skipped')
+  return incomplete?.key || sections[0].key
+}
+
 function isGuidedStepReady(project: any, stepKey: string): boolean {
   switch (stepKey) {
     case 'analyze-rhythm-key':
@@ -263,16 +287,44 @@ function buildWorkbookSections(project: any): WorkbookSection[] {
       key: 'project_setup',
       number: 1,
       title: 'Project Setup',
-      purpose: 'Confirm title, artist, creative brief, references, and series context.',
-      status: workbookStatus(project, 'project_setup', infoApproved ? 'approved' : project.stage === 'awaiting_project_info_review' ? 'ready' : project.audio_url ? 'locked' : 'empty'),
-      required: ['title', 'production path', 'artist or intentional blank', 'creative direction'],
-      output: `${productionPathSummary(project)} | ${
-        infoApproved ? 'Project setup approved.' : project.stage === 'awaiting_project_info_review' ? 'Extracted info is ready to review.' : 'Waiting for audio preparation and transcript.'
+      purpose:
+        project.stage === 'awaiting_project_info_review'
+          ? 'Review title, artist, production path, optional brief/references, then confirm to continue.'
+          : infoApproved
+            ? 'Project setup is confirmed. Title, path, and creative notes were saved at review.'
+            : 'Title and production path were set at upload. You do not type them on this screen. After lyrics are ready, a Review setup page opens to confirm everything.',
+      status: workbookStatus(
+        project,
+        'project_setup',
+        infoApproved
+          ? 'approved'
+          : project.stage === 'awaiting_project_info_review'
+            ? 'ready'
+            : project.audio_url
+              ? 'locked'
+              : 'empty'
+      ),
+      required:
+        project.stage === 'awaiting_project_info_review'
+          ? ['title (from upload)', 'production path', 'optional artist / brief / references']
+          : ['complete Song File → Rhythm/Key → Lyrics first', 'then open Review setup'],
+      output: `${productionPathSummary(project)} | Title: ${project.title || '—'} | ${
+        infoApproved
+          ? 'Project setup approved.'
+          : project.stage === 'awaiting_project_info_review'
+            ? 'Ready for review — click Review setup.'
+            : lyricsReady
+              ? 'Lyrics exist but stage is not awaiting review yet — try refreshing, or re-run lyrics if stuck.'
+              : 'Waiting for audio prep + lyrics. Use the Lyrics stage next (Prepare audio → vocals → align/transcribe).'
       }`,
-      needs: project.stage === 'awaiting_project_info_review' ? undefined : 'Lyrics and metadata ready for review',
-      primaryAction: project.stage === 'awaiting_project_info_review'
-        ? { label: 'Review setup', href: 'review' }
-        : undefined,
+      needs:
+        infoApproved || project.stage === 'awaiting_project_info_review'
+          ? undefined
+          : 'Not editable here. Go to the Lyrics stage and run the buttons there until a transcript exists; then return here for Review setup.',
+      primaryAction:
+        project.stage === 'awaiting_project_info_review'
+          ? { label: 'Review setup', href: 'review' }
+          : undefined,
     },
     {
       key: 'song_file',
@@ -583,15 +635,13 @@ export default function ProjectDetail({ id }: { id: string }) {
 
   const sections = useMemo(() => project ? buildWorkbookSections(project) : [], [project])
 
-  // Prefer the first section that still needs work; keep user selection sticky when valid.
+  // Initial / cleared selection: pick an actionable stage (e.g. Lyrics), not locked Project Setup.
+  // If the user clicks a sidebar item, keep that selection.
   useEffect(() => {
     if (!sections.length) return
     if (activeSection && sections.some(s => s.key === activeSection)) return
-    const focus =
-      sections.find(s => ['ready', 'running', 'generated', 'failed', 'rejected'].includes(s.status)) ||
-      sections.find(s => s.status !== 'approved') ||
-      sections[0]
-    setActiveSection(focus.key)
+    const focus = pickFocusSection(sections)
+    if (focus) setActiveSection(focus)
   }, [sections, activeSection])
 
   const refreshFromResponse = async (data: any) => {
@@ -670,10 +720,25 @@ export default function ProjectDetail({ id }: { id: string }) {
     setSuccessMsg('')
     setRunningAction(`approve-${sectionKey}`)
     try {
-      await refreshFromResponse(await api.projects.approveSection(id, sectionKey))
-      setSuccessMsg(`Approved: ${sectionKey.replace(/_/g, ' ')}`)
-      // Advance sidebar to the next incomplete section after a successful approve.
-      setActiveSection(null)
+      const data = await api.projects.approveSection(id, sectionKey)
+      await refreshFromResponse(data)
+      setSuccessMsg(`Approved: ${sectionKey.replace(/_/g, ' ')}. Continue with the next stage that has a Run/action button.`)
+      // After approve, jump to the next *actionable* stage (e.g. Lyrics),
+      // not locked Project Setup which has no form fields.
+      const nextProject = data?.project || data?.id ? (data.project || data) : null
+      if (nextProject) {
+        const nextSections = buildWorkbookSections(nextProject)
+        // Prefer the next stage after the one we approved that has a real action.
+        const idx = nextSections.findIndex(s => s.key === sectionKey)
+        const after = idx >= 0 ? nextSections.slice(idx + 1) : nextSections
+        const nextKey =
+          pickFocusSection(after) ||
+          pickFocusSection(nextSections.filter(s => s.key !== sectionKey)) ||
+          pickFocusSection(nextSections)
+        if (nextKey) setActiveSection(nextKey)
+      } else {
+        setActiveSection(null)
+      }
     } catch (err: any) {
       setLocalError(err?.response?.data?.detail || err?.message || 'Approval failed.')
       await fetchProject()
@@ -867,9 +932,21 @@ function WorkbookCard({
 
       {locked && (
         <div className="win95-empty" style={{ marginBottom: 12 }}>
-          {section.needs
-            ? `Locked until prerequisites are met: ${section.needs}`
-            : 'This stage is locked. Complete and approve earlier stages first.'}
+          {section.key === 'project_setup' ? (
+            <>
+              <div style={{ marginBottom: 8 }}>
+                <strong>Nothing to type on this screen.</strong> Title and path were set when you uploaded the song.
+              </div>
+              <div>
+                {section.needs ||
+                  'Use the left sidebar → open Lyrics Transcription & Timestamping → run Prepare audio, then vocals, then align/transcribe. After that, this stage unlocks with a Review setup button.'}
+              </div>
+            </>
+          ) : section.needs ? (
+            `Locked until prerequisites are met: ${section.needs}`
+          ) : (
+            'This stage is locked. Complete and approve earlier stages first.'
+          )}
         </div>
       )}
 
