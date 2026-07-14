@@ -9,6 +9,14 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable
 
+# monorepo backend/ FIRST — shared services import `config` with local_storage_path
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_LEGACY_BACKEND = _REPO_ROOT / "backend"
+_sys_path_legacy = str(_LEGACY_BACKEND)
+if _sys_path_legacy in sys.path:
+    sys.path.remove(_sys_path_legacy)
+sys.path.insert(0, _sys_path_legacy)
+
 import database as db
 
 logger = logging.getLogger("studio.jobs")
@@ -16,12 +24,6 @@ logger = logging.getLogger("studio.jobs")
 _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="studio-job")
 _lock = threading.Lock()
 _running_projects: set[str] = set()
-
-# monorepo backend/ for service reuse
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-_LEGACY_BACKEND = _REPO_ROOT / "backend"
-if str(_LEGACY_BACKEND) not in sys.path:
-    sys.path.insert(0, str(_LEGACY_BACKEND))
 
 
 def _progress(job_id: str, pct: float, message: str) -> None:

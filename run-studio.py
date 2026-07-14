@@ -21,9 +21,10 @@ def main() -> int:
     print()
 
     env = os.environ.copy()
-    # Ensure monorepo backend is importable for shared services
+    # monorepo backend first so `config` is backend/config.py (not a studio shadow)
     legacy = str(ROOT / "backend")
-    env["PYTHONPATH"] = legacy + os.pathsep + env.get("PYTHONPATH", "")
+    studio_be = str(BACKEND)
+    env["PYTHONPATH"] = legacy + os.pathsep + studio_be + os.pathsep + env.get("PYTHONPATH", "")
 
     api = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8010"],

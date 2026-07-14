@@ -6,8 +6,16 @@ from __future__ import annotations
 
 import logging
 import shutil
+import sys
 from pathlib import Path
 from typing import Any, Optional
+
+# Put monorepo backend FIRST so `import config` / services resolve to legacy
+# backend/config.py (has local_storage_path), not a studio module named config.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_LEGACY_BACKEND = _REPO_ROOT / "backend"
+if str(_LEGACY_BACKEND) not in sys.path:
+    sys.path.insert(0, str(_LEGACY_BACKEND))
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 import database as db
-from config import STORAGE
+from studio_settings import STORAGE
 from jobs import runner
 
 logging.basicConfig(level=logging.INFO)

@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
-from config import DB_PATH, STORAGE
+from studio_settings import DB_PATH, STORAGE
 
 
 def _utc() -> str:
