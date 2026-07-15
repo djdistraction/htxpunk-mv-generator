@@ -105,8 +105,32 @@ export default function ProjectConsole() {
     return false
   }
 
+  /** Visit any completed step, or the first incomplete one (no skipping ahead). */
+  const canVisitStep = (p: any, s: FlowStep): boolean => {
+    if (!p) return false
+    const idx = FLOW.indexOf(s)
+    if (idx <= 0) return true
+    // All previous steps must be done to open this one
+    for (let i = 0; i < idx; i++) {
+      if (!stepDone(p, FLOW[i])) return false
+    }
+    return true
+  }
+
+  const goToStep = (s: FlowStep, reason?: string) => {
+    if (!project || !canVisitStep(project, s)) return
+    if (busy || jobRunning) {
+      setError("Wait for the current job to finish before changing steps.")
+      return
+    }
+    setStep(s)
+    setError("")
+    if (reason) setInfo(reason)
+    else if (s !== step) setInfo(`Viewing: ${LABELS[s]}. You can edit and re-run work here.`)
+  }
+
   // On first load of a project, open the earliest incomplete step.
-  // Do not re-jump while the user is reviewing a finished step.
+  // Manual navigation (Back / sidebar) is not overridden after that.
   useEffect(() => {
     if (!project) return
     for (const s of FLOW) {
@@ -230,58 +254,77 @@ export default function ProjectConsole() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project?.id, step, project?.converted_audio_url, project?.bpm, jobRunning])
 
-  const nextEnabled = Boolean(project && stepDone(project, step) && !busy && !jobRunning)
+  const stepIndex = FLOW.indexOf(step)
+  const isLastStep = stepIndex >= FLOW.length - 1
+  const doneHere = Boolean(project && stepDone(project, step))
+
   const nextLabel = (() => {
     if (busy || jobRunning) return "Working… wait for this step to finish"
     if (!project) return "Loading…"
-    if (!stepDone(project, step)) {
-      if (step === "vocals" && !project.vocals_url) return "Upload a vocal stem or start isolation first"
-      if (step === "lyrics" && !segCount) return "Run lyrics (Next will start align/transcribe when ready)"
-      if (step === "lyric_video" && !hasVideo(project)) return "Next — render lyric video"
+    if (!doneHere) {
+      if (step === "vocals" && !project.vocals_url) return "Upload a stem or start isolation"
+      if (step === "lyrics" && !segCount) {
+        return lyricsText.trim() ? "Next — align lyrics" : "Next — transcribe lyrics"
+      }
+      if (step === "lyric_video") return "Next — render lyric video"
       return "Finish this step first"
     }
-    const idx = FLOW.indexOf(step)
-    if (idx >= FLOW.length - 1) return "Lyric video complete"
-    return `Next: ${LABELS[FLOW[idx + 1]]}`
+    if (isLastStep) return "All steps complete"
+    return `Next: ${LABELS[FLOW[stepIndex + 1]]}`
   })()
 
+  const canPressNext = (() => {
+    if (!project || busy || jobRunning) return false
+    if (doneHere) return !isLastStep // advance to later step
+    if (step === "lyrics") return Boolean(project.vocals_url)
+    if (step === "lyric_video") return segCount > 0
+    if (step === "vocals") return false // need upload or isolation button
+    return true
+  })()
+
+  /** Advance when current step is done; otherwise run this step's work. */
   const onNext = async () => {
-    if (!project || !nextEnabled) return
-    const idx = FLOW.indexOf(step)
-    if (idx >= FLOW.length - 1) {
-      setInfo("Lyric video complete. Karaoke / cinematic formats reuse this foundation later.")
+    if (!project || busy || jobRunning) return
+    setError("")
+
+    // Still need to run work on this step
+    if (!stepDone(project, step)) {
+      setBusy(true)
+      try {
+        if (step === "lyrics") await runCurrentStep(await refresh(), "lyrics", false)
+        else if (step === "lyric_video") await runCurrentStep(await refresh(), "lyric_video", false)
+        else await runCurrentStep(await refresh(), step, false)
+      } catch (e: any) {
+        setError(e.message || String(e))
+      } finally {
+        setBusy(false)
+        setLocalProgress("")
+      }
       return
     }
-    const next = FLOW[idx + 1]
+
+    if (isLastStep) {
+      setInfo("All steps complete. Use ← Back or the progress list to correct earlier steps.")
+      return
+    }
+
+    const next = FLOW[stepIndex + 1]
     setStep(next)
-    setInfo("")
-    setError("")
-    // Kick off next step work immediately (except vocals prefers upload option)
-    setBusy(true)
-    try {
-      const p = await refresh()
-      if (next === "vocals" && !p.vocals_url) {
-        setInfo("Optional: upload a pre-separated vocal file, or press “Start vocal isolation”.")
-        return
+    setInfo(`Moved to ${LABELS[next]}`)
+    // Auto-run only cheap early steps; vocals/lyrics/video wait for user
+    if (next === "song" || next === "rhythm") {
+      setBusy(true)
+      try {
+        const p = await refresh()
+        await runCurrentStep(p, next)
+      } catch (e: any) {
+        setError(e.message || String(e))
+      } finally {
+        setBusy(false)
+        setLocalProgress("")
       }
-      if (next === "lyrics") {
-        if (!p.transcript?.segments?.length) {
-          await runCurrentStep(p, "lyrics")
-        }
-        return
-      }
-      if (next === "lyric_video") {
-        if (!hasVideo(p)) {
-          await runCurrentStep(p, "lyric_video")
-        }
-        return
-      }
-      await runCurrentStep(p, next)
-    } catch (e: any) {
-      setError(e.message || String(e))
-    } finally {
-      setBusy(false)
-      setLocalProgress("")
+    } else if (next === "vocals") {
+      setInfo("Optional: upload a pre-separated vocal file, or start isolation.")
     }
   }
 
@@ -346,7 +389,7 @@ export default function ProjectConsole() {
       <div className="toolbar">
         <Link href="/" className="btn" style={{ textDecoration: "none", color: "inherit" }}>Library</Link>
         <button type="button" className="btn" onClick={() => refresh()}>Refresh</button>
-        <span className="muted">One step at a time · Next unlocks when this step finishes</span>
+        <span className="muted">Click any unlocked step to go back · Next advances when ready</span>
       </div>
 
       {(error || project.error_message) && (
@@ -358,19 +401,36 @@ export default function ProjectConsole() {
       <div className="desk">
         <div className="pane">
           <div style={{ fontWeight: "bold", marginBottom: 8 }}>PROGRESS</div>
+          <p className="muted" style={{ marginBottom: 8, fontSize: 11 }}>
+            Click a step to revisit and correct it.
+          </p>
           {FLOW.map(s => {
             const done = stepDone(project, s)
             const active = step === s
+            const unlocked = canVisitStep(project, s)
             return (
-              <div
+              <button
+                type="button"
                 key={s}
                 className={`step ${active ? "active" : ""}`}
-                style={{ opacity: done || active ? 1 : 0.7 }}
+                disabled={!unlocked || busy || jobRunning}
+                title={
+                  !unlocked
+                    ? "Finish earlier steps first"
+                    : active
+                      ? "Current step"
+                      : done
+                        ? "Open to review or correct"
+                        : "Open this step"
+                }
+                onClick={() => goToStep(s)}
               >
-                {done ? "✓ " : active ? "► " : "○ "}
+                {done ? "✓ " : active ? "► " : unlocked ? "○ " : "· "}
                 {LABELS[s]}
-                <div className="meta">{done ? "done" : active ? "current" : "waiting"}</div>
-              </div>
+                <div className="meta">
+                  {active ? "current" : done ? "done — click to edit" : unlocked ? "ready" : "locked"}
+                </div>
+              </button>
             )
           })}
         </div>
@@ -401,7 +461,7 @@ export default function ProjectConsole() {
                   BPM and musical key are <strong>detected automatically</strong> in your browser
                   from the song (essentia.js). You can correct them below if needed.
                 </p>
-                <label>BPM <input value={project.bpm || ""} readOnly={!project.bpm} onChange={async e => {
+                <label>BPM <input value={project.bpm || ""} onChange={async e => {
                   await studioApi.saveRhythm(id, { bpm: e.target.value, musical_key: project.musical_key || "", beat_grid: project.beat_grid || [] })
                   refresh()
                 }} /></label>
@@ -409,10 +469,10 @@ export default function ProjectConsole() {
                   await studioApi.saveRhythm(id, { bpm: project.bpm || "", musical_key: e.target.value, beat_grid: project.beat_grid || [] })
                   refresh()
                 }} /></label>
-                <p className="muted">Beats detected: {(project.beat_grid || []).length}</p>
-                {!project.bpm && !busy && (
-                  <button type="button" className="btn" onClick={() => runCurrentStep(project, "rhythm").catch((e: any) => setError(e.message))}>
-                    Retry auto-detect
+                <p className="muted">Beats detected: {(project.beat_grid || []).length}. Edit fields anytime, then continue.</p>
+                {!busy && !jobRunning && (
+                  <button type="button" className="btn" onClick={() => runCurrentStep(project, "rhythm", true).catch((e: any) => setError(e.message))}>
+                    Re-detect BPM & key
                   </button>
                 )}
               </>
@@ -547,41 +607,31 @@ export default function ProjectConsole() {
             </div>
           </fieldset>
 
-          <div className="row" style={{ marginTop: 12 }}>
+          <div className="row" style={{ marginTop: 12, gap: 8, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className="btn"
+              style={{ minWidth: 100 }}
+              disabled={busy || jobRunning || stepIndex <= 0}
+              onClick={() => {
+                if (stepIndex > 0) goToStep(FLOW[stepIndex - 1], `Back to ${LABELS[FLOW[stepIndex - 1]]}`)
+              }}
+            >
+              ← Back
+            </button>
             <button
               type="button"
               className="btn btn-primary"
               style={{ minWidth: 220, fontSize: 13, padding: "8px 16px" }}
-              disabled={
-                busy || jobRunning
-                  ? true
-                  : step === "lyrics" && !segCount
-                    ? !project.vocals_url
-                    : step === "lyric_video" && !hasVideo(project)
-                      ? !segCount
-                      : !nextEnabled
-              }
-              onClick={async () => {
-                if (step === "lyrics" && !segCount) {
-                  await startLyrics()
-                  return
-                }
-                if (step === "lyric_video" && !hasVideo(project)) {
-                  await startLyricVideo()
-                  return
-                }
-                await onNext()
-              }}
+              disabled={!canPressNext}
+              onClick={() => onNext()}
             >
-              {step === "lyrics" && !segCount
-                ? (busy || jobRunning ? "Working on lyrics…" : (lyricsText.trim() ? "Next — align lyrics" : "Next — transcribe lyrics"))
-                : step === "lyric_video" && !hasVideo(project)
-                  ? (busy || jobRunning ? "Rendering lyric video…" : "Next — render lyric video")
-                  : nextLabel}
+              {nextLabel}
             </button>
           </div>
           <p className="muted" style={{ marginTop: 8 }}>
-            Next stays disabled until the current step finishes. Activity panel (right) shows live job progress.
+            Use <strong>← Back</strong> or click any unlocked step on the left to correct earlier work.
+            Re-aligning lyrics invalidates the video — re-render step 5 after changes.
           </p>
         </div>
 

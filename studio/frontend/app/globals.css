@@ -91,6 +91,16 @@ a { color: var(--title); }
   background: var(--face);
   border: 2px solid;
   border-color: #fff var(--shadow) var(--shadow) #fff;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.step:hover:not(:disabled) {
+  background: #e8e8e8;
+}
+.step:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 .step.active {
   border-color: var(--shadow) #fff #fff var(--shadow);

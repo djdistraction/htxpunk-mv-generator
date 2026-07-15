@@ -192,8 +192,18 @@ def job_transcribe_lyrics(job_id: str, project_id: str) -> None:
         raise RuntimeError("Transcription returned no segments. Retry or paste lyrics and align.")
 
     _progress(job_id, 95, f"Saving {len(segs)} lyric segments…")
-    db.update_project(project_id, transcript=transcript, stage="lyrics_ready", error_message=None)
+    # New timestamps invalidate any previous lyric video
+    db.update_project(
+        project_id,
+        transcript=transcript,
+        stage="lyrics_ready",
+        error_message=None,
+        video_url=None,
+        base_video_url=None,
+        final_video_url=None,
+    )
     db.set_step(project_id, "lyrics", "needs_review")
+    db.set_step(project_id, "lyric_video", "pending")
     _progress(job_id, 100, "Lyrics ready for review")
 
 
@@ -235,8 +245,18 @@ def job_align_lyrics(job_id: str, project_id: str) -> None:
     segs = transcript.get("segments") or []
     if not segs:
         raise RuntimeError("Alignment produced no segments.")
-    db.update_project(project_id, transcript=transcript, stage="lyrics_ready", error_message=None)
+    # New timestamps invalidate any previous lyric video
+    db.update_project(
+        project_id,
+        transcript=transcript,
+        stage="lyrics_ready",
+        error_message=None,
+        video_url=None,
+        base_video_url=None,
+        final_video_url=None,
+    )
     db.set_step(project_id, "lyrics", "needs_review")
+    db.set_step(project_id, "lyric_video", "pending")
     _progress(job_id, 100, f"Aligned {len(segs)} segments")
 
 
