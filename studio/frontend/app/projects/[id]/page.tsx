@@ -463,9 +463,9 @@ export default function ProjectConsole() {
             {step === "lyrics" && (
               <>
                 <p>
-                  Paste exact lyrics if you have them (more accurate). Next will force-align them
-                  to the vocal stem. If the box is empty, Next runs Whisper transcription instead.
-                  Alignment must return every line with real timestamps (incomplete sync fails clearly).
+                  Paste exact lyrics if you have them (more accurate). Next maps them onto the vocal
+                  stem with Whisper word timestamps (not speech-only aeneas). If the box is empty,
+                  Next runs Whisper transcription instead. Bad/collapsed timestamps fail clearly.
                 </p>
                 <label>
                   Lyrics (optional)

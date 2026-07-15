@@ -209,8 +209,25 @@ def job_align_lyrics(job_id: str, project_id: str) -> None:
         raise RuntimeError("Vocal stem required for alignment. Run Isolate vocals first (and Retry if it failed).")
 
     db.set_step(project_id, "lyrics", "running")
-    _progress(job_id, 15, "Force-aligning lyrics to vocal stem…")
-    segments = align_lyrics(src, text)
+    _progress(
+        job_id,
+        10,
+        "Aligning lyrics to vocal stem (Whisper word timestamps — can take a few minutes)…",
+    )
+    stop = threading.Event()
+
+    def heartbeat():
+        n = 12
+        while not stop.wait(6):
+            n = min(90, n + 4)
+            _progress(job_id, n, f"Aligning lyrics… ~{n}%")
+
+    t = threading.Thread(target=heartbeat, daemon=True)
+    t.start()
+    try:
+        segments = align_lyrics(src, text)
+    finally:
+        stop.set()
     transcript = {
         "segments": segments if isinstance(segments, list) else (segments.get("segments") if isinstance(segments, dict) else []),
         "text": text,

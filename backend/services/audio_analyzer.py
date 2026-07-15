@@ -49,23 +49,7 @@ def _groq_client():
         base_url="https://api.groq.com/openai/v1"
     )
 
-def transcribe_audio(audio_path: str) -> dict:
-    """Transcribe audio using faster-whisper. Returns segments + word timestamps.
-
-    Expects an already vocal-isolated file (see services.audio_preprocessor.
-    separate_vocals), not the full mix — VAD misjudging sung vocals as
-    non-speech against a full instrumental bed was the confirmed cause of a
-    real empty-transcript failure. With clean vocals, VAD has an easier,
-    more reliable job; left enabled since there's no evidence yet it needs
-    to change now that the input is what it should have been all along.
-    """
-    model = _get_whisper()
-    segments_iter, info = model.transcribe(
-        audio_path,
-        word_timestamps=True,
-        vad_filter=True,  # skip silence automatically
-    )
-
+def _collect_whisper_transcript(segments_iter, info) -> dict:
     segments = []
     full_text_parts = []
     for seg in segments_iter:
@@ -89,6 +73,51 @@ def transcribe_audio(audio_path: str) -> dict:
         "text": " ".join(full_text_parts),
         "segments": segments,
     }
+
+
+def transcribe_audio(audio_path: str) -> dict:
+    """Transcribe audio using faster-whisper. Returns segments + word timestamps.
+
+    Expects an already vocal-isolated file (see services.audio_preprocessor.
+    separate_vocals), not the full mix — VAD misjudging sung vocals as
+    non-speech against a full instrumental bed was the confirmed cause of a
+    real empty-transcript failure. With clean vocals, VAD has an easier,
+    more reliable job; left enabled since there's no evidence yet it needs
+    to change now that the input is what it should have been all along.
+    """
+    model = _get_whisper()
+    segments_iter, info = model.transcribe(
+        audio_path,
+        word_timestamps=True,
+        vad_filter=True,  # skip silence automatically
+    )
+    return _collect_whisper_transcript(segments_iter, info)
+
+
+def transcribe_for_alignment(audio_path: str, lyrics_hint: str = "") -> dict:
+    """Whisper pass tuned for mapping user lyrics onto real vocal times.
+
+    Differences from transcribe_audio (important for singing):
+    - VAD off — silero VAD often classifies sung phrases as non-speech and
+      drops whole verses (confirmed: 150 words on a full 4-min vocal stem).
+    - condition_on_previous_text=False — reduces runaway hallucination loops
+      on music.
+    - initial_prompt from user lyrics — steers recognition toward the real
+      words when the user already pasted them.
+    """
+    model = _get_whisper()
+    prompt = " ".join((lyrics_hint or "").split())[:800]
+    kwargs = dict(
+        word_timestamps=True,
+        vad_filter=False,
+        condition_on_previous_text=False,
+        # beam_size=1 is faster; 5 is more accurate for music-ish audio
+        beam_size=5,
+    )
+    if prompt:
+        kwargs["initial_prompt"] = prompt
+    segments_iter, info = model.transcribe(audio_path, **kwargs)
+    return _collect_whisper_transcript(segments_iter, info)
 
 def analyze_song(transcript: dict, audio_path: str,
                  creative_brief: str = "", reference_notes: str = "",
